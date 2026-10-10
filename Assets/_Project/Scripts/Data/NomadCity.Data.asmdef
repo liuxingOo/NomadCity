@@ -1,0 +1,16 @@
+{
+    "name": "NomadCity.Data",
+    "rootNamespace": "NomadCity.Data",
+    "references": [
+        "NomadCity.Core"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

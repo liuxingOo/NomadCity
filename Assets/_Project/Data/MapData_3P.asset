@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 30f2201019a878344afb3e02b6eccf5e, type: 3}
+  m_Name: MapData_3P
+  m_EditorClassIdentifier: NomadCity.Data::NomadCity.Data.MapData
+  displayName: "\u4E09\u4EBA\u5730\u56FE"
+  mapPrefab: {fileID: 4913867726723913171, guid: bd67b6203c2ff3c4ab28fc64286f23c3, type: 3}
+  districtScores:
+  - District: 0
+    Score: 3
+  - District: 1
+    Score: 3
+  - District: 2
+    Score: 3
+  - District: 3
+    Score: 3
+  - District: 4
+    Score: 4
+  - District: 5
+    Score: 4
+  - District: 7
+    Score: 3

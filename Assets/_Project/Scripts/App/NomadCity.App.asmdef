@@ -1,0 +1,19 @@
+{
+    "name": "NomadCity.App",
+    "rootNamespace": "NomadCity.App",
+    "references": [
+        "NomadCity.Core",
+        "NomadCity.Data",
+        "NomadCity.Game",
+        "NomadCity.UI"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
