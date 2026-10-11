@@ -48,6 +48,49 @@ namespace NomadCity.Core.Model
         }
     }
 
+    /// <summary>影响力空格挂在哪里：资源点上还是航道上。</summary>
+    public enum InfluenceSlotKind
+    {
+        Node = 0,
+        Route = 1,
+    }
+
+    /// <summary>
+    /// 指向地图上某一个具体影响力空格的引用（值类型，可比较、可作字典键）。
+    /// 行动（部署 / 调度 / 城市移动）都用它来指明「把影响力放到哪里」。
+    /// </summary>
+    public readonly struct InfluenceSlotRef : IEquatable<InfluenceSlotRef>
+    {
+        public readonly InfluenceSlotKind Kind;
+
+        /// <summary>资源点 id（Kind=Node）或航道 id（Kind=Route）。</summary>
+        public readonly int TargetId;
+
+        public readonly int SlotIndex;
+
+        public InfluenceSlotRef(InfluenceSlotKind kind, int targetId, int slotIndex)
+        {
+            Kind = kind;
+            TargetId = targetId;
+            SlotIndex = slotIndex;
+        }
+
+        public static InfluenceSlotRef OnNode(int nodeId, int slotIndex) =>
+            new InfluenceSlotRef(InfluenceSlotKind.Node, nodeId, slotIndex);
+
+        public static InfluenceSlotRef OnRoute(int routeId, int slotIndex) =>
+            new InfluenceSlotRef(InfluenceSlotKind.Route, routeId, slotIndex);
+
+        public bool Equals(InfluenceSlotRef other) =>
+            Kind == other.Kind && TargetId == other.TargetId && SlotIndex == other.SlotIndex;
+
+        public override bool Equals(object obj) => obj is InfluenceSlotRef other && Equals(other);
+
+        public override int GetHashCode() => ((int)Kind * 397 ^ TargetId) * 397 ^ SlotIndex;
+
+        public override string ToString() => $"{Kind}#{TargetId}·槽{SlotIndex}";
+    }
+
     /// <summary>资源点的运行时状态。静态属性（编号、颜色、空格数）在建图时确定，之后不变。</summary>
     public sealed class MapNodeState
     {
@@ -81,7 +124,8 @@ namespace NomadCity.Core.Model
     /// <summary>
     /// 航道的运行时状态。属于某个区块。
     /// 地图上存在一条航线同时连到多个资源点的情况（例如地图中间那条 R 航道连了 4 个点），
-    /// 所以端点是列表而不是固定两个。整条航道只有一份影响力空格，也只计一次路费。
+    /// 所以端点是列表而不是固定两个。整条航道的影响力空格数量由布局决定（1 格或 2 格），
+    /// 但路费只计一次。
     /// </summary>
     public sealed class RouteState
     {
@@ -129,6 +173,16 @@ namespace NomadCity.Core.Model
         public readonly List<RouteState> Routes = new();
 
         public MapNodeState Node(int id) => Nodes[id];
+
+        public RouteState Route(int id) => Routes[id];
+
+        /// <summary>取某个影响力空格引用对应的槽位集合（资源点或航道）。</summary>
+        public InfluenceSlots SlotsOf(InfluenceSlotRef slot) => slot.Kind == InfluenceSlotKind.Node
+            ? Nodes[slot.TargetId].Slots
+            : Routes[slot.TargetId].Slots;
+
+        /// <summary>该空格当前的所有者座位号；空位返回 -1。</summary>
+        public int OccupantOf(InfluenceSlotRef slot) => SlotsOf(slot).OwnerOf(slot.SlotIndex);
 
         public MapNodeState FindNode(string code)
         {

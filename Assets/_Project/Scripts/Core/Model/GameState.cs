@@ -14,8 +14,8 @@ namespace NomadCity.Core.Model
         /// <summary>本局的模式配置（人数 + 扩展包）。</summary>
         public readonly GameSetup Setup;
 
-        /// <summary>当前回合，1–8。</summary>
-        public int TurnNumber = 1;
+        /// <summary>当前回合，1–8；0 表示尚未开局。</summary>
+        public int TurnNumber;
 
         /// <summary>当前阶段。</summary>
         public TurnPhase Phase = TurnPhase.CharacterPlacement;
@@ -29,11 +29,20 @@ namespace NomadCity.Core.Model
         /// <summary>玩家行动阶段内的轮次，1 或 2。</summary>
         public int ActionRound = 1;
 
+        /// <summary>整局是否已结束（第 8 回合收尾之后置为 true，进入终局结算）。</summary>
+        public bool IsGameOver;
+
         /// <summary>玩家列表，下标即座位号。</summary>
         public readonly List<PlayerState> Players = new();
 
         /// <summary>地图运行时状态。</summary>
         public MapState Map = new();
+
+        /// <summary>
+        /// 各区块的终局控制分（下标 = (int)District）。默认取规则规格 §9.2 的标准表；
+        /// 建局时可被地图数据（MapData 里配置的区块分）覆盖。
+        /// </summary>
+        public int[] DistrictScores = Districts.StandardScores();
 
         // —— 公共资源供应堆 ——
         /// <summary>至纯源石剩余数量（初始 35）。</summary>
@@ -49,12 +58,18 @@ namespace NomadCity.Core.Model
         /// <summary>设施供应区（最多 6 张正面朝上）。</summary>
         public readonly List<int> FacilitySupply = new();
 
+        /// <summary>延伸枢纽（红／黄／蓝各 1 张），放在一旁备用，不在设施牌堆内。</summary>
+        public readonly List<int> ExtensionHubSupply = new();
+
         public readonly List<int> EventDeckGreen = new();
         public readonly List<int> EventDeckYellow = new();
         public readonly List<int> EventDeckRed = new();
 
         /// <summary>场上的城市样式牌。</summary>
         public readonly List<int> CityPatternCards = new();
+
+        /// <summary>场上城市样式牌的标记状态（下标与 <see cref="CityPatternCards"/> 对应）。</summary>
+        public readonly List<CityPatternState> CityPatternStates = new();
 
         public GameState(GameSetup setup)
         {

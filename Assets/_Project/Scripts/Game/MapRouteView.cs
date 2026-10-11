@@ -8,7 +8,7 @@ namespace NomadCity.Game
     /// 地图 Prefab 里的一条航道。
     /// 地图上有一条航道同时连到多个资源点的情况（比如中间那条 R 航道连到 4 个点），
     /// 所以端点是列表：把这条航道连到的资源点全部拖进来（至少 2 个）。
-    /// 整条航道只有一份影响力空格，也只计一次路费。
+    /// 整条航道的影响力空格数量由布局决定（1 格或 2 格），但路费只计一次。
     /// 运行时由 MapView 解析成 MapState 里的节点编号。
     /// </summary>
     public sealed class MapRouteView : MonoBehaviour
