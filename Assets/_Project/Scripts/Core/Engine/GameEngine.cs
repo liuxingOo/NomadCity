@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using NomadCity.Core.Model;
 using NomadCity.Core.Rules;
 
@@ -20,8 +21,21 @@ namespace NomadCity.Core.Engine
         /// <summary>进入新回合（含第 1 回合）。</summary>
         public event Action<GameState> TurnStarted;
 
+        /// <summary>
+        /// 一名玩家走完主要行动、行动座位推进到下一家：(state, 旧座位, 新座位)。
+        /// 单独广播是必须的：<see cref="CommandDispatcher.CommandApplied"/> 发生在推进**之前**，
+        /// 界面若只监听它，顶栏会一直停在「上一位行动者」身上，看起来永远慢一拍。
+        /// </summary>
+        public event Action<GameState, int, int> SeatAdvanced;
+
         /// <summary>第 8 回合收尾结束，进入终局结算。</summary>
         public event Action<GameState> GameEnded;
+
+        /// <summary>
+        /// 采集阶段结算完成：(state, 报告)。UI 可据此显示本次采集的收成与路费。
+        /// ⚠️ 临时占位（M3）：目前进入采集阶段即自动结算，见 <see cref="ResolveHarvestAutomatically"/>。
+        /// </summary>
+        public event Action<GameState, HarvestReport> HarvestResolved;
 
         public GameEngine(GameState state) => State = state;
 
@@ -50,7 +64,9 @@ namespace NomadCity.Core.Engine
 
             if (map != null) state.Map = map;
 
-            BoardSetup.Run(state, catalog ?? PlaceholderCardCatalog.Default, rng ?? new Random(), firstPlayerSeat);
+            // 卡牌目录是静态查表数据，规则代码（如决定初始资源点要翻事件牌）通过 state.Catalog 访问。
+            state.Catalog = catalog ?? PlaceholderCardCatalog.Default;
+            BoardSetup.Run(state, state.Catalog, rng ?? new Random(), firstPlayerSeat);
             return new GameEngine(state);
         }
 
@@ -63,6 +79,7 @@ namespace NomadCity.Core.Engine
         {
             TurnPhase beforePhase = State.Phase;
             int beforeTurn = State.TurnNumber;
+            int beforeSeat = State.ActiveSeat;
             bool wasOver = State.IsGameOver;
 
             CommandResult result = Dispatcher.Dispatch(State, command);
@@ -70,12 +87,39 @@ namespace NomadCity.Core.Engine
 
             if (command.ConsumesAction) TurnFlow.CompletePlayerAction(State);
 
+            // 座位推进发生在 CommandApplied 之后，界面不会因为上面那次广播再刷新一次 ——
+            // 不在这里补一次，顶栏与行动提示就会一直显示上一位玩家。
+            if (State.ActiveSeat != beforeSeat) SeatAdvanced?.Invoke(State, beforeSeat, State.ActiveSeat);
+
             if (State.IsGameOver && !wasOver) GameEnded?.Invoke(State);
             else if (State.TurnNumber != beforeTurn) TurnStarted?.Invoke(State);
 
-            if (State.Phase != beforePhase) PhaseChanged?.Invoke(State, beforePhase, State.Phase);
+            if (State.Phase != beforePhase)
+            {
+                PhaseChanged?.Invoke(State, beforePhase, State.Phase);
+
+                // ⚠️ 临时占位（M3）：进入采集阶段就自动结算。
+                // 完整的 §7「玩家自选资源点 + 路费预览」UI 留到下一期，届时删除这里。
+                if (State.Phase == TurnPhase.Harvest) ResolveHarvestAutomatically();
+            }
 
             return result;
+        }
+
+        /// <summary>
+        /// ⚠️ 临时占位（M3）：进入采集阶段时，按「每个座位采集其全部合法资源点」直接结算。
+        /// <see cref="HarvestResolver.Plan"/> 内部会按预算自动跳过付不起的点，所以这个默认值不会产生非法状态。
+        /// 采集不是「轮到某人」的主要行动，所以不走命令通道，直接作用于 state（与 TurnFlow 的其它阶段边界一致）。
+        /// </summary>
+        private void ResolveHarvestAutomatically()
+        {
+            var chosen = new Dictionary<int, IReadOnlyList<int>>();
+            for (int seat = 0; seat < State.Players.Count; seat++)
+            {
+                chosen[seat] = HarvestResolver.EligibleNodes(State, seat);
+            }
+
+            HarvestResolved?.Invoke(State, HarvestResolver.Resolve(State, chosen));
         }
     }
 }

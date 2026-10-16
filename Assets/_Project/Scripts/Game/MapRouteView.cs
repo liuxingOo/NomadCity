@@ -25,6 +25,14 @@ namespace NomadCity.Game
         public District District => district;
         public int InfluenceCapacity => influenceCapacity;
 
+        /// <summary>
+        /// 第 index 个影响力空格相对本航道物体原点的**世界空间偏移**（不是局部坐标）。
+        /// 与 <see cref="MapNodeView.SlotWorldOffset"/> 同理：地图 Prefab 整体缩放不该影响标记大小，
+        /// 渲染层与 OnDrawGizmos 共用这一份算式。
+        /// </summary>
+        public Vector3 SlotWorldOffset(int index) =>
+            new Vector3(0.22f * (index - (influenceCapacity - 1) * 0.5f), 0f, 0f);
+
 #if UNITY_EDITOR
         /// <summary>
         /// 只在编辑器里生效：从航道物体的位置向每个端点画一条线，并在物体位置画出影响力容量。
@@ -42,8 +50,7 @@ namespace NomadCity.Game
             Gizmos.color = new Color(0.30f, 0.80f, 1f);
             for (int i = 0; i < influenceCapacity; i++)
             {
-                Vector3 offset = new Vector3(0.22f * (i - (influenceCapacity - 1) * 0.5f), 0f, 0f);
-                Gizmos.DrawSphere(transform.position + offset, 0.07f);
+                Gizmos.DrawSphere(transform.position + SlotWorldOffset(i), 0.07f);
             }
         }
 #endif

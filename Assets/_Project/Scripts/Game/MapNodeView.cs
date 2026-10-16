@@ -30,6 +30,15 @@ namespace NomadCity.Game
         public bool IsRedZone => isRedZone;
         public int InfluenceCapacity => influenceCapacity;
 
+        /// <summary>
+        /// 第 index 个影响力空格相对本节点原点的**世界空间偏移**（不是局部坐标）。
+        /// 用世界空间是刻意的：底图上影响力空格画在资源点左侧的竖列里，
+        /// 地图 Prefab 整体缩放（如四人面 0.2）不该让标记跟着缩到看不见；
+        /// 渲染层与 OnDrawGizmos 共用这一份算式，保证所见即所得。
+        /// </summary>
+        public Vector3 SlotWorldOffset(int index) =>
+            new Vector3(-0.40f, 0.22f * ((influenceCapacity - 1) * 0.5f - index), 0f);
+
 #if UNITY_EDITOR
         /// <summary>
         /// 只在编辑器里生效：在 Scene 视图里把填进去的颜色、影响力容量画出来，
@@ -48,8 +57,7 @@ namespace NomadCity.Game
             // 圆点个数 = Influence Capacity。底图上影响力空格画在资源点左侧的竖列里，这里跟着竖排。
             for (int i = 0; i < influenceCapacity; i++)
             {
-                Vector3 offset = new Vector3(-0.40f, 0.22f * ((influenceCapacity - 1) * 0.5f - i), 0f);
-                Gizmos.DrawSphere(transform.position + offset, 0.07f);
+                Gizmos.DrawSphere(transform.position + SlotWorldOffset(i), 0.07f);
             }
         }
 #endif

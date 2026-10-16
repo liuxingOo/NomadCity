@@ -38,6 +38,49 @@ namespace NomadCity.Core.Model
         /// <summary>已建设在自己城市面板上的设施牌 id。</summary>
         public readonly List<int> BuiltFacilities = new();
 
+        /// <summary>城市面板的空位格数：3 列 × 4 行共 12 格（RuleSpec §4.2；素材 Art/CityPanel.png）。</summary>
+        public const int CityPanelSlotCount = 12;
+
+        /// <summary>核心指挥塔固定占用的格子：第 3 行中间（0 起下标 7）。</summary>
+        public const int CityPanelCoreSlot = 7;
+
+        /// <summary>
+        /// 城市面板每个格子上放着的设施牌 id；-1 表示空格。
+        /// 下标 0–11 按「从上到下、每行从左到右」排列，与 Art/CityPanel.png 的格子一一对应（§6.4e 步 2 的落点）。
+        /// </summary>
+        public readonly int[] CityPanelSlots = NewCityPanel();
+
+        /// <summary>
+        /// 每一格上的设施是否已经用于过一次城市样式宣告。
+        /// §6.5b 步 1：宣告时把用到的设施**旋转 180°** 标识其已使用；§10.2：同一设施只能用于一个样式。
+        /// 因此「已使用」与「已旋转」是同一件事，只记一个标记；宣告后不复位（§8.2 复位的是样式牌上的玩家标记）。
+        /// </summary>
+        public readonly bool[] CityPanelUsed = new bool[CityPanelSlotCount];
+
+        /// <summary>把某一格标记为「已用于宣告」。</summary>
+        public void MarkPanelSlotUsed(int slot)
+        {
+            if (slot >= 0 && slot < CityPanelSlotCount) CityPanelUsed[slot] = true;
+        }
+
+        /// <summary>城市面板上还有空的设施位（§6.4e：仍有空位才能执行建设）。</summary>
+        public bool HasFreePanelSlot
+        {
+            get
+            {
+                foreach (int id in CityPanelSlots)
+                    if (id < 0) return true;
+                return false;
+            }
+        }
+
+        private static int[] NewCityPanel()
+        {
+            var slots = new int[CityPanelSlotCount];
+            for (int i = 0; i < slots.Length; i++) slots[i] = -1;
+            return slots;
+        }
+
         /// <summary>移动城市停靠的资源点 id；不在任何资源点上为 -1。</summary>
         public int MobileCityNodeId = -1;
 

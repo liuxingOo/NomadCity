@@ -3,7 +3,10 @@
     "rootNamespace": "NomadCity.Game",
     "references": [
         "NomadCity.Core",
-        "NomadCity.Data"
+        "NomadCity.Data",
+        "Unity.TextMeshPro",
+        "Unity.InputSystem",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

@@ -14,6 +14,10 @@ namespace NomadCity.Core.Engine
         public static CommandResult ValidateActivePlayer(GameState state, int seat)
         {
             if (state == null) return CommandResult.Fail("引擎没有游戏状态。");
+
+            // 开发者模式：放开「轮到谁 / 是不是行动阶段」这两道闸门，任何座位在任何阶段都能行动。
+            if (state.DeveloperMode) return CommandResult.Success;
+
             if (state.IsGameOver) return CommandResult.Fail("本局已经结束。");
             if (state.Phase != TurnPhase.PlayerActions) return CommandResult.Fail("当前不是玩家行动阶段。");
             if (seat < 0 || seat >= state.Players.Count) return CommandResult.Fail($"座位号 {seat} 无效。");
@@ -24,6 +28,7 @@ namespace NomadCity.Core.Engine
         /// <summary>资源点是否已开放探索：非红色区域恒开放；红色区域要等人数变体规定的回合（§10.3）。</summary>
         public static bool IsNodeOpen(GameState state, MapNodeState node)
         {
+            if (state.DeveloperMode) return true; // 开发者模式：红区也随时可探索
             if (!node.IsRedZone) return true;
             return state.TurnNumber >= PlayerCountVariant.For(state.Players.Count).RedZoneOpenTurn;
         }

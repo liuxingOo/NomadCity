@@ -30,16 +30,18 @@ namespace NomadCity.Core.Engine
             AssignCoreCommandTowers(state, catalog);
             DealInitialFunds(state, firstPlayerSeat);
 
-            // 开局入场·步 2「决定初始资源点」需要玩家逐位交互（选点、翻事件牌、结算选项），
-            // 依赖 §11 效果系统，等那部分就绪后再补；此处不预置，避免写入未经核实的牌面数据。
+            // 开局入场·步 2「决定初始资源点」是需要玩家逐位交互的步骤，不在这里预置：
+            // 由 ChooseStartNodeCommand 在玩家点选绿色资源点时执行
+            // （移动城市停靠 + 翻开绿色事件牌放上资源点指示物 + B-01 特例）。
         }
 
         /// <summary>洗切三色事件牌堆，分别牌背朝上放好（§4.1 步 2）。</summary>
         public static void PrepareEventDecks(GameState state, ICardCatalog catalog, Random rng)
         {
-            FillShuffled(state.EventDeckGreen, catalog.EventDeckIds(NodeColor.Green), rng);
-            FillShuffled(state.EventDeckYellow, catalog.EventDeckIds(NodeColor.Yellow), rng);
-            FillShuffled(state.EventDeckRed, catalog.EventDeckIds(NodeColor.Red), rng);
+            bool enterprise = state.Setup.IsEnterpriseEnabled;
+            FillShuffled(state.EventDeckGreen, catalog.EventDeckIds(NodeColor.Green, enterprise), rng);
+            FillShuffled(state.EventDeckYellow, catalog.EventDeckIds(NodeColor.Yellow, enterprise), rng);
+            FillShuffled(state.EventDeckRed, catalog.EventDeckIds(NodeColor.Red, enterprise), rng);
         }
 
         /// <summary>把 6 张城市样式牌牌面朝上放到场上（§4.1 步 3）。</summary>
@@ -101,7 +103,11 @@ namespace NomadCity.Core.Engine
         {
             foreach (PlayerState player in state.Players)
             {
-                player.BuiltFacilities.Add(catalog.CoreCommandTowerId(player.Color));
+                int towerId = catalog.CoreCommandTowerId(player.Color);
+                player.BuiltFacilities.Add(towerId);
+
+                // 指挥塔开局就摆好，占住面板上印着「核心指挥塔」的那一格（第 3 行中间），不参与建设选位。
+                player.CityPanelSlots[PlayerState.CityPanelCoreSlot] = towerId;
             }
         }
 

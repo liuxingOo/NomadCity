@@ -3,7 +3,9 @@
     "rootNamespace": "NomadCity.UI",
     "references": [
         "NomadCity.Core",
-        "NomadCity.Game"
+        "NomadCity.Game",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

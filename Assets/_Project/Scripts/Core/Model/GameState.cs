@@ -32,11 +32,26 @@ namespace NomadCity.Core.Model
         /// <summary>整局是否已结束（第 8 回合收尾之后置为 true，进入终局结算）。</summary>
         public bool IsGameOver;
 
+        /// <summary>
+        /// 开发者模式（仅用于调试）：放开「轮次 / 阶段 / 红色区域是否开放」这几道流程闸门，
+        /// 让任何座位在任何阶段都能直接执行行动，方便单独测各个按钮。**不改变规则效果本身**
+        /// （金券 / 资源 / 标记该扣还是扣）。由 GameBootstrap 在开局时按 Inspector 上的开关写入，
+        /// 正式游戏必须为 false。
+        /// </summary>
+        public bool DeveloperMode;
+
         /// <summary>玩家列表，下标即座位号。</summary>
         public readonly List<PlayerState> Players = new();
 
         /// <summary>地图运行时状态。</summary>
         public MapState Map = new();
+
+        /// <summary>
+        /// 本局的卡牌目录：把牌堆里的 int id 翻译成卡牌定义（资源点指示物的资源与数量等）。
+        /// 它是**静态查表数据**，不随对局改变，因此不属于联机快照的一部分（各端各持一份相同目录即可）。
+        /// 由 <see cref="Engine.GameEngine.Create"/> 与开局设置用同一份目录写入。
+        /// </summary>
+        public ICardCatalog Catalog;
 
         /// <summary>
         /// 各区块的终局控制分（下标 = (int)District）。默认取规则规格 §9.2 的标准表；

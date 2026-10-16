@@ -22,8 +22,17 @@ namespace NomadCity.Core.Engine
             // 3. 清空「本回合」作用域的标志（§8）。
             foreach (PlayerState player in state.Players) player.ResetTurnScopedState();
 
-            // 4. §8.1「结算收尾阶段效果」按本回合行动顺序结算（如角色牌·雷蛇的策略效果），
+            // 4. 探索没走完第三步（放置影响力）的，随回合结束作废：主要行动必须在本回合内完成（§6.4c）。
+            ResetExplorePending(state);
+
+            // 5. §8.1「结算收尾阶段效果」按本回合行动顺序结算（如角色牌·雷蛇的策略效果），
             //    依赖 §11 效果系统，等那部分落地后在此接入。
+        }
+
+        /// <summary>清掉探索「待补影响力」的标记（§6.4c）：跨回合的探索不再允许补放。</summary>
+        public static void ResetExplorePending(GameState state)
+        {
+            foreach (MapNodeState node in state.Map.Nodes) node.ExplorePending = false;
         }
 
         /// <summary>

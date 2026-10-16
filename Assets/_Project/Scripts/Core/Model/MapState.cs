@@ -110,6 +110,20 @@ namespace NomadCity.Core.Model
         /// <summary>指示物提供的数量：1 或 2（红色区域的「2」标记，规则规格 10.3）。</summary>
         public int TokenAmount = 1;
 
+        /// <summary>放置指示物时翻开的事件牌 id（§4.3 步 2）；尚未放置为 -1。</summary>
+        public int EventCardId = -1;
+
+        /// <summary>这张事件牌的选项是否已经结算过（每个资源点只结算一次，避免反复领奖励）。</summary>
+        public bool EventResolved;
+
+        /// <summary>
+        /// 探索（§6.4c）翻牌后、第三步「在目标资源点放置影响力」尚未执行的标记。
+        /// 探索分三步走，牌翻出来之后要等玩家选完事件选项才能放影响力，中间会隔开两条命令，
+        /// 靠它把「这次探索还没走完」记在资源点上，避免别处误放影响力。
+        /// 回合结束时由收尾阶段作废（主要行动必须在本回合内走完）。
+        /// </summary>
+        public bool ExplorePending;
+
         public MapNodeState(int id, string code, District district, NodeColor color, bool isRedZone, int influenceCapacity)
         {
             Id = id;
@@ -175,6 +189,25 @@ namespace NomadCity.Core.Model
         public MapNodeState Node(int id) => Nodes[id];
 
         public RouteState Route(int id) => Routes[id];
+
+        /// <summary>
+        /// 航道的显示名：用端点资源点编号拼出来，如「A-02–A-03–B-03」。
+        /// 航道本身没有编号，日志与提示里直接打 id（「航道 4」）谁也对不上地图，
+        /// 所以凡是给人看的航道名一律走这里，别各写一份。
+        /// </summary>
+        public string RouteLabel(int routeId)
+        {
+            if (routeId < 0 || routeId >= Routes.Count) return $"#{routeId}";
+
+            RouteState route = Routes[routeId];
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < route.Nodes.Length; i++)
+            {
+                if (i > 0) sb.Append('–');
+                sb.Append(Nodes[route.Nodes[i]].Code);
+            }
+            return sb.ToString();
+        }
 
         /// <summary>取某个影响力空格引用对应的槽位集合（资源点或航道）。</summary>
         public InfluenceSlots SlotsOf(InfluenceSlotRef slot) => slot.Kind == InfluenceSlotKind.Node

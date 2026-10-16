@@ -61,8 +61,42 @@ namespace NomadCity.Core.Engine
         public static int RouteCost(GameState state, int seat, int routeId) =>
             RouteHasOwnInfluence(state, routeId, seat) ? 0 : CostPerRoute;
 
-        /// <summary>按给定的一组航道结算路费（同一航道只计一次，调用方保证不重复）。</summary>
-        public static Toll Compute(GameState state, int seat, IReadOnlyList<int> routeIds)
+        /// <summary>该航道上所有「对手」的座位号（按槽位顺序，去重）。玩家要在其中选一位支付（§6.6）。</summary>
+        public static IReadOnlyList<int> OpponentsOnRoute(GameState state, int routeId, int seat)
+        {
+            var result = new List<int>();
+            InfluenceSlots slots = state.Map.Route(routeId).Slots;
+
+            for (int i = 0; i < slots.Capacity; i++)
+            {
+                int owner = slots.OwnerOf(i);
+                if (owner < 0 || owner == seat) continue;
+                if (!result.Contains(owner)) result.Add(owner);
+            }
+
+            return result;
+        }
+
+        /// <summary>某位玩家是不是该航道上的对手之一（校验「付给谁」是否合法）。</summary>
+        public static bool IsOpponentOnRoute(GameState state, int routeId, int seat, int candidate)
+        {
+            if (candidate == seat) return false;
+
+            IReadOnlyList<int> opponents = OpponentsOnRoute(state, routeId, seat);
+            for (int i = 0; i < opponents.Count; i++)
+            {
+                if (opponents[i] == candidate) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 按给定的一组航道结算路费（同一航道只计一次，调用方保证不重复）。
+        /// <paramref name="payees"/> 是玩家对「付给谁」的选择（航道 id → 座位号）；
+        /// 缺项或选得不合法时退回该航道上的第一位对手。
+        /// </summary>
+        public static Toll Compute(GameState state, int seat, IReadOnlyList<int> routeIds,
+            IReadOnlyDictionary<int, int> payees = null)
         {
             var payments = new List<Payment>();
             int total = 0;
@@ -72,12 +106,77 @@ namespace NomadCity.Core.Engine
                 int cost = RouteCost(state, seat, routeId);
                 if (cost == 0) continue;
 
-                int payee = ActionRules.FirstOpponentOnRoute(state, routeId, seat);
+                int payee = ResolvePayee(state, routeId, seat, payees);
                 payments.Add(new Payment(routeId, cost, payee));
                 total += cost;
             }
 
             return new Toll(routeIds, total, payments);
+        }
+
+        /// <summary>这条航道的收款方：优先用玩家指定且确实在该航道上的对手，否则取第一位对手。</summary>
+        public static int ResolvePayee(GameState state, int routeId, int seat, IReadOnlyDictionary<int, int> payees)
+        {
+            if (payees != null && payees.TryGetValue(routeId, out int chosen)
+                && IsOpponentOnRoute(state, routeId, seat, chosen))
+            {
+                return chosen;
+            }
+
+            return ActionRules.FirstOpponentOnRoute(state, routeId, seat);
+        }
+
+        /// <summary>去掉重复的航道 id —— 同一条航道只计一次路费（§6.6）。</summary>
+        public static List<int> DistinctRoutes(IReadOnlyList<int> routeIds)
+        {
+            var result = new List<int>();
+            if (routeIds == null) return result;
+
+            foreach (int routeId in routeIds)
+            {
+                if (!result.Contains(routeId)) result.Add(routeId);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// 这组航道能不能把 fromNode 与 toNode 连起来（§6.6 步 1：玩家自定义路线时用它判定合法性）。
+        /// 只要求连通，不要求是最短路 —— 玩家多绕几跳只是多付钱。
+        /// </summary>
+        public static bool RoutesConnect(MapState map, IReadOnlyList<int> routeIds, int fromNode, int toNode)
+        {
+            if (fromNode == toNode) return true;
+            if (routeIds == null || routeIds.Count == 0) return false;
+
+            int count = map.Nodes.Count;
+            var visited = new bool[count];
+            var queue = new Queue<int>();
+
+            visited[fromNode] = true;
+            queue.Enqueue(fromNode);
+
+            while (queue.Count > 0)
+            {
+                int current = queue.Dequeue();
+
+                foreach (int routeId in routeIds)
+                {
+                    if (routeId < 0 || routeId >= map.Routes.Count) continue;
+
+                    RouteState route = map.Route(routeId);
+                    if (!route.Connects(current)) continue;
+
+                    foreach (int next in route.Others(current))
+                    {
+                        if (visited[next]) continue;
+                        visited[next] = true;
+                        if (next == toNode) return true;
+                        queue.Enqueue(next);
+                    }
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

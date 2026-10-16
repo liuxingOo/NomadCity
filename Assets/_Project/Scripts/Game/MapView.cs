@@ -24,6 +24,18 @@ namespace NomadCity.Game
         /// <summary>当前使用的地图数据。</summary>
         public MapData ActiveMap { get; private set; }
 
+        /// <summary>当前地图实例的根节点；未构建时为 null。渲染层把标记挂到它下面。</summary>
+        public Transform MapRoot { get; private set; }
+
+        /// <summary>当前地图实例里收集到的资源点视图，下标与 <see cref="MapState.Nodes"/> 的 id 一一对应。</summary>
+        public IReadOnlyList<MapNodeView> NodeViews => nodeViews;
+
+        /// <summary>当前地图实例里收集到的航道视图，下标与 <see cref="MapState.Routes"/> 的 id 一一对应。</summary>
+        public IReadOnlyList<MapRouteView> RouteViews => routeViews;
+
+        private readonly List<MapNodeView> nodeViews = new List<MapNodeView>();
+        private readonly List<MapRouteView> routeViews = new List<MapRouteView>();
+
         private GameObject instance;
 
         /// <summary>按人数选地图：4 人用四人面，2 / 3 人用三人面（规则规格 13.2）。</summary>
@@ -53,14 +65,17 @@ namespace NomadCity.Game
             instance.name = data.MapPrefab.name;
             instance.transform.localPosition = Vector3.zero;
             instance.transform.localRotation = Quaternion.identity;
+            MapRoot = instance.transform;
 
             // 先收集资源点，建立「View → 编号」映射，航道再据此解析两端。
+            // nodeViews 的下标必须与 MapState.Nodes 的 id 严格一致，渲染层才能按下标取视图。
             var idOf = new Dictionary<MapNodeView, int>();
             foreach (MapNodeView view in instance.GetComponentsInChildren<MapNodeView>(true))
             {
                 int id = State.Nodes.Count;
                 idOf[view] = id;
                 State.Nodes.Add(new MapNodeState(id, view.Code, view.District, view.Color, view.IsRedZone, view.InfluenceCapacity));
+                nodeViews.Add(view);
             }
 
             foreach (MapRouteView view in instance.GetComponentsInChildren<MapRouteView>(true))
@@ -89,6 +104,7 @@ namespace NomadCity.Game
 
                 int id = State.Routes.Count;
                 State.Routes.Add(new RouteState(id, ends.ToArray(), view.District, view.InfluenceCapacity));
+                routeViews.Add(view); // 跳过的航道不进列表，保证下标与 RouteState.Id 对齐
             }
 
             return State;
@@ -106,6 +122,9 @@ namespace NomadCity.Game
 
             State = null;
             ActiveMap = null;
+            MapRoot = null;
+            nodeViews.Clear();
+            routeViews.Clear();
         }
     }
 }

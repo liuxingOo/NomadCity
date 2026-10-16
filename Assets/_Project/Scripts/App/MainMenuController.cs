@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 
 namespace NomadCity.App
@@ -60,6 +61,10 @@ namespace NomadCity.App
                 Debug.LogError($"[主菜单] 无效的模式配置：{setup}");
                 return;
             }
+
+            // 单场景加载会连根销毁主菜单的整个 Canvas。先清掉 UGUI 里对旧场景按钮的残留选中引用，
+            // 否则帧末 UGUI 会去访问已销毁的 Image，抛出 MissingReferenceException。
+            if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
 
             Debug.Log($"[主菜单] 开始游戏 —— {setup}");
             SceneManager.LoadScene(gameSceneName);
