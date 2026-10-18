@@ -103,6 +103,17 @@ namespace NomadCity.Core.Model
         // 基础版 5 个角色名（同一颜色的 5 张角色相同），规则规格 §14 已确认。
         private static readonly string[] RoleNames = { "雷蛇", "极境", "德克萨斯", "锡人", "坎诺特" };
 
+        // 基础版 5 角色的策略 / 计谋（牌面名 + 效果序列），来源 Doc/CardEffects.md §3。
+        // 顺序与 RoleNames 一一对应；同一颜色的 5 张角色共用同一套效果。
+        private static readonly string[] RoleStrategyNames =
+            { "安保协议", "后勤调配", "特别递送", "建立威信", "秘密渠道" };
+
+        private static readonly string[] RoleTacticsNames =
+            { "控制阵地", "导航通讯", "叙拉古人", "人员召集", "征收物资" };
+
+        private static readonly RewardOp[][] RoleStrategyOps = BuildRoleStrategyOps();
+        private static readonly RewardOp[][] RoleTacticsOps = BuildRoleTacticsOps();
+
         private static readonly CharacterCardDef[] Characters = BuildCharacters();
         private static readonly FacilityCardDef[] Facilities = BuildFacilities();
         private static readonly EventCardDef[] Events = BuildEvents();
@@ -215,34 +226,288 @@ namespace NomadCity.Core.Model
                 for (int role = 0; role < CardCounts.CharacterRoles; role++)
                 {
                     int id = CardIds.CharacterBase + color * CardCounts.CharacterRoles + role;
-                    defs[id - CardIds.CharacterBase] = new CharacterCardDef(id, (PlayerColor)color, RoleNames[role]);
+                    defs[id - CardIds.CharacterBase] = new CharacterCardDef(
+                        id, (PlayerColor)color, RoleNames[role],
+                        RoleStrategyNames[role], RoleTacticsNames[role],
+                        RoleStrategyOps[role], RoleTacticsOps[role]);
                 }
             }
             return defs;
         }
 
+        // —— 角色牌效果数据（来源：Doc/CardEffects.md §3；顺序与 RoleNames 一致）——
+
+        private static RewardOp[][] BuildRoleStrategyOps() => new[]
+        {
+            // 雷蛇·策略「安保协议」：放置 2 次影响力；本回合收尾阶段移除 1 个你的影响力（延迟结算）。
+            new[]
+            {
+                RewardOp.Influence(InfluencePlacementScope.DeployRules, 2),
+                RewardOp.Deferred(RewardOp.RemoveOwnInfluence(1)),
+            },
+
+            // 极境·策略「后勤调配」：从源岩／源石／异铁中选你拥有数量最少的一种，获得 4 个。
+            new[] { RewardOp.ChooseLeastHeldResource(4, ResourceType.Orirock, ResourceType.Originium, ResourceType.Oriron) },
+
+            // 德克萨斯·策略「特别递送」：获得 12 金券；选 1 张设施供应区的设施牌放回设施牌堆底部。
+            new[]
+            {
+                RewardOp.Vouchers(12),
+                RewardOp.SupplyCardToDeckBottom(),
+            },
+
+            // 锡人·策略「建立威信」：获得 1 分；然后可选支付 12 金券得 1 至纯源石，再可选支付 15 金券得 1 至纯源石。
+            new[]
+            {
+                RewardOp.Score(1),
+                RewardOp.OptionalChain(
+                    new EffectBranch("支付 12 金券，获得 1 个至纯源石",
+                        RewardOp.PayVouchers(12), RewardOp.Gain(ResourceType.OriginitePrime, 1)),
+                    new EffectBranch("支付 15 金券，获得 1 个至纯源石",
+                        RewardOp.PayVouchers(15), RewardOp.Gain(ResourceType.OriginitePrime, 1))),
+            },
+
+            // 坎诺特·策略「秘密渠道」：把任意资源按单价出售（源岩 3 / 源石 3 / 异铁 4 / 至纯源石 15）。
+            new[] { RewardOp.SellResources() },
+        };
+
+        private static RewardOp[][] BuildRoleTacticsOps() => new[]
+        {
+            // 雷蛇·计谋「控制阵地」：支付 3 金券 → 替换 1 个影响力（同格移除后放置，放不下则只移除）。
+            new[]
+            {
+                RewardOp.PayVouchers(3),
+                RewardOp.ReplaceInfluence(1),
+            },
+
+            // 极境·计谋「导航通讯」：支付 3 至纯源石 → 以「相邻且有自己的影响力」的资源点为目标免费城市移动。
+            new[]
+            {
+                RewardOp.Pay(ResourceType.OriginitePrime, 3),
+                RewardOp.FreeCityMoveOwnInfluenced(1),
+            },
+
+            // 德克萨斯·计谋「叙拉古人」：支付 3 金券 → 移动 3 个自己的影响力。
+            new[]
+            {
+                RewardOp.PayVouchers(3),
+                RewardOp.RelocateInfluence(3),
+            },
+
+            // 锡人·计谋「人员召集」：把弃牌区的牌全部收回手牌；每收回 1 张在「获得 5 金券 / 移动 1 个影响力」中二选一。
+            new[]
+            {
+                RewardOp.RecallDiscardPerCard(
+                    new EffectBranch("获得 5 金券", RewardOp.Vouchers(5)),
+                    new EffectBranch("移动 1 个自己的影响力", RewardOp.RelocateInfluence(1))),
+            },
+
+            // 坎诺特·计谋「征收物资」：出牌者选 1 种基础资源；所有玩家按 2 金券 / 个卖光该资源（各自收取），出牌者 +1 分。
+            new[]
+            {
+                RewardOp.LevyResourceSale(2),
+                RewardOp.Score(1),
+            },
+        };
+
+        // —— 设施牌数据（来源：Doc/FacilityCards.md）——
+        // 普通设施牌按素材拼版图从左到右、从上到下编号（素材槽位 22／33／44 是延伸枢纽，跳过）。
+
         private static FacilityCardDef[] BuildFacilities()
         {
             var defs = new FacilityCardDef[CardCounts.StandardFacilities + CardCounts.CoreCommandTowers + CardCounts.ExtensionHubs];
 
-            for (int i = 0; i < CardCounts.StandardFacilities; i++)
-            {
-                int id = CardIds.FacilityBase + i;
-                defs[i] = new FacilityCardDef(id, FacilityKind.Standard, $"未命名设施 {i + 1:00}");
-            }
+            BuildStandardFacilities(defs);
+
+            // 核心指挥塔牌面为**彩色**描边（可视为任意颜色，§6.5b），id 仍按玩家颜色分段（200–203）。
             for (int color = 0; color < CardCounts.CoreCommandTowers; color++)
             {
                 defs[TowersOffset + color] = new FacilityCardDef(
-                    CardIds.CoreCommandTowerBase + color, FacilityKind.CoreCommandTower, $"核心指挥塔（{(PlayerColor)color}）");
+                    CardIds.CoreCommandTowerBase + color, FacilityKind.CoreCommandTower, "核心指挥塔",
+                    FacilityColor.Rainbow, 0, null, 0, FacilityKeyword.Unique);
             }
 
-            var hubColors = new[] { PlayerColor.Red, PlayerColor.Yellow, PlayerColor.Blue }; // 延伸枢纽没有绿色
+            // 延伸枢纽没有绿色；顺序沿用既有 {红, 黄, 蓝}
+            var hubColors = new[] { FacilityColor.Red, FacilityColor.Yellow, FacilityColor.Blue };
             for (int i = 0; i < hubColors.Length; i++)
             {
                 defs[HubsOffset + i] = new FacilityCardDef(
-                    CardIds.ExtensionHubBase + i, FacilityKind.ExtensionHub, $"延伸枢纽（{hubColors[i]}）");
+                    CardIds.ExtensionHubBase + i, FacilityKind.ExtensionHub, "延伸枢纽", hubColors[i], -1);
             }
             return defs;
+        }
+
+        /// <summary>
+        /// 41 张普通设施牌，按 id 顺序（100–140）写入 <paramref name="defs"/> 的前 41 个槽位。
+        /// 同名多张的牌逐张登记，数值完全相同。
+        /// 入场效果与费用修正中能用现有 <see cref="RewardOp"/> / <see cref="FacilityCostModifier"/> 表达的
+        /// 直接录入；仍需新增效果节点的（以单价售卖资源、结算他牌入场效果、传递起始标记、图标型效果）
+        /// 留空，见 FacilityCards.md §7。
+        /// </summary>
+        private static void BuildStandardFacilities(FacilityCardDef[] defs)
+        {
+            int i = 0;
+
+            // —— 彩色（11 张，100–110）——
+            i = AddStandard(defs, i, "城邦行政区", FacilityColor.Rainbow, 3, 3, 30, FacilityKeyword.Unique,
+                new[]
+                {
+                    RewardOp.Pay(ResourceType.Orirock, 3),
+                    RewardOp.Pay(ResourceType.Originium, 3),
+                    RewardOp.Pay(ResourceType.Oriron, 3),
+                });
+            i = AddStandard(defs, i, "附属能源设施", FacilityColor.Rainbow, 1, 3, 23, FacilityKeyword.Unique,
+                new[]
+                {
+                    RewardOp.Pay(ResourceType.Orirock, 2),
+                    RewardOp.Pay(ResourceType.Originium, 2),
+                    RewardOp.Pay(ResourceType.Oriron, 3),
+                },
+                // 入场效果：选一个十字相邻的非彩色设施，结算它的入场效果。
+                new[] { RewardOp.SettleAnotherEntryEffect() });
+            i = AddStandard(defs, i, "联邦理事会", FacilityColor.Rainbow, 0, 3, 17, FacilityKeyword.Unique,
+                new[] { RewardOp.Pay(ResourceType.Orirock, 4), RewardOp.Pay(ResourceType.Originium, 2) },
+                // 入场效果：本回合收尾阶段「传递起始标记」时，改由本玩家获得。
+                new[] { RewardOp.PassStartMarker() });
+            i = AddStandard(defs, i, "简陋工程营", FacilityColor.Rainbow, -1, 2, 8, FacilityKeyword.Unique,
+                new[] { RewardOp.Pay(ResourceType.Orirock, 2), RewardOp.Pay(ResourceType.Originium, 1) },
+                // 入场效果：进行一次建造（照牌面费用付费）。
+                new[] { RewardOp.BuildOnce() });
+
+            // —— 蓝色（10 张，111–120）——
+            // 资源费用 = 至纯源石1 + 金券2（费用列可混入金券 / 至纯源石，见 Doc/FacilityCards.md §1）
+            i = AddStandard(defs, i, "物流枢纽", FacilityColor.Blue, 2, 2, 24, FacilityKeyword.Unique,
+                new[] { RewardOp.Pay(ResourceType.OriginitePrime, 1), RewardOp.PayVouchers(2) },
+                // 入场效果：从余下的延伸枢纽中选 1 张并建设。
+                new[] { RewardOp.BuildExtensionHub() });
+            i = AddStandard(defs, i, "源石精炼厂", FacilityColor.Blue, 0, 1, 10, FacilityKeyword.None,
+                new[]
+                {
+                    RewardOp.Pay(ResourceType.Orirock, 1),
+                    RewardOp.Pay(ResourceType.Originium, 1),
+                    RewardOp.Pay(ResourceType.Oriron, 1),
+                },
+                new[] { RewardOp.Gain(ResourceType.Originium, 6) });
+            i = AddStandard(defs, i, "城市化区域", FacilityColor.Blue, 1, 3, 16, FacilityKeyword.None,
+                new[] { RewardOp.Pay(ResourceType.Orirock, 3), RewardOp.Pay(ResourceType.Oriron, 2) },
+                // 入场效果：每有一个与核心指挥塔十字相邻的设施，获得 4 金券。
+                new[] { RewardOp.VouchersPerCount(CountSource.AdjacentCoreFacilities, 4) });
+            i = AddStandard(defs, i, "异铁冶炼厂", FacilityColor.Blue, 1, 1, 15, FacilityKeyword.None,
+                new[]
+                {
+                    RewardOp.Pay(ResourceType.Orirock, 2),
+                    RewardOp.Pay(ResourceType.Originium, 2),
+                    RewardOp.Pay(ResourceType.Oriron, 1),
+                },
+                new[] { RewardOp.Gain(ResourceType.Oriron, 4) });
+            i = AddStandard(defs, i, "贸易街区", FacilityColor.Blue, 0, 3, 6, FacilityKeyword.None,
+                new[] { RewardOp.Pay(ResourceType.Orirock, 1), RewardOp.Pay(ResourceType.Oriron, 1) },
+                // 入场效果：可以按单价把任意资源换成金券（源岩3／源石3／异铁4／至纯源石15）。
+                new[] { RewardOp.SellResources() });
+
+            // —— 黄色（10 张，121–130）——
+            i = AddStandard(defs, i, "城邦工业区", FacilityColor.Yellow, 2, 3, 24, FacilityKeyword.None,
+                new[]
+                {
+                    RewardOp.Pay(ResourceType.Orirock, 4),
+                    RewardOp.Pay(ResourceType.Originium, 3),
+                    RewardOp.PayVouchers(2),
+                },
+                // 建筑费用修正（非入场效果）：自己面板上每有 1 种非彩色设施，少付 1 源岩。
+                null,
+                new FacilityCostModifier(CountSource.NonColorFacilityKinds, ResourceType.Orirock, 1));
+            i = AddStandard(defs, i, "高性能动力设施", FacilityColor.Yellow, 0, 2, 20, FacilityKeyword.None,
+                new[] { RewardOp.Pay(ResourceType.Originium, 4), RewardOp.Pay(ResourceType.Oriron, 2) },
+                // 牌面关键词栏的「免费」紧邻城市移动图标，只表示「进行一次免费的城市移动」（免付 3 源石）；
+                // 建设本身照常按上面的两组费用二选一支付（已与规则持有者确认）。
+                // 入场效果：免费城市移动（§6.4d）；另按牌面另一行，在所经航道**额外**放置 1 个影响力
+                //（出发点的放置由城市移动本身完成，故这次合计放 2 个）。
+                new[] { RewardOp.FreeCityMove(), RewardOp.PlaceInfluenceOnCityMoveRoute() });
+            i = AddStandard(defs, i, "固源岩提纯厂", FacilityColor.Yellow, 0, 1, 10, FacilityKeyword.None,
+                new[]
+                {
+                    RewardOp.Pay(ResourceType.Orirock, 1),
+                    RewardOp.Pay(ResourceType.Originium, 1),
+                    RewardOp.Pay(ResourceType.Oriron, 1),
+                },
+                new[] { RewardOp.Gain(ResourceType.Orirock, 7) });
+            i = AddStandard(defs, i, "源石精炼厂", FacilityColor.Yellow, 0, 1, 10, FacilityKeyword.None,
+                new[]
+                {
+                    RewardOp.Pay(ResourceType.Orirock, 1),
+                    RewardOp.Pay(ResourceType.Originium, 1),
+                    RewardOp.Pay(ResourceType.Oriron, 1),
+                },
+                new[] { RewardOp.Gain(ResourceType.Originium, 6) });
+            i = AddStandard(defs, i, "开采电铲", FacilityColor.Yellow, 0, 3, 10, FacilityKeyword.None,
+                new[] { RewardOp.Pay(ResourceType.Originium, 2), RewardOp.Pay(ResourceType.Oriron, 1) },
+                // 入场效果：合计获得 5 个资源，由玩家在源岩／源石／异铁三者之间任意分配。
+                new[] { RewardOp.GainSpread(5, ResourceType.Orirock, ResourceType.Originium, ResourceType.Oriron) });
+
+            // —— 红色（10 张，131–140）——
+            i = AddStandard(defs, i, "异铁冶炼厂", FacilityColor.Red, 1, 1, 15, FacilityKeyword.None,
+                new[]
+                {
+                    RewardOp.Pay(ResourceType.Orirock, 2),
+                    RewardOp.Pay(ResourceType.Originium, 2),
+                    RewardOp.Pay(ResourceType.Oriron, 1),
+                },
+                new[] { RewardOp.Gain(ResourceType.Oriron, 4) });
+            i = AddStandard(defs, i, "固源岩提纯厂", FacilityColor.Red, 0, 1, 10, FacilityKeyword.None,
+                new[]
+                {
+                    RewardOp.Pay(ResourceType.Orirock, 1),
+                    RewardOp.Pay(ResourceType.Originium, 1),
+                    RewardOp.Pay(ResourceType.Oriron, 1),
+                },
+                new[] { RewardOp.Gain(ResourceType.Orirock, 7) });
+            i = AddStandard(defs, i, "佣兵指挥部", FacilityColor.Red, 1, 3, 18, FacilityKeyword.None,
+                new[]
+                {
+                    RewardOp.Pay(ResourceType.Orirock, 2),
+                    RewardOp.Pay(ResourceType.Oriron, 2),
+                    RewardOp.PayVouchers(4),
+                },
+                // 入场效果为「或」二选一：替换 1 个影响力，或放置 1 个影响力。
+                new[]
+                {
+                    RewardOp.Alternative(
+                        new EffectBranch("替换 1 个影响力", RewardOp.ReplaceInfluence()),
+                        new EffectBranch("放置 1 个影响力",
+                            RewardOp.Influence(InfluencePlacementScope.DeployRules, 1))),
+                });
+            i = AddStandard(defs, i, "护航调度中心", FacilityColor.Red, 0, 2, 18, FacilityKeyword.None,
+                new[]
+                {
+                    RewardOp.Pay(ResourceType.Orirock, 2),
+                    RewardOp.Pay(ResourceType.Originium, 2),
+                    RewardOp.Pay(ResourceType.Oriron, 2),
+                },
+                new[] { RewardOp.Influence(InfluencePlacementScope.DeployRules, 2) });
+            i = AddStandard(defs, i, "载具仓库", FacilityColor.Red, 0, 3, 9, FacilityKeyword.None,
+                new[] { RewardOp.Pay(ResourceType.Orirock, 1), RewardOp.Pay(ResourceType.Originium, 2) },
+                // 入场效果为「或」二选一：拿走 1 个别人的影响力并移动 1 个自己的影响力，或执行 1 次探索。
+                new[]
+                {
+                    RewardOp.Alternative(
+                        new EffectBranch("拿走 1 个影响力并移动自己的 1 个影响力",
+                            RewardOp.RemoveInfluence(), RewardOp.RelocateInfluence()),
+                        new EffectBranch("执行 1 次探索", RewardOp.ExploreOnce())),
+                });
+        }
+
+        /// <summary>登记 <paramref name="copies"/> 张同名牌（连号 id），返回下一个起始下标。</summary>
+        private static int AddStandard(FacilityCardDef[] defs, int start, string name, FacilityColor color, int score,
+            int copies, int voucherCost = 0, FacilityKeyword keywords = FacilityKeyword.None,
+            IReadOnlyList<RewardOp> resourceCost = null, IReadOnlyList<RewardOp> entryEffects = null,
+            FacilityCostModifier costModifier = null)
+        {
+            for (int i = 0; i < copies; i++)
+            {
+                defs[start + i] = new FacilityCardDef(CardIds.FacilityBase + start + i, FacilityKind.Standard, name,
+                    color, score, resourceCost, voucherCost, keywords, entryEffects, costModifier);
+            }
+            return start + copies;
         }
 
         // —— 事件牌数据（来源：Doc/EventCards.md；id 按素材拼版图从左到右、从上到下编号）——
@@ -403,33 +668,54 @@ namespace NomadCity.Core.Model
         // —— 城市样式牌数据（来源：Doc/RuleSpec.md §6.5b / §10.2 与牌面切片 card_cp_lv1.jpg / card_cp_lv2.jpg）——
         // 坐标是**相对**格阵，匹配时可整体平移 + 按 90° 倍数旋转（不可翻转，§10.2）；
         // 斜分格记成多个颜色（其一即可）；彩色设施任何时候都能当作任意颜色（§10.2），由 PatternCell.Accepts 统一处理。
-        // 牌面上「解锁特殊行动」的文本属主要行动牌面，尚未建模，本次不入库。
+        // 牌面上「解锁特殊行动」的费用与效果均已录入（§6.3f / §10.2-4，来源 card_cp_lv1.jpg / card_cp_lv2.jpg）。
 
         private static CityPatternCardDef[] BuildCityPatterns()
         {
             return new[]
             {
                 // —— I 级（4 张，500–503）——
+                // 军工业化区域：放置 X 个影响力（X = 该样式牌上自己的标记数，至多 3 个）。
                 Pattern(500, 1, "军工业化区域", 2,
+                    null, new[] { RewardOp.InfluencePerPatternMarkers(3) },
                     new PatternCell(0, 0, FacilityColor.Blue, FacilityColor.Yellow), // 斜分：蓝 / 黄
                     new PatternCell(0, 1, FacilityColor.Red)),
 
+                // 动员配套体系：替换 1 个影响力（移除一个后在同一空格放置一个自己的）。
                 Pattern(501, 1, "动员配套体系", 3,
+                    null, new[] { RewardOp.ReplaceInfluence(1) },
                     new PatternCell(0, 0, FacilityColor.Yellow),
                     new PatternCell(0, 1, FacilityColor.Yellow),
                     new PatternCell(0, 2, FacilityColor.Red)),
 
+                // 复合动力系统：支付 1 源石 + 合计 3 个（源岩／异铁任意分配）→ 1 次免费城市移动 + 在经过的航道上放置 1 影响力。
                 Pattern(502, 1, "复合动力系统", 3,
+                    new[]
+                    {
+                        RewardOp.Pay(ResourceType.Originium, 1),
+                        RewardOp.PaySpread(3, ResourceType.Orirock, ResourceType.Oriron),
+                    },
+                    new[] { RewardOp.FreeCityMove(1), RewardOp.PlaceInfluenceOnCityMoveRoute(1) },
                     new PatternCell(0, 0, FacilityColor.Yellow),
                     new PatternCell(1, 0, FacilityColor.Red),
                     new PatternCell(1, 1, FacilityColor.Yellow)),
 
+                // 物资中继站：获得 源岩×1、源石×1、异铁×1。
                 Pattern(503, 1, "物资中继站", 2,
+                    null, new[]
+                    {
+                        RewardOp.Gain(ResourceType.Orirock, 1),
+                        RewardOp.Gain(ResourceType.Originium, 1),
+                        RewardOp.Gain(ResourceType.Oriron, 1),
+                    },
                     new PatternCell(0, 0, FacilityColor.Blue, FacilityColor.Red), // 斜分：蓝 / 红
                     new PatternCell(0, 1, FacilityColor.Yellow)),
 
                 // —— II 级（2 张，504–505）——
+                // 源石工业中枢：支付 6 金券 → 本轮额外 2 次主要行动；本轮不能用角色牌。
                 Pattern(504, 2, "源石工业中枢", 6,
+                    new[] { RewardOp.PayVouchers(6) },
+                    new[] { RewardOp.ExtraMainActions(2), RewardOp.ForbidCharacterCardsThisRound() },
                     new PatternCell(0, 0, FacilityColor.Blue),
                     new PatternCell(1, 0, FacilityColor.Red),
                     new PatternCell(1, 1, FacilityColor.Blue),
@@ -437,7 +723,10 @@ namespace NomadCity.Core.Model
                     new PatternCell(2, 1, FacilityColor.Yellow),
                     new PatternCell(2, 2, FacilityColor.Red)),
 
+                // 高效移动管理体系：支付 3 源石 → 连续 2 次免费城市移动；本轮不能用角色牌。
                 Pattern(505, 2, "高效移动管理体系", 7,
+                    new[] { RewardOp.Pay(ResourceType.Originium, 3) },
+                    new[] { RewardOp.ForbidCharacterCardsThisRound(), RewardOp.FreeCityMove(2) },
                     new PatternCell(0, 0, FacilityColor.Yellow),
                     new PatternCell(1, 0, FacilityColor.Red),
                     new PatternCell(1, 1, FacilityColor.Yellow),
@@ -495,5 +784,11 @@ namespace NomadCity.Core.Model
         private static CityPatternCardDef Pattern(int id, int level, string name, int score,
             params PatternCell[] cells) =>
             new CityPatternCardDef(id, level, name, score, new PatternCondition(cells));
+
+        /// <summary>带「解锁特殊行动」费用与效果的城市样式牌（基础版 6 张，§6.3f / §10.2-4）。</summary>
+        private static CityPatternCardDef Pattern(int id, int level, string name, int score,
+            RewardOp[] specialActionCost, RewardOp[] specialActionEffects, params PatternCell[] cells) =>
+            new CityPatternCardDef(id, level, name, score, new PatternCondition(cells),
+                null, specialActionCost, specialActionEffects);
     }
 }

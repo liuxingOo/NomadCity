@@ -74,13 +74,11 @@ namespace NomadCity.Tests
             state.Map.Route(0).Slots.Place(0, 2); // 座位 2 占了 R0
             int mine = state.Player(0).Vouchers;
             int theirs = state.Player(2).Vouchers;
-            int supply = state.SupplyVouchers;
 
             Assert.IsTrue(engine.Dispatch(new ExploreCommand(0, 2)).Ok);
 
             Assert.AreEqual(mine - 4, state.Player(0).Vouchers, "总路费仍是 4 券。");
             Assert.AreEqual(theirs + 2, state.Player(2).Vouchers, "R0 上的 2 券归座位 2。");
-            Assert.AreEqual(supply + 2, state.SupplyVouchers, "R1 没有对手影响力，2 券进供应堆。");
         }
 
         [Test]

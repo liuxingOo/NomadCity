@@ -59,12 +59,8 @@ namespace NomadCity.Core.Model
         /// </summary>
         public int[] DistrictScores = Districts.StandardScores();
 
-        // —— 公共资源供应堆 ——
-        /// <summary>至纯源石剩余数量（初始 35）。</summary>
-        public int SupplyOriginitePrime;
-
-        /// <summary>哥伦比亚金券剩余总值（初始 70）。</summary>
-        public int SupplyVouchers;
+        // 至纯源石与金券没有数量限制（可用替代品），因此不设「供应堆剩余量」——
+        // 发出去就是发出去，付回「供应堆」等同于退回无限池，无需记账。
 
         // —— 公共牌堆 ——
         /// <summary>设施牌堆（背面朝上）。</summary>
@@ -86,9 +82,75 @@ namespace NomadCity.Core.Model
         /// <summary>场上城市样式牌的标记状态（下标与 <see cref="CityPatternCards"/> 对应）。</summary>
         public readonly List<CityPatternState> CityPatternStates = new();
 
+        /// <summary>
+        /// 延迟结算队列（§11.4「本回合收尾阶段结算」）：<see cref="RewardKind.Deferred"/> 效果入队，
+        /// 收尾阶段由 <see cref="Engine.CleanupResolver"/> 依次取出执行。
+        /// </summary>
+        public readonly List<DeferredEffect> DeferredEffects = new();
+
+        /// <summary>
+        /// 本回合收尾阶段「传递起始标记」时，起始玩家改由谁担任（「联邦理事会」的效果）；-1 表示不改变。
+        /// 由效果写入，下一回合由 <see cref="Engine.TurnFlow"/> 读取后复位。
+        /// </summary>
+        public int PendingStartMarkerSeat = -1;
+
+        /// <summary>
+        /// 最近一次城市移动所用的航道 id（-1 = 还没发生过城市移动）。城市移动只能移到**相邻**资源点，
+        /// 因此一次移动只经过一条航道；「高性能动力设施」的「在经过的航道上放置 1 个影响力」按它取落点候选。
+        /// </summary>
+        public int LastCityMoveRouteId = -1;
+
+        /// <summary>
+        /// 正在使用特殊行动的那张城市样式牌 id（-1 = 不在结算特殊行动中）。
+        /// 「军工业化区域」的「放置 X 个影响力」按它取计数来源（X = 该牌上自己的标记数，模仿 <see cref="LastCityMoveRouteId"/> 的通道）。
+        /// </summary>
+        public int ActiveSpecialActionPatternId = -1;
+
         public GameState(GameSetup setup)
         {
             Setup = setup;
+        }
+
+        /// <summary>
+        /// 深拷贝一份本状态，用于「先问后改」的效果会话：在副本上反复试跑，正式状态原封不动。
+        /// <see cref="Catalog"/> 与 <see cref="Setup"/> 是静态/只读数据，直接共享，不复制。
+        /// </summary>
+        public GameState Clone()
+        {
+            var copy = new GameState(Setup)
+            {
+                TurnNumber = TurnNumber,
+                Phase = Phase,
+                FirstPlayerSeat = FirstPlayerSeat,
+                ActiveSeat = ActiveSeat,
+                ActionRound = ActionRound,
+                IsGameOver = IsGameOver,
+                DeveloperMode = DeveloperMode,
+                Catalog = Catalog,
+                DistrictScores = (int[])DistrictScores.Clone(),
+                Map = Map.Clone(),
+                PendingStartMarkerSeat = PendingStartMarkerSeat,
+                LastCityMoveRouteId = LastCityMoveRouteId,
+                ActiveSpecialActionPatternId = ActiveSpecialActionPatternId,
+            };
+
+            foreach (PlayerState player in Players) copy.Players.Add(player.Clone());
+
+            copy.FacilityDeck.AddRange(FacilityDeck);
+            copy.FacilitySupply.AddRange(FacilitySupply);
+            copy.ExtensionHubSupply.AddRange(ExtensionHubSupply);
+            copy.EventDeckGreen.AddRange(EventDeckGreen);
+            copy.EventDeckYellow.AddRange(EventDeckYellow);
+            copy.EventDeckRed.AddRange(EventDeckRed);
+            copy.CityPatternCards.AddRange(CityPatternCards);
+            copy.DeferredEffects.AddRange(DeferredEffects); // DeferredEffect 是只读结构体，逐项复制即可
+
+            foreach (CityPatternState pattern in CityPatternStates)
+            {
+                copy.CityPatternStates.Add(pattern.Clone());
+            }
+
+            return copy;
         }
 
         public PlayerState Player(int seat) => Players[seat];
@@ -97,5 +159,12 @@ namespace NomadCity.Core.Model
 
         /// <summary>座位号顺时针方向的下一位玩家。</summary>
         public int NextSeat(int seat) => (seat + 1) % Players.Count;
+
+        /// <summary>取某张城市样式牌的标记状态；不在场上时返回 null。</summary>
+        public CityPatternState PatternStateOf(int cardId)
+        {
+            int index = CityPatternCards.IndexOf(cardId);
+            return index < 0 ? null : CityPatternStates[index];
+        }
     }
 }

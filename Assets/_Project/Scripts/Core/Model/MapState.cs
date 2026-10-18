@@ -29,6 +29,13 @@ namespace NomadCity.Core.Model
             for (int i = 0; i < capacity; i++) owners[i] = -1;
         }
 
+        /// <summary>按另一份槽位状态复制一份（占用者一并拷贝，供效果会话的状态副本用）。</summary>
+        public InfluenceSlots(InfluenceSlots source)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            owners = (int[])source.owners.Clone();
+        }
+
         public int OwnerOf(int slot) => owners[slot];
 
         public bool IsEmpty(int slot) => owners[slot] < 0;
@@ -38,6 +45,16 @@ namespace NomadCity.Core.Model
         public void Place(int slot, int ownerSeat) => owners[slot] = ownerSeat;
 
         public void Clear(int slot) => owners[slot] = -1;
+
+        /// <summary>把另一份同容量的槽位状态的占用情况整份拷过来。</summary>
+        public void CopyFrom(InfluenceSlots source)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (source.owners.Length != owners.Length)
+                throw new ArgumentException("槽位数量不一致，不能整份拷贝。", nameof(source));
+
+            Array.Copy(source.owners, owners, owners.Length);
+        }
 
         /// <summary>该座位在此位置上的影响力数量。</summary>
         public int CountOf(int seat)
@@ -189,6 +206,37 @@ namespace NomadCity.Core.Model
         public MapNodeState Node(int id) => Nodes[id];
 
         public RouteState Route(int id) => Routes[id];
+
+        /// <summary>深拷贝一份地图运行时状态（指示物、影响力占用等），供效果会话的状态副本用。</summary>
+        public MapState Clone()
+        {
+            var copy = new MapState();
+
+            foreach (MapNodeState node in Nodes)
+            {
+                var clone = new MapNodeState(node.Id, node.Code, node.District, node.Color, node.IsRedZone,
+                    node.Slots.Capacity)
+                {
+                    HasResourceToken = node.HasResourceToken,
+                    TokenResource = node.TokenResource,
+                    TokenAmount = node.TokenAmount,
+                    EventCardId = node.EventCardId,
+                    EventResolved = node.EventResolved,
+                    ExplorePending = node.ExplorePending,
+                };
+                clone.Slots.CopyFrom(node.Slots);
+                copy.Nodes.Add(clone);
+            }
+
+            foreach (RouteState route in Routes)
+            {
+                var clone = new RouteState(route.Id, (int[])route.Nodes.Clone(), route.District, route.Slots.Capacity);
+                clone.Slots.CopyFrom(route.Slots);
+                copy.Routes.Add(clone);
+            }
+
+            return copy;
+        }
 
         /// <summary>
         /// 航道的显示名：用端点资源点编号拼出来，如「A-02–A-03–B-03」。

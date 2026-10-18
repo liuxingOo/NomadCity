@@ -4,7 +4,11 @@
     "references": [
         "NomadCity.Core",
         "NomadCity.Data",
-        "NomadCity.Game"
+        "NomadCity.Game",
+        "NomadCity.UI",
+        "NomadCity.App",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [
         "Editor"

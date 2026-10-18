@@ -58,6 +58,68 @@ namespace NomadCity.Core.Engine
         /// <summary>是不是印着「核心指挥塔」的那一格（第 3 行中间）。</summary>
         public static bool IsCoreSlot(int slot) => slot == PlayerState.CityPanelCoreSlot;
 
+        /// <summary>
+        /// 核心指挥塔那一格的十字相邻格（上、下、左、右；均在面板内）。
+        /// 供「城市化区域」这类「每有一个与核心指挥塔十字相邻的设施」的计数使用。
+        /// </summary>
+        public static readonly int[] CoreNeighbors =
+        {
+            PlayerState.CityPanelCoreSlot - Columns, // 上
+            PlayerState.CityPanelCoreSlot + Columns, // 下
+            PlayerState.CityPanelCoreSlot - 1,       // 左
+            PlayerState.CityPanelCoreSlot + 1,       // 右
+        };
+
+        /// <summary>核心指挥塔十字相邻的 4 格上已经摆了几张设施（空格不算）。</summary>
+        public static int AdjacentToCoreFacilityCount(PlayerState player)
+        {
+            int count = 0;
+            foreach (int slot in CoreNeighbors)
+            {
+                if (CardAt(player, slot) >= 0) count++;
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// 面板上**非彩色**（颜色不是 <see cref="FacilityColor.Rainbow"/>）设施的**种数** —— 按不同牌名去重，
+        /// 同名的多张只算 1 种（对应牌面「每有 1 种非彩色的设施」）。查不到定义的格子不计。
+        /// </summary>
+        public static int NonColorFacilityKindCount(PlayerState player, ICardCatalog catalog)
+        {
+            if (player == null || catalog == null) return 0;
+
+            var names = new HashSet<string>();
+            for (int slot = 0; slot < PlayerState.CityPanelSlotCount; slot++)
+            {
+                int cardId = CardAt(player, slot);
+                if (cardId < 0) continue;
+
+                FacilityCardDef card = catalog.Facility(cardId);
+                if (card == null || card.Color == FacilityColor.Rainbow) continue;
+
+                names.Add(card.Name);
+            }
+            return names.Count;
+        }
+
+        /// <summary>按 <see cref="CountSource"/> 统计某玩家面板上的数量（效果节点与建筑费用修正共用）。</summary>
+        public static int Count(GameState state, int seat, CountSource source)
+        {
+            if (state == null || seat < 0 || seat >= state.Players.Count) return 0;
+
+            PlayerState player = state.Players[seat];
+            switch (source)
+            {
+                case CountSource.AdjacentCoreFacilities:
+                    return AdjacentToCoreFacilityCount(player);
+                case CountSource.NonColorFacilityKinds:
+                    return NonColorFacilityKindCount(player, state.Catalog);
+                default:
+                    return 0;
+            }
+        }
+
         /// <summary>某格上的设施牌 id；空格为 -1。</summary>
         public static int CardAt(PlayerState player, int slot) =>
             player != null && IsInside(slot) ? player.CityPanelSlots[slot] : -1;
@@ -102,7 +164,9 @@ namespace NomadCity.Core.Engine
         }
 
         /// <summary>
-        /// 列出所有合法匹配。同一次宣告里玩家可能有多组可用的格子，由上层让玩家挑一组。
+        /// 列出所有合法匹配（同一次宣告里玩家可能有多组可用的格子，由上层让玩家挑一组）。
+        /// **同一组格子只出现一次**：单格或旋转对称的条件会在不同角度下重复命中同样的格子，
+        /// 那些重复项会被丢掉，否则界面会把同一组摆法列好几遍。
         /// </summary>
         public static List<PatternMatch> FindAll(PlayerState player, ICardCatalog catalog,
             PatternCondition condition)
@@ -126,12 +190,42 @@ namespace NomadCity.Core.Engine
                         PatternMatch found = TryPlace(player, catalog, condition, minRow, minCol,
                             height, width, rotation, rowOffset, columnOffset);
 
-                        if (found.Slots != null) results.Add(found);
+                        if (found.Slots == null) continue;
+                        if (ContainsSameSlots(results, found.Slots)) continue;
+
+                        results.Add(found);
                     }
                 }
             }
 
             return results;
+        }
+
+        /// <summary>已经收过「用同样这几格」的摆法了吗（顺序无关；用于过滤旋转带出来的重复项）。</summary>
+        private static bool ContainsSameSlots(List<PatternMatch> found, IReadOnlyList<int> slots)
+        {
+            foreach (PatternMatch existing in found)
+            {
+                if (existing.Slots.Count != slots.Count) continue;
+
+                bool same = true;
+                for (int i = 0; i < slots.Count && same; i++)
+                {
+                    bool hit = false;
+                    for (int j = 0; j < existing.Slots.Count; j++)
+                    {
+                        if (existing.Slots[j] == slots[i])
+                        {
+                            hit = true;
+                            break;
+                        }
+                    }
+                    same = hit;
+                }
+
+                if (same) return true;
+            }
+            return false;
         }
 
         /// <summary>条件占的矩形范围（先把坐标归一化到自身左上角为 0,0）。</summary>

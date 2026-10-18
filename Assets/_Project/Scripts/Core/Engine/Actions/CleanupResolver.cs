@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NomadCity.Core.Model;
 
 namespace NomadCity.Core.Engine
@@ -25,8 +26,24 @@ namespace NomadCity.Core.Engine
             // 4. 探索没走完第三步（放置影响力）的，随回合结束作废：主要行动必须在本回合内完成（§6.4c）。
             ResetExplorePending(state);
 
-            // 5. §8.1「结算收尾阶段效果」按本回合行动顺序结算（如角色牌·雷蛇的策略效果），
-            //    依赖 §11 效果系统，等那部分落地后在此接入。
+            // 5. §8.1「结算收尾阶段效果」按本回合行动顺序结算（延迟结算队列，§11.4）。
+            ResolveDeferredEffects(state);
+        }
+
+        /// <summary>
+        /// 结算收尾阶段效果（§8.1 / §11.4 延迟结算）：按入队顺序（即本回合的行动顺序）依次执行
+        /// <see cref="GameState.DeferredEffects"/> 里的效果。玩家点选类效果仍走默认选择器（取首个合法候选）。
+        /// </summary>
+        public static void ResolveDeferredEffects(GameState state)
+        {
+            if (state.DeferredEffects.Count == 0) return;
+
+            var queue = new List<DeferredEffect>(state.DeferredEffects);
+            state.DeferredEffects.Clear();
+            foreach (DeferredEffect deferred in queue)
+            {
+                EffectResolver.Execute(state, deferred.Seat, deferred.Ops);
+            }
         }
 
         /// <summary>清掉探索「待补影响力」的标记（§6.4c）：跨回合的探索不再允许补放。</summary>

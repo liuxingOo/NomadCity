@@ -10,8 +10,8 @@ namespace NomadCity.Core.Engine
     /// </summary>
     public static class ActionRules
     {
-        /// <summary>校验「是不是轮到这名玩家在玩家行动阶段行动」（§6.1）。</summary>
-        public static CommandResult ValidateActivePlayer(GameState state, int seat)
+        /// <summary>校验「是不是轮到这名玩家在玩家行动阶段行动」，**不看**角色牌是否处于连用中途（§6.1）。</summary>
+        public static CommandResult ValidateActiveSeat(GameState state, int seat)
         {
             if (state == null) return CommandResult.Fail("引擎没有游戏状态。");
 
@@ -24,6 +24,43 @@ namespace NomadCity.Core.Engine
             if (seat != state.ActiveSeat) return CommandResult.Fail("还没轮到你行动。");
             return CommandResult.Success;
         }
+
+        /// <summary>校验「是不是轮到这名玩家在玩家行动阶段行动」（§6.1）。</summary>
+        public static CommandResult ValidateActivePlayer(GameState state, int seat)
+        {
+            CommandResult turn = ValidateActiveSeat(state, seat);
+            if (!turn.Ok) return turn;
+
+            // §10.1.2：起始玩家连续使用策略与计谋时，两种效果之间不能插入其他主要 / 快速行动。
+            // 角色牌自己的命令绕开这道闸门（见 UseCharacterCardCommand / EndCharacterCardUseCommand）。
+            if (!state.DeveloperMode && state.Player(seat).CharacterSecondEffectPending)
+                return CommandResult.Fail("使用两种角色牌效果之间不能插入其他行动（§10.1.2）：请先使用另一种效果或结束角色牌使用。");
+
+            return CommandResult.Success;
+        }
+
+        /// <summary>
+        /// 校验「这名玩家在本轮能否使用角色牌」（§6.3f）：
+        /// 「源石工业中枢」/「高效移动管理体系」特殊行动的「使用此行动的轮中不能使用角色牌」，
+        /// 记为 <see cref="PlayerState.CharacterCardBanRound"/>，仅在该轮（= <see cref="GameState.ActionRound"/>）内生效。
+        /// </summary>
+        public static CommandResult ValidateCharacterCardAllowed(GameState state, int seat)
+        {
+            if (state == null) return CommandResult.Fail("引擎没有游戏状态。");
+            if (state.DeveloperMode) return CommandResult.Success;
+
+            if (seat >= 0 && seat < state.Players.Count &&
+                state.Player(seat).CharacterCardBanRound == state.ActionRound)
+                return CommandResult.Fail("本轮使用了城市样式特殊行动，不能再使用角色牌（§6.3f）。");
+
+            return CommandResult.Success;
+        }
+
+        /// <summary>
+        /// 开发者模式（仅调试）：跳过所有费用校验与扣除（建设 / 城市移动 / 探索路费 / 采集路费 / 效果里的付费），
+        /// 让各行动与效果可以「不消耗资源」地反复测试。正式游戏请务必关闭。
+        /// </summary>
+        public static bool IgnoresCosts(GameState state) => state != null && state.DeveloperMode;
 
         /// <summary>资源点是否已开放探索：非红色区域恒开放；红色区域要等人数变体规定的回合（§10.3）。</summary>
         public static bool IsNodeOpen(GameState state, MapNodeState node)

@@ -34,7 +34,7 @@ TextureImporter:
   cubemapConvolution: 0
   seamlessCubemap: 0
   textureFormat: 1
-  maxTextureSize: 2048
+  maxTextureSize: 4096
   textureSettings:
     serializedVersion: 2
     filterMode: 1
@@ -45,7 +45,7 @@ TextureImporter:
     wrapW: 1
   nPOTScale: 0
   lightmap: 0
-  compressionQuality: 50
+  compressionQuality: 100
   spriteMode: 2
   spriteExtrude: 1
   spriteMeshType: 1
@@ -74,11 +74,11 @@ TextureImporter:
   platformSettings:
   - serializedVersion: 4
     buildTarget: DefaultTexturePlatform
-    maxTextureSize: 2048
+    maxTextureSize: 4096
     resizeAlgorithm: 0
     textureFormat: -1
     textureCompression: 1
-    compressionQuality: 50
+    compressionQuality: 100
     crunchedCompression: 0
     allowsAlphaSplitting: 0
     overridden: 0
@@ -87,11 +87,11 @@ TextureImporter:
     forceMaximumCompressionQuality_BC6H_BC7: 0
   - serializedVersion: 4
     buildTarget: Standalone
-    maxTextureSize: 2048
+    maxTextureSize: 4096
     resizeAlgorithm: 0
     textureFormat: -1
     textureCompression: 1
-    compressionQuality: 50
+    compressionQuality: 100
     crunchedCompression: 0
     allowsAlphaSplitting: 0
     overridden: 0
@@ -100,11 +100,11 @@ TextureImporter:
     forceMaximumCompressionQuality_BC6H_BC7: 0
   - serializedVersion: 4
     buildTarget: WebGL
-    maxTextureSize: 2048
+    maxTextureSize: 4096
     resizeAlgorithm: 0
     textureFormat: -1
     textureCompression: 1
-    compressionQuality: 50
+    compressionQuality: 100
     crunchedCompression: 0
     allowsAlphaSplitting: 0
     overridden: 0
@@ -115,15 +115,15 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: card_facility_0
+      name: card_facility_City-Administrative-District_rainbow_01
       rect:
         serializedVersion: 2
         x: 0
-        y: 0
-        width: 5400
-        height: 5100
+        y: 4250
+        width: 600
+        height: 850
       alignment: 0
-      pivot: {x: 0, y: 0}
+      pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
       customData: 
       outline: []
@@ -136,11 +136,1177 @@ TextureImporter:
       indices: 
       edges: []
       weights: []
+    - serializedVersion: 2
+      name: card_facility_City-Administrative-District_rainbow_02
+      rect:
+        serializedVersion: 2
+        x: 600
+        y: 4250
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 8a6b96eda122eb642babad4f574ac1ad
+      internalID: 1548010125
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_City-Administrative-District_rainbow_03
+      rect:
+        serializedVersion: 2
+        x: 1200
+        y: 4250
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 2cce88dfb47209e47b58a72c0e312133
+      internalID: -291176062
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Auxiliary-Power-Facility_rainbow_01
+      rect:
+        serializedVersion: 2
+        x: 1800
+        y: 4250
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: ecdcbf3cafc072747a828dcbff00a5b1
+      internalID: -1465228800
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Auxiliary-Power-Facility_rainbow_02
+      rect:
+        serializedVersion: 2
+        x: 2400
+        y: 4250
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: e4c6b500c565f9b418cf6d3835ee37b1
+      internalID: -1142709996
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Auxiliary-Power-Facility_rainbow_03
+      rect:
+        serializedVersion: 2
+        x: 3000
+        y: 4250
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 341b424bc9d3baa45851771eb207998a
+      internalID: 1643628505
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Federation-Office_rainbow_01
+      rect:
+        serializedVersion: 2
+        x: 3600
+        y: 4250
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 4981fc7927060fa4e993f10eb6f0b691
+      internalID: 1140027659
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Federation-Office_rainbow_02
+      rect:
+        serializedVersion: 2
+        x: 4200
+        y: 4250
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 7446c945342745d449c572d99fea2e28
+      internalID: 782085893
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Federation-Office_rainbow_03
+      rect:
+        serializedVersion: 2
+        x: 4800
+        y: 4250
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 1560361a6446bb340a94699d5a206157
+      internalID: -1892231658
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Makeshift-Engineering-Camp_rainbow_01
+      rect:
+        serializedVersion: 2
+        x: 0
+        y: 3404
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 7e628a50ecc67894c9771750db00ed4c
+      internalID: 1123057076
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Makeshift-Engineering-Camp_rainbow_02
+      rect:
+        serializedVersion: 2
+        x: 600
+        y: 3404
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 51e69bef559f9c64da2fea736a063dd7
+      internalID: -141710685
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Logistics-Hub_blue_01
+      rect:
+        serializedVersion: 2
+        x: 1200
+        y: 3400
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: ddd97fd99cfc77f46b4fc191e42ddb1c
+      internalID: -279716864
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Logistics-Hub_blue_02
+      rect:
+        serializedVersion: 2
+        x: 1800
+        y: 3400
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 95c860fa578c5e54691b143c3ec47566
+      internalID: -918763507
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Originium-Refinery_blue
+      rect:
+        serializedVersion: 2
+        x: 2396
+        y: 3396
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 54c33ea35887244409bcaaa6cb3b2691
+      internalID: 999200872
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Urbanized-District_blue_01
+      rect:
+        serializedVersion: 2
+        x: 3000
+        y: 3400
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: bd992d5acfa9d05419b4fffc02227885
+      internalID: -1687644098
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Urbanized-District_blue_02
+      rect:
+        serializedVersion: 2
+        x: 3600
+        y: 3400
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: fbc6ec4c7e25acb45ae37b19b92076f4
+      internalID: 1981099254
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Urbanized-District_blue_03
+      rect:
+        serializedVersion: 2
+        x: 4200
+        y: 3400
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 2a2b72a4f6882fe489d9409418f80518
+      internalID: 1887396276
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Iron-Smelter_blue
+      rect:
+        serializedVersion: 2
+        x: 4800
+        y: 3396
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: a1dbca45782492145843b014dc6ef268
+      internalID: 51326729
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Trade-District_blue_01
+      rect:
+        serializedVersion: 2
+        x: 0
+        y: 2550
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 8a3ce4e151469964cbe8c8245c550ef5
+      internalID: 1237769284
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Trade-District_blue_02
+      rect:
+        serializedVersion: 2
+        x: 600
+        y: 2546
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: cb0a743cb84a3f24486b6d45b9ae7c9a
+      internalID: 1153663176
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Trade-District_blue_03
+      rect:
+        serializedVersion: 2
+        x: 1200
+        y: 2550
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: b95bf75dc89082b45acddb952cb345b2
+      internalID: -1620680024
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Extension-Hub_blue
+      rect:
+        serializedVersion: 2
+        x: 1800
+        y: 2555
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: b5fb35fc13052164888956cab583e5ec
+      internalID: -29383907
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_City-Industrial-Zone_yellow_01
+      rect:
+        serializedVersion: 2
+        x: 2400
+        y: 2568
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: ac8061fd3131bff4ead546bc8d1dbb5d
+      internalID: 1151971535
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_City-Industrial-Zone_yellow_02
+      rect:
+        serializedVersion: 2
+        x: 3000
+        y: 2554
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: a695b944c93acc94592a1309026cc2f0
+      internalID: -574553737
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_City-Industrial-Zone_yellow_03
+      rect:
+        serializedVersion: 2
+        x: 3600
+        y: 2550
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: ab49cda8acc6eee4585a9a53a4f0f849
+      internalID: 1802615283
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_High-Performance-Power-Facility_yellow_01
+      rect:
+        serializedVersion: 2
+        x: 4200
+        y: 2558
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: b8e1dc398da7b624db5f8a4596695658
+      internalID: -1226604745
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_High-Performance-Power-Facility_yellow_02
+      rect:
+        serializedVersion: 2
+        x: 4800
+        y: 2550
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 899050cec1d5de844997d64d7f7af529
+      internalID: 2030770231
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Orirock-Refinery_yellow
+      rect:
+        serializedVersion: 2
+        x: 0
+        y: 1700
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: b7956133e411e1a4aa5eae7d27abf432
+      internalID: -1377210407
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Originium-Steelworks_yellow
+      rect:
+        serializedVersion: 2
+        x: 600
+        y: 1704
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: a11f2a830f2306445983c615f4b89dea
+      internalID: 1760714284
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Mining-Excavator_yellow_01
+      rect:
+        serializedVersion: 2
+        x: 1200
+        y: 1700
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 424953b15c9704c438af97f2d5dd5fbb
+      internalID: 1679545115
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Mining-Excavator_yellow_02
+      rect:
+        serializedVersion: 2
+        x: 1800
+        y: 1700
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 90abad749e5796a45b6d0c13a2b090b7
+      internalID: -86047569
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Mining-Excavator_yellow_03
+      rect:
+        serializedVersion: 2
+        x: 2400
+        y: 1700
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 27f127fb5e627fd4aa9e8641fc87228d
+      internalID: 226003450
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Extension-Hub_yellow
+      rect:
+        serializedVersion: 2
+        x: 2995
+        y: 1700
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: c2fb0a72480cf2b4bb902b17dbe98009
+      internalID: -940059718
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Iron-Smelter_red
+      rect:
+        serializedVersion: 2
+        x: 3600
+        y: 1696
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: b6fc9aae332d6424f8ac5f3897d9ec8b
+      internalID: 922351806
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Orirock-Refinery_red
+      rect:
+        serializedVersion: 2
+        x: 4205
+        y: 1705
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: eabb6df7ae07e3d42a1ad03b43870ea5
+      internalID: -1047327262
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Mercenary-Command-Post_red_0
+      rect:
+        serializedVersion: 2
+        x: 4800
+        y: 1700
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: e8c96de2a5e9a324290b20e95513ec83
+      internalID: 1320293187
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Mercenary-Command-Post_red_01
+      rect:
+        serializedVersion: 2
+        x: 0
+        y: 850
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: c4994c42e1210684290c959afc9a2274
+      internalID: 1445067367
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Mercenary-Command-Post_red_03
+      rect:
+        serializedVersion: 2
+        x: 600
+        y: 850
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 33e21845d02c206418a775a141d8f247
+      internalID: 901710115
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Escort-Dispatch-Center_red_01
+      rect:
+        serializedVersion: 2
+        x: 1200
+        y: 846
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 8f49cf05e879e5a42bfda6cdc9135da5
+      internalID: -1478874848
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Escort-Dispatch-Center_red_02
+      rect:
+        serializedVersion: 2
+        x: 1800
+        y: 850
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 840bb01526c867e4aad142b74b64c0a9
+      internalID: -1471662468
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Vehicle-Depot_red_01
+      rect:
+        serializedVersion: 2
+        x: 2400
+        y: 850
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 9bb6262105446b24b96a49a818a364dc
+      internalID: -1498969437
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Vehicle-Depot_red_02
+      rect:
+        serializedVersion: 2
+        x: 2969
+        y: 846
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 3e89bb8a0e860af44bc1f1aee76af9ee
+      internalID: 1342962109
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Vehicle-Depot_red_03
+      rect:
+        serializedVersion: 2
+        x: 3600
+        y: 850
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 805e09a54371c2c45a52094c9790b8e7
+      internalID: -1001134196
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Extension-Hub_red
+      rect:
+        serializedVersion: 2
+        x: 4200
+        y: 855
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 5e4b60a95aa3e614fbb27908e350c3fc
+      internalID: -1196588495
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Core-Command-Tower_rainbow_01
+      rect:
+        serializedVersion: 2
+        x: 4800
+        y: 850
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 76b7f134b98235a47bf2a3d37e642eb8
+      internalID: 503604556
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Core-Command-Tower_rainbow_02
+      rect:
+        serializedVersion: 2
+        x: 0
+        y: 5
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 70b9ff8763b0cca47bba2957f48800db
+      internalID: 113488489
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Core-Command-Tower_rainbow_03
+      rect:
+        serializedVersion: 2
+        x: 600
+        y: 9
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 579601abdd8d39b45a74db8fc3d475ff
+      internalID: 1757163769
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Core-Command-Tower_rainbow_04
+      rect:
+        serializedVersion: 2
+        x: 1200
+        y: 5
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 548bf8244f4e610438c706dfc91ebc75
+      internalID: -876719274
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Enterprise-Office_red_exp
+      rect:
+        serializedVersion: 2
+        x: 1800
+        y: 0
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 80ea2ccf4401f504d835f63b4b68d36a
+      internalID: 1330269641
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Enterprise-Office_blue_exp
+      rect:
+        serializedVersion: 2
+        x: 2400
+        y: 0
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 54e0f0f09db74e24da5bddeaa2376fe6
+      internalID: -9820165
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: card_facility_Enterprise-Office_yellow_exp
+      rect:
+        serializedVersion: 2
+        x: 3000
+        y: 0
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 5ebb7bf8c3cec184a94aad15f1702b24
+      internalID: -1823629160
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: None1
+      rect:
+        serializedVersion: 2
+        x: 3600
+        y: 0
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 97eb0628a122b704d808fb3192c4b799
+      internalID: 236692879
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: None2
+      rect:
+        serializedVersion: 2
+        x: 4200
+        y: 0
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: bc52aa0dbd739f544bf2b34971a0e51a
+      internalID: -1932165401
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: None3
+      rect:
+        serializedVersion: 2
+        x: 4800
+        y: 5
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 73b96b59f9d37f74185427c827699a94
+      internalID: -769616525
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
     outline: []
     customData: 
     physicsShape: []
     bones: []
-    spriteID: 
+    spriteID: 0540a48b9d072d042b5e3d5a7ccfcf00
     internalID: 0
     vertices: []
     indices: 
@@ -148,9 +1314,65 @@ TextureImporter:
     weights: []
     secondaryTextures: []
     spriteCustomMetadata:
-      entries: []
+      entries:
+      - key: SpriteEditor.SliceSettings
+        value: '{"sliceOnImport":false,"gridCellCount":{"x":9.0,"y":6.0},"gridSpriteSize":{"x":600.0,"y":850.0},"gridSpriteOffset":{"x":0.0,"y":0.0},"gridSpritePadding":{"x":0.0,"y":0.0},"pivot":{"x":0.5,"y":0.5},"pivotPixels":{"x":0.0,"y":0.0},"autoSlicingMethod":0,"spriteAlignment":0,"pivotUnitMode":0,"slicingType":2,"keepEmptyRects":false,"isAlternate":false}'
     nameFileIdTable:
-      card_facility_0: -4453099796512991476
+      Federation-Office_rainbow_01: -1892231658
+      None1: 236692879
+      None2: -1932165401
+      None3: -769616525
+      card_facility_Auxiliary-Power-Facility_rainbow_01: -1465228800
+      card_facility_Auxiliary-Power-Facility_rainbow_02: -1142709996
+      card_facility_Auxiliary-Power-Facility_rainbow_03: 1643628505
+      card_facility_City-Administrative-District_rainbow_01: -4453099796512991476
+      card_facility_City-Administrative-District_rainbow_02: 1548010125
+      card_facility_City-Administrative-District_rainbow_03: -291176062
+      card_facility_City-Industrial-Zone_yellow_01: 1151971535
+      card_facility_City-Industrial-Zone_yellow_02: -574553737
+      card_facility_City-Industrial-Zone_yellow_03: 1802615283
+      card_facility_Core-Command-Tower_rainbow_01: 503604556
+      card_facility_Core-Command-Tower_rainbow_02: 113488489
+      card_facility_Core-Command-Tower_rainbow_03: 1757163769
+      card_facility_Core-Command-Tower_rainbow_04: -876719274
+      card_facility_Enterprise-Office_blue_exp: -9820165
+      card_facility_Enterprise-Office_red_exp: 1330269641
+      card_facility_Enterprise-Office_yellow_exp: -1823629160
+      card_facility_Escort-Dispatch-Center_red_01: -1478874848
+      card_facility_Escort-Dispatch-Center_red_02: -1471662468
+      card_facility_Extension-Hub_blue: -29383907
+      card_facility_Extension-Hub_red: -1196588495
+      card_facility_Extension-Hub_yellow: -940059718
+      card_facility_Federation-Office_rainbow_01: 1140027659
+      card_facility_Federation-Office_rainbow_02: 782085893
+      card_facility_Federation-Office_rainbow_03: -1892231658
+      card_facility_High-Performance-Power-Facility_yellow_01: -1226604745
+      card_facility_High-Performance-Power-Facility_yellow_02: 2030770231
+      card_facility_Iron-Smelter_blue: 51326729
+      card_facility_Iron-Smelter_red: 922351806
+      card_facility_Logistics-Hub_blue_01: -279716864
+      card_facility_Logistics-Hub_blue_02: -918763507
+      card_facility_Makeshift-Engineering-Camp_rainbow_01: 1123057076
+      card_facility_Makeshift-Engineering-Camp_rainbow_02: -141710685
+      card_facility_Mercenary-Command-Post_red_0: 1320293187
+      card_facility_Mercenary-Command-Post_red_01: 1445067367
+      card_facility_Mercenary-Command-Post_red_03: 901710115
+      card_facility_Mining-Excavator_yellow_01: 1679545115
+      card_facility_Mining-Excavator_yellow_02: -86047569
+      card_facility_Mining-Excavator_yellow_03: 226003450
+      card_facility_Originium-Refinery_blue: 999200872
+      card_facility_Originium-Steelworks_yellow: 1760714284
+      card_facility_Orirock-Refinery_red: -1047327262
+      card_facility_Orirock-Refinery_yellow: -1377210407
+      card_facility_Trade-District_blue_01: 1237769284
+      card_facility_Trade-District_blue_02: 1153663176
+      card_facility_Trade-District_blue_03: -1620680024
+      card_facility_Urbanized-District_blue_01: -1687644098
+      card_facility_Urbanized-District_blue_02: 1981099254
+      card_facility_Urbanized-District_blue_03: 1887396276
+      card_facility_Vehicle-Depot_red_01: -1498969437
+      card_facility_Vehicle-Depot_red_02: 1342962109
+      card_facility_Vehicle-Depot_red_03: -1001134196
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

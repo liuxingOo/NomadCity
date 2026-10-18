@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using NomadCity.Core.Model;
 
 namespace NomadCity.Core.Engine
@@ -9,8 +11,9 @@ namespace NomadCity.Core.Engine
     /// 3) 结算入场效果（§11 通用效果执行器，不为某张牌硬编码）。
     /// 做完后从设施牌堆补牌，让设施供应区恢复 6 张。
     ///
-    /// 41 张设施牌的牌面数据尚未录入（RuleSpec §13.1 待办），因此目前设施牌的费用 / 分数 /
-    /// 入场效果都还是默认的 0 / 空 —— 本命令不依赖任何具体牌面数据，数据录入后自动生效。
+    /// 41 张普通设施牌的牌面数据已录入（见 `Doc/FacilityCards.md`）：费用 / 分数 / 关键词都已生效；
+    /// 入场效果里「获得 N 资源」「放置影响力」「`or` 二选一」「拿走／移动／替换影响力」已可结算，
+    /// 仍需新增效果节点的部分留空，见该文档 §7。
     /// </summary>
     public sealed class BuildFacilityCommand : ICommand
     {
@@ -26,12 +29,17 @@ namespace NomadCity.Core.Engine
         /// <summary>第三步入场效果的结算报告；Apply 之后才有值。</summary>
         public EffectReport Report { get; private set; }
 
-        public BuildFacilityCommand(int seat, int facilityId, int panelSlot, FacilityPayment payment)
+        /// <summary>入场效果里需要玩家点选时由它回答；不传则用「总是取第一个合法项」的自动结算。</summary>
+        private readonly IEffectChoices choices;
+
+        public BuildFacilityCommand(int seat, int facilityId, int panelSlot, FacilityPayment payment,
+            IEffectChoices choices = null)
         {
             ActorSeat = seat;
             FacilityId = facilityId;
             PanelSlot = panelSlot;
             Payment = payment;
+            this.choices = choices;
         }
 
         public int ActorSeat { get; }
@@ -70,10 +78,10 @@ namespace NomadCity.Core.Engine
             if (player.CityPanelSlots[PanelSlot] >= 0)
                 return CommandResult.Fail($"城市面板第 {PanelSlot + 1} 格已经有设施牌了，换一个空位。");
 
-            if (card.IsUnique && player.BuiltFacilities.Contains(FacilityId))
-                return CommandResult.Fail($"「{card.Name}」带「唯一」关键词，你的城市面板上已经有一张了（§6.4e）。");
+            if (card.IsUnique && HasSameName(state, player, card))
+                return CommandResult.Fail($"「{card.Name}」带「唯一」关键词，你的城市面板上已经有一张同名设施了（§6.4e）。");
 
-            return ValidatePayment(card, player);
+            return ValidatePayment(state, card, player);
         }
 
         public void Apply(GameState state)
@@ -83,18 +91,34 @@ namespace NomadCity.Core.Engine
 
             Pay(state, player, card);          // 步 1
             PlaceOnPanel(state, player, card); // 步 2
-            Report = EffectResolver.Execute(state, ActorSeat, card.EntryEffects); // 步 3
+            Report = EffectResolver.Execute(state, ActorSeat, card.EntryEffects, choices); // 步 3
+        }
+
+        /// <summary>
+        /// 「唯一」（§6.4e）：同一玩家的城市面板上，**同名牌**只能有 1 张。
+        /// 按牌名而非牌 id 判定 —— 同名异色的设施（如三种颜色的「源石精炼厂」）也算同名。
+        /// </summary>
+        private static bool HasSameName(GameState state, PlayerState player, FacilityCardDef card)
+        {
+            foreach (int builtId in player.BuiltFacilities)
+            {
+                FacilityCardDef built = state.Catalog.Facility(builtId);
+                if (built != null && built.Name == card.Name) return true;
+            }
+            return false;
         }
 
         /// <summary>步 1 校验：免建的牌直接过；其余必须明确选一种费用、并且付得起。</summary>
-        private CommandResult ValidatePayment(FacilityCardDef card, PlayerState player)
+        private CommandResult ValidatePayment(GameState state, FacilityCardDef card, PlayerState player)
         {
             if (IsFreeToBuild(card)) return CommandResult.Success;
+            if (ActionRules.IgnoresCosts(state)) return CommandResult.Success; // 开发者模式：不查费用
 
             switch (Payment)
             {
                 case FacilityPayment.Resources:
-                    if (!card.CanPayWithResources(player.Resources))
+                    if (!FacilityCardDef.CanPayWithResources(
+                            EffectiveResourceCost(state, ActorSeat, card), player.Resources, player.Vouchers))
                         return CommandResult.Fail($"资源不足以支付「{card.Name}」的资源费用。");
                     return CommandResult.Success;
 
@@ -112,19 +136,58 @@ namespace NomadCity.Core.Engine
         private static bool IsFreeToBuild(FacilityCardDef card) =>
             card.IsFree || (card.ResourceCost.Count == 0 && card.VoucherCost == 0);
 
+        /// <summary>
+        /// 把「建筑费用修正」折算进资源费用列：按 <see cref="FacilityCostModifier.Source"/> 数出的数量 ×
+        /// <see cref="FacilityCostModifier.PerCount"/>，从费用列里**对应的那一份资源**上扣减（下限 0，只扣一次）。
+        /// 只影响资源费用组，金券费用（<see cref="FacilityPayment.Vouchers"/> 那一组）不受影响。
+        /// 例：「城邦工业区」每有 1 种非彩色设施少付 1 源岩。
+        /// 公开给界面用：建设第一步显示的「选项一 · 资源」要写真实费用，不能写没折算过的原价。
+        /// </summary>
+        public static IReadOnlyList<RewardOp> EffectiveResourceCost(GameState state, int seat, FacilityCardDef card)
+        {
+            if (card.CostModifier == null) return card.ResourceCost;
+
+            int discount = CityPanelQuery.Count(state, seat, card.CostModifier.Source) * card.CostModifier.PerCount;
+            if (discount <= 0) return card.ResourceCost;
+
+            var cost = new List<RewardOp>(card.ResourceCost.Count);
+            bool discounted = false;
+            foreach (RewardOp op in card.ResourceCost)
+            {
+                if (!discounted && op.Kind == RewardKind.PayResource && op.Resource == card.CostModifier.Resource)
+                {
+                    cost.Add(RewardOp.Pay(op.Resource, Math.Max(0, op.Amount - discount)));
+                    discounted = true;
+                    continue;
+                }
+                cost.Add(op);
+            }
+            return cost;
+        }
+
         private void Pay(GameState state, PlayerState player, FacilityCardDef card)
         {
             if (IsFreeToBuild(card)) return;
+            if (ActionRules.IgnoresCosts(state)) return; // 开发者模式：不扣费
 
             if (Payment == FacilityPayment.Resources)
             {
-                foreach (RewardOp op in card.ResourceCost)
-                    player.Resources.TrySpend(op.Resource, op.Amount);
+                foreach (RewardOp op in EffectiveResourceCost(state, ActorSeat, card))
+                {
+                    if (op.Kind == RewardKind.PayVouchers)
+                    {
+                        // 资源费用列里可能混有金券成分（如「城邦工业区」的 金券2）
+                        player.Vouchers -= op.Amount;
+                    }
+                    else
+                    {
+                        player.Resources.TrySpend(op.Resource, op.Amount);
+                    }
+                }
             }
             else
             {
                 player.Vouchers -= card.VoucherCost;
-                state.SupplyVouchers += card.VoucherCost; // 与发放金券对称：付出去的金券回到供应堆
             }
         }
 

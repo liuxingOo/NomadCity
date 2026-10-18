@@ -113,7 +113,7 @@ namespace NomadCity.Core.Engine
 
         /// <summary>
         /// 按顺位发放初始资金（§4.3 步 3）：从起始玩家开始顺时针，各顺位金额由人数变体决定。
-        /// 金券是从资源供应堆取用，因此同步从 <see cref="GameState.SupplyVouchers"/> 扣除。
+        /// 金券没有数量限制（可用替代品），发出去即可，不必从任何供应堆扣除。
         /// </summary>
         public static void DealInitialFunds(GameState state, int firstPlayerSeat)
         {
@@ -125,7 +125,6 @@ namespace NomadCity.Core.Engine
                 PlayerState player = state.Players[seat];
                 int vouchers = variant.InitialVouchers(order);
                 player.Vouchers += vouchers;
-                state.SupplyVouchers -= vouchers;
                 player.Score += variant.InitialBonusScore(order);
                 seat = state.NextSeat(seat);
             }

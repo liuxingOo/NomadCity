@@ -64,10 +64,20 @@ namespace NomadCity.Core.Engine
         /// <summary>
         /// 一名玩家完成一个「主要行动」后调用：轮到顺时针下一位；
         /// 一轮走完则轮次 +1；第 2 轮也走完就自动进入采集阶段（规则规格 6.1）。
+        ///
+        /// 「源石工业中枢」特殊行动给当前玩家追加的「额外主要行动」先在这里消费：
+        /// 还有余额就递减并**保持当前座位**，让该玩家在本轮内紧接着继续行动（§6.3f）。
         /// </summary>
         public static void CompletePlayerAction(GameState state)
         {
             if (state.Phase != TurnPhase.PlayerActions) return;
+
+            PlayerState actor = state.Player(state.ActiveSeat);
+            if (actor.ExtraMainActionsThisTurn > 0)
+            {
+                actor.ExtraMainActionsThisTurn--;
+                return; // 该玩家本轮还能继续行动，不推进座位
+            }
 
             state.ActiveSeat = state.NextSeat(state.ActiveSeat);
             if (state.ActiveSeat != state.FirstPlayerSeat) return; // 这一轮还没走完
@@ -88,12 +98,17 @@ namespace NomadCity.Core.Engine
             if (state.TurnNumber >= TotalTurns)
             {
                 state.IsGameOver = true;
+                state.PendingStartMarkerSeat = -1;
                 FinalScoring.Settle(state);
                 return;
             }
 
             state.TurnNumber++;
-            state.FirstPlayerSeat = state.NextSeat(state.FirstPlayerSeat); // 起始玩家顺时针传递（规则规格 8）
+            // 起始玩家顺时针传递（§8）；「联邦理事会」若在本回合收尾阶段生效，则改由它指定的玩家担任。
+            state.FirstPlayerSeat = state.PendingStartMarkerSeat >= 0
+                ? state.PendingStartMarkerSeat
+                : state.NextSeat(state.FirstPlayerSeat);
+            state.PendingStartMarkerSeat = -1;
             state.ActiveSeat = state.FirstPlayerSeat;
             state.ActionRound = 1;
             state.Phase = TurnPhase.CharacterPlacement;

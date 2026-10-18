@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using NomadCity.Core.Engine;
@@ -25,11 +26,74 @@ namespace NomadCity.UI
         private FacilitySupplyPanel supplyPanel;
         private CityPanelView cityPanel;
         private CityPatternPanel patternPanel;
+        private CardPreviewPopup cardPreview;
+        private CharacterHandPanel handPanel;
+
+        /// <summary>本机玩家座位（0 起）：非建设模式下城市面板固定显示这名玩家，建设模式下改用行动玩家。</summary>
+        private int localSeat;
 
         private ActionMode mode = ActionMode.None;
 
-        /// <summary>建设（§6.4e）选中的设施供应区牌位下标；-1 表示还没选牌。</summary>
-        private int buildSupplyIndex = -1;
+        /// <summary>建设流程（§6.4e）走到哪一步；<see cref="BuildStep.NotBuilding"/> 表示不在建设。</summary>
+        private enum BuildStep
+        {
+            NotBuilding = 0, // 不在建设
+            PickCard = 1,    // L0：在设施供应区 6 张牌里选一张
+            Pay = 2,         // L1：放大卡面 + 选项一（资源）/ 选项二（金券）/ 取消建设
+            Slot = 3,        // L2：城市面板空位高亮，选一格（其他行动按钮锁死）
+            Confirm = 4,     // L3：确认弹窗「在此处建造《X》？+N 分；获得…」
+            Effect = 5,      // L4：入场效果点选（可能连锁多次，带返回键）
+        }
+
+        private BuildStep buildStep = BuildStep.NotBuilding;
+
+        /// <summary>
+        /// 建设入场效果里「要玩家点选」的收集会话（§11）：在状态副本上把效果串试跑到需要选择处就停下，
+        /// 逐个问完再正式派发。已跑完或没在收集时为 null。
+        /// </summary>
+        private EffectChoiceSession buildSession;
+
+        /// <summary>正在建设的那次选择的暂存：会话结束后照它派发建设命令。</summary>
+        private int buildSeat = -1;
+        private int buildCardId = -1;
+        private int buildSlot = -1;
+        private FacilityPayment buildPayment = FacilityPayment.None;
+
+        /// <summary>角色牌使用流程（§6.3a / §10.1）走到哪一步。</summary>
+        private enum CharacterStep
+        {
+            None = 0,     // 不在使用角色牌
+            Effect = 1,   // 正在收集这次效果里要玩家点选的节点（策略 / 计谋）
+            Second = 2,   // 起始玩家用掉一种效果后，等玩家决定「继续用另一种 / 结束」
+        }
+
+        private CharacterStep characterStep = CharacterStep.None;
+
+        /// <summary>正在使用角色牌的那名玩家与那张牌。</summary>
+        private int characterSeat = -1;
+        private int characterCardId = -1;
+
+        /// <summary>这次要发动的是策略还是计谋。</summary>
+        private CharacterEffectKind characterEffect;
+
+        /// <summary>角色牌效果里「要玩家点选」的收集会话；已跑完或没在收集时为 null。</summary>
+        private EffectChoiceSession characterSession;
+
+        /// <summary>使用城市样式特殊行动（§6.3f）走到哪一步。</summary>
+        private enum SpecialStep
+        {
+            None = 0,      // 不在使用特殊行动
+            PickCard = 1,  // 从场上的样式牌里点一张（会付费用、结算效果）
+            Effect = 2,    // 正在收集这次特殊行动里要玩家点选的节点（可能连锁多次，带返回键）
+        }
+
+        private SpecialStep specialStep = SpecialStep.None;
+
+        /// <summary>这次要使用特殊行动的城市样式牌 id。</summary>
+        private int specialCardId = -1;
+
+        /// <summary>特殊行动效果里「要玩家点选」的收集会话；已跑完或没在收集时为 null。</summary>
+        private EffectChoiceSession specialSession;
 
         /// <summary>调度模式下已选中的起点（尚未组成一步）。</summary>
         private InfluenceSlotRef? relocateFrom;
@@ -77,10 +141,20 @@ namespace NomadCity.UI
         /// <summary>这张事件卡是不是「探索」（§6.4c）翻出来的 —— 是的话结算完选项还要补上第三步。</summary>
         private bool pendingEventFromExplore;
 
+        /// <summary>正在结算的那个选项下标；结算完回到 -1。</summary>
+        private int pendingEventOption = -1;
+
+        /// <summary>这次选项要不要执行条件段（§11.2）；玩家点「放弃效果」时为 false。</summary>
+        private bool pendingEventAcceptCost = true;
+
+        /// <summary>事件选项效果的试跑会话（和建设 L4 同一套机制）：候选落点要玩家点地图或弹窗来答。</summary>
+        private EffectChoiceSession eventSession;
+
         public void Initialize(GameEngine engine, MapStateRenderer renderer, MapPointerInput pointerInput,
             GameHud hud, ActionPanel panel, EventCardPanel eventCardPanel = null, ChoicePopup choicePopup = null,
             FacilitySupplyPanel supplyPanel = null, CityPanelView cityPanel = null,
-            CityPatternPanel patternPanel = null)
+            CityPatternPanel patternPanel = null, CardPreviewPopup cardPreview = null,
+            CharacterHandPanel handPanel = null, int localSeat = 0)
         {
             this.engine = engine;
             this.renderer = renderer;
@@ -92,6 +166,9 @@ namespace NomadCity.UI
             this.supplyPanel = supplyPanel;
             this.cityPanel = cityPanel;
             this.patternPanel = patternPanel;
+            this.cardPreview = cardPreview;
+            this.handPanel = handPanel;
+            this.localSeat = localSeat;
 
             if (engine != null)
             {
@@ -110,12 +187,14 @@ namespace NomadCity.UI
                 panel.CommitRequested += OnCommitRequested;
                 panel.CancelRequested += OnCancelRequested;
                 panel.AdvancePhaseRequested += OnAdvancePhaseRequested;
+                panel.CharacterCardRequested += OnCharacterCardRequested;
             }
 
             if (eventCardPanel != null) eventCardPanel.OptionSelected += OnEventOptionSelected;
             if (supplyPanel != null) supplyPanel.CardClicked += OnSupplyCardClicked;
             if (cityPanel != null) cityPanel.SlotClicked += OnCitySlotClicked;
             if (patternPanel != null) patternPanel.CardClicked += OnPatternCardClicked;
+            if (handPanel != null) handPanel.CardClicked += OnHandCardClicked;
 
             if (hud != null) hud.Bind(engine);
 
@@ -142,12 +221,14 @@ namespace NomadCity.UI
                 panel.CommitRequested -= OnCommitRequested;
                 panel.CancelRequested -= OnCancelRequested;
                 panel.AdvancePhaseRequested -= OnAdvancePhaseRequested;
+                panel.CharacterCardRequested -= OnCharacterCardRequested;
             }
 
             if (eventCardPanel != null) eventCardPanel.OptionSelected -= OnEventOptionSelected;
             if (supplyPanel != null) supplyPanel.CardClicked -= OnSupplyCardClicked;
             if (cityPanel != null) cityPanel.SlotClicked -= OnCitySlotClicked;
             if (patternPanel != null) patternPanel.CardClicked -= OnPatternCardClicked;
+            if (handPanel != null) handPanel.CardClicked -= OnHandCardClicked;
         }
 
         // —— 引擎事件 ——
@@ -189,11 +270,11 @@ namespace NomadCity.UI
         {
             if (engine == null) return;
 
-            // 「路费付给谁」的小选择窗开着时不许换行动：换行动会清掉这次的探索计划，
-            // 弹窗却还留在屏幕上，之后再点它的选项，答案会落进一个已经没有主的流程里。
+            // 「路费付给谁」「入场效果挑一个」这类小选择窗开着时不许换行动：换行动会清掉这次的探索计划或
+            // 建设的暂存，弹窗却还留在屏幕上，之后再点它的选项，答案会落进一个已经没有主的流程里。
             if (choicePopup != null && choicePopup.IsVisible)
             {
-                SetStatus("请先选完「路费付给谁」。");
+                SetStatus("请先答完当前弹出的选择。");
                 return;
             }
 
@@ -220,8 +301,8 @@ namespace NomadCity.UI
         {
             if (engine == null) return;
 
-            // 「路费付给谁」的小选择窗还开着时不许再点「确认」：否则会重跑一遍 CommitExplore，
-            // 把队列清空重建、弹窗被同一个问题覆盖，看起来就是「点了确认没反应／选项一闪就没了」。
+            // 「路费付给谁」「入场效果挑一个」这类小选择窗还开着时不许再点「确认」：
+            // 否则会重跑一遍 CommitExplore，把队列清空重建、弹窗被同一个问题覆盖，看起来就是「点了确认没反应／选项一闪就没了」。
             if (choicePopup != null && choicePopup.IsVisible) return;
 
             // 探索的「确认」= 用选好的目标点与航道正式执行探索（之后翻牌、选选项、补放影响力）。
@@ -244,15 +325,61 @@ namespace NomadCity.UI
                 SetMode(ActionMode.None);
         }
 
-        /// <summary>取消：退出当前行动，并丢弃已做的选点（含调度已暂存的步骤）。</summary>
+        /// <summary>取消：退出当前行动，并丢弃已做的选点（含调度已暂存的步骤、建设的半程）。</summary>
         private void OnCancelRequested()
         {
             // 小选择窗开着时，「取消」只作用于那个窗口：否则会把正在进行的探索整段作废，
             // 而窗口还留在屏幕上，看上去像「点了取消却什么都没发生」。
             if (choicePopup != null && choicePopup.IsVisible)
             {
-                SetStatus("请先选完「路费付给谁」（要放弃这次探索就点那个窗口的取消）。");
+                SetStatus("请先答完当前弹出的选择（要放弃这次探索就点那个窗口的取消）。");
                 return;
+            }
+
+            // 事件选项的返回键（事件卡已最小化、正等玩家点地图时）：退掉最近一个答案重问；
+            // 退无可退就回到事件卡，让玩家改选别的选项。
+            if (eventSession != null)
+            {
+                if (eventSession.Back()) ContinueEventChoices();
+                else BackToEventCard();
+                return;
+            }
+
+            // 角色牌效果的「取消」= 返回键：退掉最近一个答案；退无可退就放弃这次使用（牌仍在盖放位）。
+            if (characterSession != null)
+            {
+                if (characterSession.Back()) ContinueCharacterChoices();
+                else ExitCharacterFlow("已返回，牌还在盖放位；可以重新点「使用角色牌」。");
+                return;
+            }
+
+            // 城市样式特殊行动的「取消」= 返回键：退掉最近一个答案；退无可退就放弃这次使用（标记未动、费用未扣）。
+            if (specialSession != null)
+            {
+                if (specialSession.Back()) ContinueSpecialChoices();
+                else ExitSpecialFlow("已返回，没有使用任何城市样式特殊行动。");
+                return;
+            }
+
+            // 建设的「取消」= 返回键：逐层往回退一层，不撤销引擎状态（所有选择都在派发命令前完成）。
+            if (mode == ActionMode.Build && buildStep != BuildStep.NotBuilding && buildStep != BuildStep.PickCard)
+            {
+                switch (buildStep)
+                {
+                    case BuildStep.Pay:
+                        BackToPickCard();
+                        return;
+                    case BuildStep.Slot:
+                        BackToBuildPay();
+                        return;
+                    case BuildStep.Confirm:
+                        EnterBuildSlot();
+                        return;
+                    case BuildStep.Effect:
+                        if (buildSession != null && buildSession.Back()) ContinueBuildChoices();
+                        else BackToBuildConfirm();
+                        return;
+                }
             }
 
             if (mode == ActionMode.None) return;
@@ -268,7 +395,7 @@ namespace NomadCity.UI
             // 同上：还有待回答的小选择窗时不许推进阶段，否则这次探索会被整段丢弃。
             if (choicePopup != null && choicePopup.IsVisible)
             {
-                SetStatus("请先选完「路费付给谁」。");
+                SetStatus("请先答完当前弹出的选择。");
                 return;
             }
 
@@ -283,12 +410,25 @@ namespace NomadCity.UI
             if (engine == null) return;
             GameState state = engine.State;
 
+            // 事件选项里的「点地图」选择（与建设 L4 / 主要行动同源）。此时事件卡是最小化状态，
+            // 所以必须挡在下面「事件还没结算完」的守卫前面。
+            if (eventSession != null && HandleEventMapPick(hit)) return;
+
+            // 角色牌效果里的「点地图」选择（与部署 / 调度 / 城市移动同源）。
+            if (characterSession != null && HandleCharacterMapPick(hit)) return;
+
+            // 城市样式特殊行动效果里的「点地图」选择（与部署 / 调度 / 城市移动同源）。
+            if (specialSession != null && HandleSpecialMapPick(hit)) return;
+
             // 事件卡弹窗还开着（展开或最小化）时，地图点击一律忽略 ——
             // 事件还没结算完就不该去点资源点（最小化只是为了方便看地图，不是放弃结算）。
             if (eventCardPanel != null && eventCardPanel.IsVisible) return;
 
             // 小选择弹窗（如「路费付给谁」）开着时同理，先把它答完。
             if (choicePopup != null && choicePopup.IsVisible) return;
+
+            // 建设 L4 的「点地图」选择：与部署 / 调度 / 城市移动同源，直接点地图上的合法位置作答。
+            if (mode == ActionMode.Build && buildStep == BuildStep.Effect && HandleBuildMapPick(hit)) return;
 
             // 开局入场（§4.3）：第 1 回合的角色牌盖放阶段，点绿色资源点本体即为「决定初始资源点」。
             // 此时还没有行动模式，所以放在最前面单独处理。
@@ -373,25 +513,190 @@ namespace NomadCity.UI
         }
 
         /// <summary>
-        /// 玩家点了卡面上的某个选项：派发结算命令，把结算简报写回 HUD 状态行，然后关掉面板。
-        /// 若这张牌是「探索」翻出来的，结算完紧接着补上第三步 —— 在目标资源点放影响力（§6.4c）。
-        /// 选项的「是否支付条件段」目前一律为 true（条件段的 UI 开关尚未做，见 §11.2）。
+        /// 玩家点了卡面上的某个选项。分两步问清楚再派发结算命令：
+        /// 1) 选项含「→」条件段（§11.2）时，先问「执行条件段」还是「放弃效果」（放弃则整个效果结束）——两层都可返回；
+        /// 2) 选项效果里若还有要玩家点选的地方（如「放置影响力」），与主要行动同源：直接点地图或弹窗作答。
+        /// 结算完关掉事件卡；若这张牌是「探索」翻出来的，紧接着补第三步 —— 在目标资源点放影响力（§6.4c）。
         /// </summary>
         private void OnEventOptionSelected(int optionIndex)
         {
             if (engine == null || pendingEventNodeId < 0) return;
 
+            EventOption option = EventOptionAt(engine.State, optionIndex);
+            if (option == null) return;
+
+            pendingEventOption = optionIndex;
+
+            // 没有条件段（或没接线弹窗）就直接执行结果段。
+            if (!option.HasCost || choicePopup == null)
+            {
+                BeginEventEffects(option, acceptCost: true);
+                return;
+            }
+
+            // 条件式选项：先让玩家决定要不要做「→」前那一段；返回则什么都不做，可以改选别的选项。
+            choicePopup.Show(
+                $"这个选项要先完成：{DescribeOps(option.Cost)}\n完成之后才能拿到结果段；放弃则结束这个效果。",
+                new[] { "执行条件段", "放弃效果" }, choice =>
+                {
+                    if (choice == 0) BeginEventEffects(option, acceptCost: true);
+                    else if (choice == 1) ResolveEventOption(acceptCost: false, answers: null);
+                    else SetStatus("已返回，可以改选这张事件卡上的其它选项。");
+                });
+        }
+
+        /// <summary>当前事件卡上的第 optionIndex 个选项；越界返回 null。</summary>
+        private EventOption EventOptionAt(GameState state, int optionIndex)
+        {
+            if (state == null || pendingEventNodeId < 0) return null;
+
+            MapNodeState node = state.Map.Node(pendingEventNodeId);
+            if (node == null || node.EventCardId < 0) return null;
+            if (EventCardPanel.SpriteIndexOf(node.EventCardId) < 0) return null; // 未知号段，ICardCatalog.Event 会抛
+
+            EventCardDef card = state.Catalog.Event(node.EventCardId);
+            return optionIndex >= 0 && optionIndex < card.Options.Count ? card.Options[optionIndex] : null;
+        }
+
+        /// <summary>把一串效果单元拼成给玩家看的短句（直接用 <see cref="RewardOp.ToString"/> 的中文描述）。</summary>
+        private static string DescribeOps(IReadOnlyList<RewardOp> ops)
+        {
+            if (ops == null || ops.Count == 0) return "（无）";
+
+            var parts = new List<string>(ops.Count);
+            foreach (RewardOp op in ops) parts.Add(op.ToString());
+            return string.Join("、", parts);
+        }
+
+        /// <summary>
+        /// 在状态副本上试跑这个选项的效果：跑到需要玩家选择处就停下（点地图 / 弹窗作答），
+        /// 答案收齐后原样重放给正式命令。机制与建设 L4 完全一致（§11 效果执行器 + 确定性重放）。
+        /// </summary>
+        private void BeginEventEffects(EventOption option, bool acceptCost)
+        {
+            if (engine == null || option == null) return;
+
+            pendingEventAcceptCost = acceptCost;
+
+            // 没接线弹窗就退回自动结算，别把玩家卡在流程里。
+            if (choicePopup == null)
+            {
+                ResolveEventOption(acceptCost, answers: null);
+                return;
+            }
+
+            GameState state = engine.State;
+            int nodeId = pendingEventNodeId;
+            int seat = pendingEventSeat;
+
+            eventSession = new EffectChoiceSession(state,
+                (sandbox, choices) => EffectResolver.ExecuteOption(sandbox, seat, option, acceptCost,
+                    choices, anchorNodeId: nodeId));
+            eventSession.Advance();
+            ContinueEventChoices();
+        }
+
+        /// <summary>抛出 / 点选事件选项的下一个待答选择；退无可退就退回事件卡重选选项。</summary>
+        private void ContinueEventChoices()
+        {
+            if (eventSession == null) return;
+
+            if (eventSession.IsComplete)
+            {
+                IReadOnlyList<int> answers = eventSession.Answers;
+                eventSession = null;
+                ResolveEventOption(pendingEventAcceptCost, answers);
+                return;
+            }
+
+            ChoiceRequest request = eventSession.Pending;
+
+            // 候选是地图位置的走「点地图」：把事件卡最小化让地图可点，与部署 / 调度同源。
+            if (request.Pick != null && request.Pick.Kind != ChoicePickKind.None)
+            {
+                if (choicePopup != null && choicePopup.IsVisible) choicePopup.Hide();
+                if (eventCardPanel != null) eventCardPanel.Collapse();
+                if (panel != null) panel.SetLocked(true); // 其余行动按钮锁死，只留「取消」当返回键
+                SetStatus("请直接点地图上列出的位置作答；点「取消」可退回重选选项。");
+                return;
+            }
+
+            EffectChoiceSession session = eventSession;
+            var options = new List<string>(request.Options.Count);
+            foreach (ChoiceOption item in request.Options) options.Add(item.Label);
+
+            choicePopup.Show(request.Prompt, options, choice =>
+            {
+                if (session != eventSession) return; // 会话已作废（例如中途换了行动）
+
+                if (choice >= 0)
+                {
+                    session.Answer(choice);
+                    ContinueEventChoices();
+                    return;
+                }
+
+                if (session.Back()) ContinueEventChoices();
+                else BackToEventCard();
+            });
+        }
+
+        /// <summary>退回事件卡：丢弃这次选项的收集，恢复卡面让玩家改选别的选项（不撤销引擎状态）。</summary>
+        private void BackToEventCard()
+        {
+            eventSession = null;
+            if (choicePopup != null && choicePopup.IsVisible) choicePopup.Hide();
+            if (panel != null) panel.SetLocked(false);
+            if (eventCardPanel != null) eventCardPanel.Expand();
+            SetStatus("已返回，可以重新选择这张事件卡上的选项。");
+        }
+
+        /// <summary>事件选项里「点地图」的那一次选择：把点击翻译成选项下标（与建设 L4 共用同一段翻译）。</summary>
+        private bool HandleEventMapPick(MapHit hit)
+        {
+            if (eventSession == null || eventSession.IsComplete) return false;
+
+            ChoicePick pick = eventSession.Pending != null ? eventSession.Pending.Pick : null;
+            if (pick == null || pick.Kind == ChoicePickKind.None) return false;
+
+            if (!TryTranslateMapPick(pick, hit, out int index)) return true;
+
+            eventSession.Answer(index);
+            ContinueEventChoices();
+            return true;
+        }
+
+        /// <summary>
+        /// 照暂存的选择派发事件结算命令，然后收尾（关面板、探索补第三步）。
+        /// <paramref name="answers"/> 为 null 表示这次选项没有要玩家点选的地方（交给引擎自动结算）。
+        /// </summary>
+        private void ResolveEventOption(bool acceptCost, IReadOnlyList<int> answers)
+        {
+            if (engine == null || pendingEventNodeId < 0) return;
+
             int seat = pendingEventSeat;
             int nodeId = pendingEventNodeId;
+            int optionIndex = pendingEventOption;
             bool fromExplore = pendingEventFromExplore;
 
-            var command = new ResolveEventOptionCommand(seat, nodeId, optionIndex, acceptCost: true);
+            IEffectChoices choices = answers == null ? null : new RecordedChoices(answers, strict: false);
+            var command = new ResolveEventOptionCommand(seat, nodeId, optionIndex, acceptCost,
+                choices: choices);
+
             if (!Dispatch(command)) return; // 结算失败时把面板留着，好让玩家换个选项重试
 
-            if (eventCardPanel != null) eventCardPanel.Hide();
+            eventSession = null;
+            if (panel != null) panel.SetLocked(false);
+            if (eventCardPanel != null)
+            {
+                eventCardPanel.Expand();
+                eventCardPanel.Hide();
+            }
+
             pendingEventSeat = -1;
             pendingEventNodeId = -1;
             pendingEventFromExplore = false;
+            pendingEventOption = -1;
 
             if (!fromExplore)
             {
@@ -721,103 +1026,385 @@ namespace NomadCity.UI
 
         // —— 建设（§6.4e）——
 
-        /// <summary>在设施牌弹窗里点了第 index 个牌位：记下来并收起弹窗，等玩家再点自己城市面板的空位。</summary>
+        /// <summary>
+        /// L0：在设施牌弹窗里点了第 index 个牌位 —— 记下这张牌与建设者，收起选牌窗口，
+        /// 进入 L1「放大卡面 + 选付费方式」。
+        /// </summary>
         private void OnSupplyCardClicked(int index)
         {
-            if (engine == null || mode != ActionMode.Build) return;
+            if (engine == null || mode != ActionMode.Build || buildStep != BuildStep.PickCard) return;
 
             GameState state = engine.State;
             int cardId = SupplyCardAt(state, index);
             if (cardId < 0) return;
 
-            buildSupplyIndex = index;
+            buildSeat = ViewSeat(state);
+            buildCardId = cardId;
 
-            // 选中即收起：弹窗和它的全屏遮罩一起收掉，把左下角的城市面板让出来给玩家点空格。
-            // 想换一张牌就再点一次「建设」（重开会清掉上次的选择）。
+            // 选中即收起：把选牌窗口让位给「放大卡面 + 选费用」这一步。
             if (supplyPanel != null) supplyPanel.SetOpen(false);
+            EnterBuildPay();
+        }
+
+        /// <summary>
+        /// L1：放大卡面 + 三个按钮 —— 选项一（资源付费）、选项二（金券付费）、取消建设（回 L0）。
+        /// 「免费」关键词或没写费用的牌不必问，直接进 L2；只有一种费用时另一个按钮自动隐藏。
+        /// </summary>
+        private void EnterBuildPay()
+        {
+            if (engine == null) return;
+
+            GameState state = engine.State;
+            FacilityCardDef card = state.Catalog.Facility(buildCardId);
+            if (card == null) return;
+
+            bool hasResources = card.ResourceCost.Count > 0;
+            bool hasVouchers = card.VoucherCost > 0;
+
+            if (card.IsFree || (!hasResources && !hasVouchers))
+            {
+                buildPayment = FacilityPayment.None;
+                EnterBuildSlot();
+                return;
+            }
+
+            if (cardPreview == null)
+            {
+                SetStatus("建设要用「卡面放大」弹窗来选付费方式，但它没接线。");
+                return;
+            }
+
+            buildStep = BuildStep.Pay;
+
+            PlayerState player = state.Player(buildSeat);
+            IReadOnlyList<RewardOp> resourceCost = BuildFacilityCommand.EffectiveResourceCost(state, buildSeat, card);
+            bool free = ActionRules.IgnoresCosts(state); // 开发者模式：不问付得起付不起
+
+            string resourceText = hasResources ? $"选项一 · 资源：{DescribeCost(resourceCost)}" : string.Empty;
+            string voucherText = hasVouchers ? $"选项二 · 金券：{card.VoucherCost} 张" : string.Empty;
+
+            cardPreview.ShowForBuild(state, buildCardId,
+                resourceText,
+                hasResources && (free || FacilityCardDef.CanPayWithResources(resourceCost, player.Resources, player.Vouchers)),
+                () =>
+                {
+                    buildPayment = FacilityPayment.Resources;
+                    FinishBuildPay();
+                },
+                voucherText, hasVouchers && (free || player.Vouchers >= card.VoucherCost),
+                () =>
+                {
+                    buildPayment = FacilityPayment.Vouchers;
+                    FinishBuildPay();
+                },
+                BackToPickCard);
 
             UpdateHint();
         }
 
-        /// <summary>点了自己城市面板的第 slot 格：需要选付费方式就弹小窗，否则直接建设。</summary>
-        private void OnCitySlotClicked(int slot)
+        /// <summary>L1 选好付费方式：收起卡面弹窗，进入 L2 选位。</summary>
+        private void FinishBuildPay()
         {
-            if (engine == null || mode != ActionMode.Build) return;
-
-            GameState state = engine.State;
-            if (buildSupplyIndex < 0)
-            {
-                SetStatus("先点「建设」在弹出的设施牌窗口里选一张要建的牌。");
-                return;
-            }
-
-            int cardId = SupplyCardAt(state, buildSupplyIndex);
-            if (cardId < 0)
-            {
-                SetStatus("刚才选的那张设施牌已经不在供应区了，请重新选一张。");
-                return;
-            }
-
-            FacilityCardDef card = state.Catalog.Facility(cardId);
-            if (card == null) return;
-
-            bool canPayResources = card.ResourceCost.Count > 0;
-            bool canPayVouchers = card.VoucherCost > 0;
-
-            // 「免费」关键词、或两种费用都没写：不用问，直接建。
-            if (card.IsFree || (!canPayResources && !canPayVouchers))
-            {
-                ExecuteBuild(state, cardId, slot, FacilityPayment.None);
-                return;
-            }
-
-            // 只有一种费用可选时也不用弹窗（41 张牌的数据录完后多半两种都有）。
-            if (!canPayResources || !canPayVouchers)
-            {
-                ExecuteBuild(state, cardId, slot,
-                    canPayResources ? FacilityPayment.Resources : FacilityPayment.Vouchers);
-                return;
-            }
-
-            if (choicePopup == null)
-            {
-                SetStatus($"《{card.Name}》有资源 / 金券两种费用，但小选择弹窗没接线，问不了付费方式。");
-                return;
-            }
-
-            var options = new List<string>
-            {
-                $"用资源支付：{DescribeCost(card.ResourceCost)}",
-                $"用金券支付：{card.VoucherCost} 张金券",
-            };
-
-            choicePopup.Show($"《{card.Name}》用哪种费用支付（§6.4e 步 1）？", options, choice =>
-            {
-                if (engine == null) return;
-
-                if (choice == 0) ExecuteBuild(engine.State, cardId, slot, FacilityPayment.Resources);
-                else if (choice == 1) ExecuteBuild(engine.State, cardId, slot, FacilityPayment.Vouchers);
-                else SetStatus("已取消这次建设。");
-            });
+            if (cardPreview != null) cardPreview.Hide();
+            EnterBuildSlot();
         }
 
-        /// <summary>派发建设命令；成功后退出建设模式并把结果写进状态行。</summary>
-        private void ExecuteBuild(GameState state, int cardId, int slot, FacilityPayment payment)
+        /// <summary>L2：收起所有弹窗，城市面板空位高亮、其他行动按钮锁死，等玩家点一格。</summary>
+        private void EnterBuildSlot()
+        {
+            buildStep = BuildStep.Slot;
+
+            if (cardPreview != null) cardPreview.Hide();
+            if (choicePopup != null && choicePopup.IsVisible) choicePopup.Hide();
+            if (panel != null) panel.SetLocked(true);
+
+            RefreshFacilityViews();
+            UpdateHint();
+        }
+
+        /// <summary>L2 的返回键：回到 L1 重选付费方式；免建的牌没有 L1，直接回 L0。</summary>
+        private void BackToBuildPay()
+        {
+            if (buildPayment == FacilityPayment.None)
+            {
+                BackToPickCard();
+                return;
+            }
+
+            EnterBuildPay();
+        }
+
+        /// <summary>退回 L0 重选要建的设施牌（整条流程复位；已收集的入场效果答案一并丢弃）。</summary>
+        private void BackToPickCard()
+        {
+            if (cardPreview != null) cardPreview.Hide();
+            if (choicePopup != null && choicePopup.IsVisible) choicePopup.Hide();
+            if (panel != null) panel.SetLocked(false);
+
+            buildStep = BuildStep.PickCard;
+            buildCardId = -1;
+            buildSlot = -1;
+            buildPayment = FacilityPayment.None;
+            buildSession = null;
+
+            if (supplyPanel != null) supplyPanel.SetOpen(true);
+            RefreshFacilityViews();
+            UpdateHint();
+        }
+
+        /// <summary>点了城市面板的第 slot 格：非建设模式弹出放大卡面；L2 则记下落点并弹 L3 确认。</summary>
+        private void OnCitySlotClicked(int slot)
         {
             if (engine == null) return;
 
-            int seat = state.ActiveSeat;
-            var command = new BuildFacilityCommand(seat, cardId, slot, payment);
-            if (!Dispatch(command)) return;
+            GameState state = engine.State;
 
-            buildSupplyIndex = -1;
+            // 非建设模式：点已建成的设施 → 弹出放大卡面，方便玩家看清卡面。
+            if (mode != ActionMode.Build)
+            {
+                OpenCardPreview(state, slot);
+                return;
+            }
+
+            if (buildStep != BuildStep.Slot)
+            {
+                SetStatus(buildStep == BuildStep.Effect
+                    ? "请先答完入场效果的选择（点弹窗里的选项，或直接点地图上合法的位置）。"
+                    : "请先在弹出的窗口里选好要建的牌与付费方式。");
+                return;
+            }
+
+            buildSlot = slot;
+            EnterBuildConfirm();
+        }
+
+        /// <summary>
+        /// L3：确认弹窗「在此处建造《X》？+N 分；获得…」。确定 → L4 结算入场效果；取消 → 回 L2 选位。
+        /// 分数取自卡面（可为负），「获得」是入场效果的预览。
+        /// </summary>
+        private void EnterBuildConfirm()
+        {
+            if (engine == null) return;
+
+            GameState state = engine.State;
+            FacilityCardDef card = state.Catalog.Facility(buildCardId);
+            if (card == null) return;
+
+            buildStep = BuildStep.Confirm;
+
+            if (choicePopup == null)
+            {
+                SetStatus("建设确认弹窗没接线，直接按「确定」处理。");
+                BeginBuildEffects();
+                return;
+            }
+
+            string title = $"在此处建造《{card.Name}》？\n得分 {card.Score:+0;-0;0}；获得：{DescribeEntryEffects(card)}";
+
+            choicePopup.Show(title, new[] { "确定建造" }, choice =>
+            {
+                if (engine == null) return;
+
+                if (choice == 0) BeginBuildEffects();
+                else EnterBuildSlot();
+            });
+        }
+
+        /// <summary>
+        /// L4：先确认好了「在此处建造」，再逐个问清入场效果里要玩家点选的节点，最后正式派发建设命令。
+        /// 建到「面板正在显示的那名玩家」名下，保证建完当场就能在面板上看到（§6.4e）。
+        /// </summary>
+        private void BeginBuildEffects()
+        {
+            if (engine == null) return;
+
+            GameState state = engine.State;
+            FacilityCardDef card = state.Catalog.Facility(buildCardId);
+            IReadOnlyList<RewardOp> effects = card != null ? card.EntryEffects : null;
+
+            buildStep = BuildStep.Effect;
+
+            // 没有入场效果（或没接线弹窗）就直接建，省掉一轮无意义的会话。
+            if (effects == null || effects.Count == 0 || choicePopup == null)
+            {
+                DispatchBuild(Array.Empty<int>());
+                return;
+            }
+
+            // 在状态副本上试跑整串入场效果：跑到需要选择处就停下，等玩家点完再继续。
+            // 部分效果会连锁（二选一里再挑落点、探索翻出的事件选项、结算他牌的入场效果……），
+            // 每轮都从副本重跑，所以后面几步的候选清单永远是基于前面答案的真实状态（§11）。
+            buildSession = new EffectChoiceSession(state,
+                (sandbox, choices) => EffectResolver.Execute(sandbox, buildSeat, effects, choices));
+            buildSession.Advance();
+            ContinueBuildChoices();
+        }
+
+        /// <summary>
+        /// 抛出 / 点选入场效果的下一个待答选择：
+        /// 候选是地图位置（放 / 移 / 拿走影响力、选资源点）的走「点地图」，与主要行动同源；
+        /// 其余抽象选项走弹窗。两边的返回键都是「退回上一个选择」，退无可退回 L3 确认。
+        /// </summary>
+        private void ContinueBuildChoices()
+        {
+            if (buildSession == null) return;
+
+            if (buildSession.IsComplete)
+            {
+                IReadOnlyList<int> answers = buildSession.Answers;
+                buildSession = null;
+                DispatchBuild(answers);
+                return;
+            }
+
+            ChoiceRequest request = buildSession.Pending;
+
+            if (request.Pick != null && request.Pick.Kind != ChoicePickKind.None)
+            {
+                // 「同源」交互：与部署 / 调度 / 城市移动一样直接点地图上的合法位置，不再列一长串按钮。
+                if (choicePopup != null && choicePopup.IsVisible) choicePopup.Hide();
+                UpdateHint();
+                return;
+            }
+
+            var options = new List<string>(request.Options.Count);
+            foreach (ChoiceOption option in request.Options) options.Add(option.Label);
+
+            EffectChoiceSession session = buildSession;
+            choicePopup.Show(request.Prompt, options, choice =>
+            {
+                if (session != buildSession) return; // 会话已被作废（例如中途换了行动）
+
+                if (choice >= 0)
+                {
+                    session.Answer(choice);
+                    ContinueBuildChoices();
+                    return;
+                }
+
+                // 返回键（弹窗上的取消）：退掉最近一个答案；退无可退就回 L3 确认。
+                if (session.Back()) ContinueBuildChoices();
+                else BackToBuildConfirm();
+            });
+        }
+
+        /// <summary>L4 退到 L3：丢弃本次入场效果的收集，重新显示确认弹窗（再确定会重新开始收集）。</summary>
+        private void BackToBuildConfirm()
+        {
+            buildSession = null;
+            EnterBuildConfirm();
+        }
+
+        /// <summary>
+        /// 「点地图」时把点击翻译成候选清单里的下标：与主要行动（部署 / 调度 / 城市移动 / 探索）同源，
+        /// 建设 L4 与事件选项共用这一段。候选以外的位置点不出答案，只给一句提示（不打断流程）。
+        /// 返回 false 表示这次点击不在候选之列（提示已写进状态行）。
+        /// </summary>
+        private bool TryTranslateMapPick(ChoicePick pick, MapHit hit, out int index)
+        {
+            index = -1;
+            if (pick == null || pick.Kind == ChoicePickKind.None) return false;
+
+            if (pick.Kind == ChoicePickKind.InfluenceSlot)
+            {
+                if (!hit.IsSlot)
+                {
+                    SetStatus("这里不是合法候选，请点击地图上列出的那些影响力空格。");
+                    return false;
+                }
+
+                for (int i = 0; i < pick.Slots.Count; i++)
+                {
+                    if (pick.Slots[i].Equals(hit.Slot))
+                    {
+                        index = i;
+                        return true;
+                    }
+                }
+            }
+            else
+            {
+                if (hit.Kind != MapHitKind.NodeBody)
+                {
+                    SetStatus("这里不是合法候选，请点击地图上的资源点本体。");
+                    return false;
+                }
+
+                for (int i = 0; i < pick.NodeIds.Count; i++)
+                {
+                    if (pick.NodeIds[i] == hit.NodeId)
+                    {
+                        index = i;
+                        return true;
+                    }
+                }
+            }
+
+            SetStatus("这个位置不在本次的候选项里，请点引导文字里列出的那些。");
+            return false;
+        }
+
+        /// <summary>建设 L4 里「点地图」的那一次选择：照候选清单把点击翻译成选项下标。</summary>
+        private bool HandleBuildMapPick(MapHit hit)
+        {
+            if (buildSession == null || buildSession.IsComplete) return false;
+
+            ChoicePick pick = buildSession.Pending != null ? buildSession.Pending.Pick : null;
+            if (pick == null || pick.Kind == ChoicePickKind.None) return false;
+
+            if (!TryTranslateMapPick(pick, hit, out int index)) return true; // 不在候选之列，已提示
+
+            buildSession.Answer(index);
+            ContinueBuildChoices();
+            return true;
+        }
+
+        /// <summary>照暂存的选择派发建设命令；成功后退出建设模式并把结果写进状态行。</summary>
+        private void DispatchBuild(IReadOnlyList<int> answers)
+        {
+            if (engine == null) return;
+
+            // 把玩家点出来的答案交给引擎重放一遍：引擎是确定性的，正式执行会得到与试跑一致的结果。
+            var command = new BuildFacilityCommand(buildSeat, buildCardId, buildSlot, buildPayment,
+                new RecordedChoices(answers, strict: false));
+
+            if (!Dispatch(command))
+            {
+                // 引擎拒绝（费用不够、与「唯一」冲突、格子被占……）：原因已写进状态行，退回 L3 让玩家改。
+                BackToBuildConfirm();
+                return;
+            }
+
+            int seat = buildSeat;
+            int cardId = buildCardId;
+            int slot = buildSlot;
             SetMode(ActionMode.None);
 
             string suffix = command.Report != null && command.Report.Entries.Count > 0
                 ? $"；入场效果：{command.Report.Describe()}"
                 : string.Empty;
-            SetStatus($"[建设] 玩家{seat + 1} 建造了《{FacilityName(state, cardId)}》" +
+            SetStatus($"[建设] 玩家{seat + 1} 建造了《{FacilityName(engine.State, cardId)}》" +
                       $"，放在城市面板第 {slot + 1} 格{suffix}");
+        }
+
+        /// <summary>点已建成的设施格子时弹出放大卡面；空格子不响应。取牌座位必须与所显示的面板一致。</summary>
+        private void OpenCardPreview(GameState state, int slot)
+        {
+            int seat = ViewSeat(state);
+            PlayerState player = seat >= 0 && seat < state.Players.Count ? state.Players[seat] : null;
+
+            int cardId = player != null && slot >= 0 && slot < player.CityPanelSlots.Length
+                ? player.CityPanelSlots[slot]
+                : -1;
+            if (cardId < 0) return;
+
+            if (cardPreview == null)
+            {
+                SetStatus("卡面放大弹窗没接线，看不到放大图。");
+                return;
+            }
+
+            cardPreview.Show(state, cardId);
         }
 
         /// <summary>设施供应区第 index 个牌位上的设施牌 id；没有则 -1。</summary>
@@ -839,23 +1426,83 @@ namespace NomadCity.UI
             return string.Join("、", parts);
         }
 
+        /// <summary>建设 L3 确认弹窗里那句「获得：…」：把这张牌的入场效果翻成人话（复用 RewardOp 自带的描述）。</summary>
+        private static string DescribeEntryEffects(FacilityCardDef card)
+        {
+            if (card == null || card.EntryEffects.Count == 0) return "无入场效果";
+
+            var parts = new List<string>(card.EntryEffects.Count);
+            foreach (RewardOp op in card.EntryEffects) parts.Add(op.ToString());
+            return string.Join("、", parts);
+        }
+
         // —— 宣告城市样式（§6.3b / §6.5b）——
 
         /// <summary>
-        /// 在样式牌弹窗里点了第 index 张牌：派发宣告命令，引擎自动挑出第一组合法摆法
-        /// （条件可旋转、不可翻转，§10.2）。成功就收起弹窗，并把「用了城市面板哪几格 + 旋转角度」写进状态行；
-        /// 失败时弹窗留着，好让玩家换一张样式牌重试（原因由引擎给出，如「凑不出条件」或「条件还没录入」）。
+        /// 在样式牌弹窗里点了第 index 张牌：先算出这张牌的所有合法摆法（条件可旋转、不可翻转，§10.2）。
+        /// 只有一组摆法就直接宣告；有多组就先让玩家挑用哪几格 —— 同一设施只能用一次（§6.5b 步 1），
+        /// 挑哪几格会影响后面还能宣告哪些样式，所以这是玩家的权利，不能替玩家定。
+        /// 失败时弹窗留着，好让玩家换一张样式牌重试（原因由引擎给出，如「凑不出条件」）。
         /// </summary>
         private void OnPatternCardClicked(int index)
+        {
+            if (engine == null) return;
+
+            // 特殊行动（§6.3f）：点样式牌 = 选要用哪张牌解锁的特殊行动，不用凑条件，直接进收费用 + 结算效果。
+            if (mode == ActionMode.SpecialAction)
+            {
+                // 正在逐项收集这次特殊行动要玩家点选的东西时，不许换牌：换了会把半程的答案丢掉。
+                if (specialSession != null)
+                {
+                    SetStatus("请先答完当前特殊行动要你点选的选择。");
+                    return;
+                }
+
+                GameState patternState = engine.State;
+                if (index < 0 || index >= patternState.CityPatternCards.Count) return;
+                BeginSpecialAction(patternState.CityPatternCards[index]);
+                return;
+            }
+
+            if (mode != ActionMode.Declare) return;
+
+            GameState state = engine.State;
+            int cardId = state.CityPatternCards[index];
+            CityPatternCardDef card = state.Catalog.CityPattern(cardId);
+
+            List<PatternMatch> matches = card.HasCondition
+                ? CityPanelQuery.FindAll(state.Player(state.ActiveSeat), state.Catalog, card.Condition)
+                : new List<PatternMatch>();
+
+            // 凑不出（或条件还没录入）就直接派发，让引擎给出准确原因；
+            // 只有一组摆法也不必问，直接用它。
+            if (matches.Count <= 1 || choicePopup == null)
+            {
+                DeclarePatternWithPlacement(cardId, matches.Count > 1 ? 0 : -1);
+                return;
+            }
+
+            var labels = new List<string>(matches.Count);
+            for (int i = 0; i < matches.Count; i++)
+                labels.Add($"摆法 {i + 1}：{DescribePatternSlots(matches[i])}（旋转 {matches[i].RotationDegrees}°）");
+
+            choicePopup.Show(
+                $"《{PatternName(state, cardId)}》有 {matches.Count} 组摆法，你想用哪几格？\n（用过的设施不能再用于下一次宣告）",
+                labels, choice =>
+                {
+                    if (choice >= 0) DeclarePatternWithPlacement(cardId, choice);
+                    else SetStatus("已返回，可以重新选择要宣告的城市样式牌。");
+                });
+        }
+
+        /// <summary>照选定的摆法派发宣告命令，并把「用了哪几格 + 旋转角度」写进状态行。</summary>
+        private void DeclarePatternWithPlacement(int cardId, int placementIndex)
         {
             if (engine == null || mode != ActionMode.Declare) return;
 
             GameState state = engine.State;
-            if (index < 0 || index >= state.CityPatternCards.Count) return;
-
-            int cardId = state.CityPatternCards[index];
-            var command = new DeclareCityPatternCommand(state.ActiveSeat, cardId);
-            if (!Dispatch(command)) return;
+            var command = new DeclareCityPatternCommand(state.ActiveSeat, cardId, placementIndex);
+            if (!Dispatch(command)) return; // 失败时弹窗留着，好让玩家换一张样式牌重试
 
             int seat = state.ActiveSeat;
             string slots = DescribePatternSlots(command.Match);
@@ -884,6 +1531,442 @@ namespace NomadCity.UI
         {
             CityPatternCardDef card = state.Catalog.CityPattern(cardId);
             return card != null ? card.ToString() : $"样式牌 {cardId}";
+        }
+
+        // —— 使用城市样式特殊行动（§6.3f / §10.2-4）——
+
+        /// <summary>
+        /// 在样式牌弹窗里点了某张牌：这张牌解锁的特殊行动要收费用、结算效果，
+        /// 其中可能有要玩家点选的节点（放置 / 移动影响力、自由分配支付……）。
+        /// 先在状态副本上把「费用 + 效果」试跑到需要选择处就停下，逐个问完再正式派发（与建设 L4 / 角色牌同源）。
+        /// 收集期间锁住其他行动按钮，只留「取消」当返回键。
+        /// </summary>
+        private void BeginSpecialAction(int cardId)
+        {
+            if (engine == null) return;
+
+            GameState state = engine.State;
+            CityPatternCardDef card = state.Catalog.CityPattern(cardId);
+            if (card == null || !card.HasSpecialAction)
+            {
+                SetStatus($"《{PatternName(state, cardId)}》的特殊行动还没录入，暂时无法使用。");
+                return;
+            }
+
+            specialCardId = cardId;
+            specialStep = SpecialStep.Effect;
+
+            IReadOnlyList<RewardOp> cost = card.SpecialActionCost;
+            IReadOnlyList<RewardOp> effects = card.SpecialActionEffects;
+
+            if (panel != null) panel.SetLocked(true);
+
+            // 没有要玩家点选的选择（或没接线弹窗）就直接派发，省掉一轮无意义的会话。
+            if (choicePopup == null)
+            {
+                DispatchSpecialAction(Array.Empty<int>());
+                return;
+            }
+
+            int seat = state.ActiveSeat;
+            specialSession = new EffectChoiceSession(state, (sandbox, choices) =>
+            {
+                // 与命令同款：先记「当前特殊行动所在样式牌」，供 PlaceInfluencePerPatternMarkers 取计数来源。
+                int previous = sandbox.ActiveSpecialActionPatternId;
+                sandbox.ActiveSpecialActionPatternId = cardId;
+                EffectResolver.Execute(sandbox, seat, cost, choices);
+                EffectReport report = EffectResolver.Execute(sandbox, seat, effects, choices);
+                sandbox.ActiveSpecialActionPatternId = previous;
+                return report;
+            });
+            specialSession.Advance();
+            ContinueSpecialChoices();
+        }
+
+        /// <summary>抛出 / 点选特殊行动的下一个待答选择：点地图的候选走「点地图」，其余走弹窗（带返回键）。</summary>
+        private void ContinueSpecialChoices()
+        {
+            if (specialSession == null) return;
+
+            if (specialSession.IsComplete)
+            {
+                IReadOnlyList<int> answers = specialSession.Answers;
+                specialSession = null;
+                DispatchSpecialAction(answers);
+                return;
+            }
+
+            ChoiceRequest request = specialSession.Pending;
+
+            if (request.Pick != null && request.Pick.Kind != ChoicePickKind.None)
+            {
+                // 「同源」交互：与部署 / 调度 / 城市移动一样直接点地图上的合法位置，不再列一长串按钮。
+                if (choicePopup != null && choicePopup.IsVisible) choicePopup.Hide();
+                UpdateHint();
+                return;
+            }
+
+            var options = new List<string>(request.Options.Count);
+            foreach (ChoiceOption option in request.Options) options.Add(option.Label);
+
+            EffectChoiceSession session = specialSession;
+            choicePopup.Show(request.Prompt, options, choice =>
+            {
+                if (session != specialSession) return; // 会话已被作废（例如中途换了行动）
+
+                if (choice >= 0)
+                {
+                    session.Answer(choice);
+                    ContinueSpecialChoices();
+                    return;
+                }
+
+                // 返回键：退掉最近一个答案；退无可退就放弃这次使用（标记未动、费用未扣）。
+                if (session.Back()) ContinueSpecialChoices();
+                else ExitSpecialFlow("已返回，没有使用任何城市样式特殊行动。");
+            }, request.AllowCancel);
+        }
+
+        /// <summary>特殊行动效果里「点地图」的那一次选择：照候选清单把点击翻译成选项下标。</summary>
+        private bool HandleSpecialMapPick(MapHit hit)
+        {
+            if (specialSession == null || specialSession.IsComplete) return false;
+
+            ChoicePick pick = specialSession.Pending != null ? specialSession.Pending.Pick : null;
+            if (pick == null || pick.Kind == ChoicePickKind.None) return false;
+
+            if (!TryTranslateMapPick(pick, hit, out int index)) return true; // 不在候选之列，已提示
+
+            specialSession.Answer(index);
+            ContinueSpecialChoices();
+            return true;
+        }
+
+        /// <summary>照收集到的答案派发「使用城市样式特殊行动」命令，并把结出的效果写进状态行。</summary>
+        private void DispatchSpecialAction(IReadOnlyList<int> answers)
+        {
+            if (engine == null) return;
+
+            GameState state = engine.State;
+            int seat = state.ActiveSeat;
+            int cardId = specialCardId;
+
+            var command = new UsePatternSpecialActionCommand(seat, cardId,
+                new RecordedChoices(answers, strict: false));
+
+            if (!Dispatch(command))
+            {
+                // 引擎拒绝（没宣告过 / 牌上标记不可用 / 本回合已用过……）：原因已写进状态行，
+                // 回到「选牌」这一步，让玩家换一张样式牌重试（与宣告失败时留着弹窗同理）。
+                specialSession = null;
+                specialStep = SpecialStep.PickCard;
+                specialCardId = -1;
+                if (panel != null) panel.SetLocked(false);
+                return;
+            }
+
+            string suffix = command.Report != null && command.Report.Entries.Count > 0
+                ? $"；{command.Report.Describe()}"
+                : string.Empty;
+
+            ExitSpecialFlow($"[特殊行动] 玩家{seat + 1} 使用了《{PatternName(state, cardId)}》的特殊行动{suffix}");
+        }
+
+        /// <summary>退出特殊行动流程：清掉收集会话、解锁其他行动按钮、收起样式牌弹窗，并可选地写一句状态。</summary>
+        private void ExitSpecialFlow(string status)
+        {
+            specialSession = null;
+            specialStep = SpecialStep.None;
+            specialCardId = -1;
+            if (panel != null) panel.SetLocked(false);
+            SetMode(ActionMode.None); // 收起样式牌弹窗
+            if (!string.IsNullOrEmpty(status)) SetStatus(status);
+        }
+
+        // —— 盖放与使用角色牌（§4.2 阶段 1 / §6.3a / §10.1）——
+
+        /// <summary>盖放阶段点手牌里的第 index 张：把它盖放到本机玩家面前（§10.1.1）。</summary>
+        private void OnHandCardClicked(int index)
+        {
+            if (engine == null) return;
+
+            GameState state = engine.State;
+            if (state.Phase != TurnPhase.CharacterPlacement)
+            {
+                SetStatus("盖放角色牌只能在回合的「角色牌盖放」阶段进行（§4.2 阶段 1）。");
+                return;
+            }
+
+            int seat = ViewSeat(state);
+            PlayerState player = state.Players[seat];
+            if (index < 0 || index >= player.HandCharacterCards.Count) return;
+
+            int cardId = player.HandCharacterCards[index];
+            if (Dispatch(new PlaceCharacterCardCommand(seat, cardId)))
+            {
+                CharacterCardDef def = state.Catalog.Character(cardId);
+                SetStatus($"[盖放] 玩家{seat + 1} 盖放了《{(def != null ? def.Name : cardId.ToString())}》。");
+            }
+        }
+
+        /// <summary>
+        /// 点了「使用角色牌」（§6.3a）：先问这张盖放牌的「策略 / 计谋」，再逐个问清效果里要玩家点选的节点。
+        /// 起始玩家用掉一种效果后接着弹「继续用另一种 / 结束」（§10.1.2）。
+        /// </summary>
+        private void OnCharacterCardRequested()
+        {
+            if (engine == null) return;
+
+            if (choicePopup != null && choicePopup.IsVisible)
+            {
+                SetStatus("请先答完当前弹出的选择。");
+                return;
+            }
+
+            GameState state = engine.State;
+
+            // 开发者模式放开阶段闸门，正常玩法只能在玩家行动阶段用。
+            if (!state.DeveloperMode && state.Phase != TurnPhase.PlayerActions)
+            {
+                SetStatus("「使用角色牌」是玩家行动阶段的快速行动——请先把阶段推进过去。");
+                return;
+            }
+
+            // 快速行动可以从任意「选了没做」的主要行动状态里直接发出：先退回 None，免得选中的部署 / 调度选点还挂着。
+            SetMode(ActionMode.None);
+
+            int seat = state.ActiveSeat;
+            if (seat < 0 || seat >= state.Players.Count)
+            {
+                SetStatus("当前没有轮到任何玩家行动。");
+                return;
+            }
+
+            PlayerState player = state.Player(seat);
+            if (player.PlacedCharacterCard < 0)
+            {
+                SetStatus("你本回合还没有盖放角色牌，无法使用（§10.1.1）。");
+                return;
+            }
+            if (player.UsedCharacterCardThisTurn)
+            {
+                SetStatus("本回合已经使用过这张角色牌了（§6.5a）。");
+                return;
+            }
+
+            CharacterCardDef def = state.Catalog.Character(player.PlacedCharacterCard);
+            if (def == null || !def.HasEffects)
+            {
+                SetStatus($"「{(def != null ? def.Name : player.PlacedCharacterCard.ToString())}」" +
+                          "的策略 / 计谋效果还没有录入。");
+                return;
+            }
+
+            if (choicePopup == null)
+            {
+                SetStatus("使用角色牌的弹窗没接线，无法选策略 / 计谋。");
+                return;
+            }
+
+            characterSeat = seat;
+            characterCardId = player.PlacedCharacterCard;
+
+            var options = new List<string>(2);
+            var kinds = new List<CharacterEffectKind>(2);
+            if (!player.UsedCharacterStrategyThisTurn)
+            {
+                options.Add($"策略 · {def.StrategyName}");
+                kinds.Add(CharacterEffectKind.Strategy);
+            }
+            if (!player.UsedCharacterTacticsThisTurn)
+            {
+                options.Add($"计谋 · {def.TacticsName}");
+                kinds.Add(CharacterEffectKind.Tactics);
+            }
+
+            choicePopup.Show($"使用《{def.Name}》的哪个效果？", options, choice =>
+            {
+                if (choice < 0 || choice >= kinds.Count)
+                {
+                    SetStatus("已取消使用角色牌。");
+                    return;
+                }
+                BeginCharacterEffect(kinds[choice]);
+            });
+        }
+
+        /// <summary>
+        /// 发动已选定的那一种效果：在状态副本上试跑整串效果，跑到需要选择处就停下，
+        /// 等玩家点完再继续（与建设 L4 / 事件选项共用同一套 <see cref="EffectChoiceSession"/>）。
+        /// 收集期间锁住其他行动按钮，只留「取消」当返回键。
+        /// </summary>
+        private void BeginCharacterEffect(CharacterEffectKind kind)
+        {
+            if (engine == null) return;
+
+            GameState state = engine.State;
+            CharacterCardDef def = state.Catalog.Character(characterCardId);
+            IReadOnlyList<RewardOp> ops = def != null ? def.OpsOf(kind) : null;
+
+            characterEffect = kind;
+            characterStep = CharacterStep.Effect;
+
+            if (panel != null) panel.SetLocked(true);
+
+            if (ops == null || ops.Count == 0 || choicePopup == null)
+            {
+                DispatchCharacterEffect(Array.Empty<int>());
+                return;
+            }
+
+            characterSession = new EffectChoiceSession(state,
+                (sandbox, choices) => EffectResolver.Execute(sandbox, characterSeat, ops, choices));
+            characterSession.Advance();
+            ContinueCharacterChoices();
+        }
+
+        /// <summary>抛出 / 点选这次角色牌效果的下一个待答选择：点地图的候选走「点地图」，其余走弹窗。</summary>
+        private void ContinueCharacterChoices()
+        {
+            if (characterSession == null) return;
+
+            if (characterSession.IsComplete)
+            {
+                IReadOnlyList<int> answers = characterSession.Answers;
+                characterSession = null;
+                DispatchCharacterEffect(answers);
+                return;
+            }
+
+            ChoiceRequest request = characterSession.Pending;
+
+            if (request.Pick != null && request.Pick.Kind != ChoicePickKind.None)
+            {
+                if (choicePopup != null && choicePopup.IsVisible) choicePopup.Hide();
+                UpdateHint();
+                return;
+            }
+
+            var options = new List<string>(request.Options.Count);
+            foreach (ChoiceOption option in request.Options) options.Add(option.Label);
+
+            EffectChoiceSession session = characterSession;
+            choicePopup.Show(request.Prompt, options, choice =>
+            {
+                if (session != characterSession) return; // 会话已被作废（例如中途换了行动）
+
+                if (choice >= 0)
+                {
+                    session.Answer(choice);
+                    ContinueCharacterChoices();
+                    return;
+                }
+
+                // 返回键：退掉最近一个答案；退无可退就放弃这次效果（牌还在盖放位，未被弃置）。
+                if (session.Back()) ContinueCharacterChoices();
+                else
+                {
+                    ExitCharacterFlow("已返回，牌还在盖放位；可以重新点「使用角色牌」。");
+                }
+            }, request.AllowCancel);
+        }
+
+        /// <summary>角色牌效果里「点地图」的那一次选择：照候选清单把点击翻译成选项下标。</summary>
+        private bool HandleCharacterMapPick(MapHit hit)
+        {
+            if (characterSession == null || characterSession.IsComplete) return false;
+
+            ChoicePick pick = characterSession.Pending != null ? characterSession.Pending.Pick : null;
+            if (pick == null || pick.Kind == ChoicePickKind.None) return false;
+
+            if (!TryTranslateMapPick(pick, hit, out int index)) return true; // 不在候选之列，已提示
+
+            characterSession.Answer(index);
+            ContinueCharacterChoices();
+            return true;
+        }
+
+        /// <summary>照收集到的答案派发「使用角色牌」命令；起始玩家用掉一种后接着问是否连用另一种。</summary>
+        private void DispatchCharacterEffect(IReadOnlyList<int> answers)
+        {
+            if (engine == null) return;
+
+            var command = new UseCharacterCardCommand(characterSeat, characterEffect,
+                new RecordedChoices(answers, strict: false));
+
+            if (!Dispatch(command))
+            {
+                // 引擎拒绝（未盖放 / 已用过 / 非起始玩家连用……）：原因已写进状态行。
+                ExitCharacterFlow(null);
+                return;
+            }
+
+            CharacterCardDef def = engine.State.Catalog.Character(characterCardId);
+            string effectName = def != null ? def.NameOf(characterEffect) : characterEffect.ToString();
+            string suffix = command.Report != null && command.Report.Entries.Count > 0
+                ? $"；效果：{command.Report.Describe()}"
+                : string.Empty;
+            SetStatus($"[角色牌] 玩家{characterSeat + 1} 发动《{(def != null ? def.Name : characterCardId.ToString())}》" +
+                      $"的{effectName}{suffix}");
+
+            characterSession = null;
+
+            // 起始玩家用掉一种效果后，牌还留在盖放位等决定是否连用（§10.1.2）。
+            if (engine.State.Player(characterSeat).CharacterSecondEffectPending) BeginSecondEffectPrompt();
+            else ExitCharacterFlow(null);
+        }
+
+        /// <summary>起始玩家用掉一种效果后：问「继续用另一种 / 结束」，期间不得插入其他行动（§10.1.2）。</summary>
+        private void BeginSecondEffectPrompt()
+        {
+            if (engine == null) return;
+
+            characterStep = CharacterStep.Second;
+
+            if (choicePopup == null)
+            {
+                characterStep = CharacterStep.None;
+                SetStatus("起始玩家已用掉一种角色牌效果：再点「使用角色牌」发动另一种，或点「取消」结束。");
+                return;
+            }
+
+            choicePopup.Show(
+                "起始玩家可以按任意顺序连续发动策略与计谋；两种效果之间不能插入别的行动（§10.1.2）。",
+                new[] { "继续使用另一种效果", "结束角色牌使用" },
+                choice =>
+                {
+                    if (choice == 0)
+                    {
+                        PlayerState p = engine.State.Player(characterSeat);
+                        CharacterEffectKind other = p.UsedCharacterStrategyThisTurn
+                            ? CharacterEffectKind.Tactics
+                            : CharacterEffectKind.Strategy;
+                        BeginCharacterEffect(other);
+                    }
+                    else
+                    {
+                        EndCharacterUse();
+                    }
+                });
+        }
+
+        /// <summary>结束角色牌使用：把盖放牌移入弃牌区（§10.1.3）。</summary>
+        private void EndCharacterUse()
+        {
+            if (engine == null) return;
+
+            bool ok = Dispatch(new EndCharacterCardUseCommand(characterSeat));
+            int seat = characterSeat;
+            ExitCharacterFlow(ok ? $"[角色牌] 玩家{seat + 1} 结束使用角色牌，牌已移入弃牌区。" : null);
+        }
+
+        /// <summary>退出角色牌使用流程：清掉收集会话、解锁其他行动按钮，并可选地写一句状态。</summary>
+        private void ExitCharacterFlow(string status)
+        {
+            characterSession = null;
+            characterStep = CharacterStep.None;
+            if (panel != null) panel.SetLocked(false);
+            if (!string.IsNullOrEmpty(status)) SetStatus(status);
         }
 
         // —— 内部工具 ——
@@ -916,15 +1999,27 @@ namespace NomadCity.UI
             payeeQueue.Clear();
             RefreshExploreHighlight();
 
-            // 建设的选牌同理：换行动后原来那张牌不该还算「已选中」。
-            buildSupplyIndex = -1;
+            // 建设整条流程复位：换行动 / 建成退出后，选中的牌、落点、付费方式与收集到的答案都不该还算数。
+            buildStep = next == ActionMode.Build ? BuildStep.PickCard : BuildStep.NotBuilding;
+            buildCardId = -1;
+            buildSlot = -1;
+            buildPayment = FacilityPayment.None;
+            buildSession = null;
+            if (cardPreview != null) cardPreview.Hide();
+
+            // 特殊行动整条流程复位：换行动 / 用完退出后，选中的牌与收集到的答案都不该还算数。
+            specialStep = next == ActionMode.SpecialAction ? SpecialStep.PickCard : SpecialStep.None;
+            specialCardId = -1;
+            specialSession = null;
 
             // 设施牌弹窗不常驻：进建设模式才弹出，退出（含「取消」、建成后自动退出）就收起。
             // 宿主容器保持激活，这里只切弹窗根。
             if (supplyPanel != null) supplyPanel.SetOpen(next == ActionMode.Build);
 
-            // 城市样式牌弹窗同理（§6.3b）：进宣告模式弹出 6 张样式牌，选中一张或取消即收起。
-            if (patternPanel != null) patternPanel.SetOpen(next == ActionMode.Declare);
+            // 城市样式牌弹窗同理（§6.3b）：进宣告模式弹出 6 张样式牌，选中一张或取消即收起；
+            // 使用特殊行动（§6.3f）也要从这 6 张里点一张，所以一并弹出。
+            if (patternPanel != null)
+                patternPanel.SetOpen(next == ActionMode.Declare || next == ActionMode.SpecialAction);
 
             // 设施供应区 / 城市面板只有建设模式下可点，跟着模式一起刷新。
             RefreshFacilityViews();
@@ -933,7 +2028,11 @@ namespace NomadCity.UI
             // 否则它的回调会在这次探索作废之后才被打进来，把某个过期选择写进已经没人管的计划里。
             if (choicePopup != null && choicePopup.IsVisible) choicePopup.Hide();
 
-            if (panel != null) panel.SetMode(mode);
+            if (panel != null)
+            {
+                panel.SetLocked(false); // 退出建设（或换行动）时把「锁住其他行动」解开
+                panel.SetMode(mode);
+            }
             UpdateHint();
         }
 
@@ -954,9 +2053,23 @@ namespace NomadCity.UI
                 if (mode == ActionMode.None && IsSetupPhase(state))
                 {
                     int seat = ChooseStartNodeCommand.NextChooser(state);
+                    const string place = "先点「手牌」小标签展开手牌，再点其中一张盖放（§4.2 阶段 1）。";
                     panel.SetHint(seat < 0
-                        ? "初始资源点都决定好了——点「结束回合」进入玩家行动。"
-                        : $"轮到玩家 {seat + 1}：请点击一个绿色资源点本体作为初始资源点。");
+                        ? $"{place}初始资源点都决定好了——点「结束回合」进入玩家行动。"
+                        : $"{place}轮到玩家 {seat + 1}：请点击一个绿色资源点本体作为初始资源点。");
+                    return;
+                }
+
+                // 角色牌效果收集 / 连用确认期间，优先显示它的引导。
+                if (characterStep == CharacterStep.Effect && characterSession != null)
+                {
+                    panel.SetHint(CharacterEffectHint());
+                    return;
+                }
+
+                if (characterStep == CharacterStep.Second)
+                {
+                    panel.SetHint("角色牌：请在弹出的窗口里选「继续使用另一种效果」或「结束角色牌使用」（§10.1.2）。");
                     return;
                 }
             }
@@ -981,12 +2094,32 @@ namespace NomadCity.UI
                     panel.SetHint("请点击一个与移动城市相邻的资源点。");
                     break;
                 case ActionMode.Build:
-                    panel.SetHint(buildSupplyIndex < 0
-                        ? "建设：点窗口里的任意一张设施牌。"
-                        : "建设：请点击你城市面板上的一个空位。");
+                    switch (buildStep)
+                    {
+                        case BuildStep.Pay:
+                            panel.SetHint("建设：在放大卡面上选一种付费方式（选项一 / 选项二），或点「取消建设」重新选牌。");
+                            break;
+                        case BuildStep.Slot:
+                            panel.SetHint("建设：请点击你城市面板上亮起来的一个空位（点「取消」返回上一步）。");
+                            break;
+                        case BuildStep.Confirm:
+                            panel.SetHint("建设：确认弹窗里点「确定建造」，或点「取消」返回选位。");
+                            break;
+                        case BuildStep.Effect:
+                            panel.SetHint(BuildEffectHint());
+                            break;
+                        default:
+                            panel.SetHint("建设：点窗口里的任意一张设施牌。");
+                            break;
+                    }
                     break;
                 case ActionMode.Declare:
                     panel.SetHint("宣告城市样式：请从弹出的 6 张样式牌里点一张（引擎会自动匹配组合）。");
+                    break;
+                case ActionMode.SpecialAction:
+                    panel.SetHint(specialStep == SpecialStep.Effect
+                        ? SpecialEffectHint()
+                        : "特殊行动：请从弹出的 6 张样式牌里点一张——付费用并结算它解锁的特殊行动（§6.3f）。");
                     break;
                 case ActionMode.Explore:
                 {
@@ -1004,6 +2137,73 @@ namespace NomadCity.UI
                 }
             }
         }
+
+        /// <summary>
+        /// 建设 L4 的引导：这一步要「点地图」就把候选位置念出来，否则提示在弹窗里选。
+        /// 候选清单直接来自引擎的 <see cref="ChoicePick"/>，所以不会出现「提示说合法、点下去却不行」。
+        /// </summary>
+        private string BuildEffectHint()
+        {
+            ChoiceRequest request = buildSession != null ? buildSession.Pending : null;
+            if (request == null) return "建设：正在结算入场效果……";
+
+            if (request.Pick == null || request.Pick.Kind == ChoicePickKind.None)
+                return $"建设入场效果：{request.Prompt}";
+
+            var where = new List<string>();
+            if (request.Pick.Kind == ChoicePickKind.InfluenceSlot)
+            {
+                foreach (InfluenceSlotRef slot in request.Pick.Slots) where.Add(SlotName(slot));
+                return $"建设入场效果：{request.Prompt} —— 请直接点地图上的：{string.Join("、", where)}";
+            }
+
+            foreach (int nodeId in request.Pick.NodeIds) where.Add($"资源点 {engine.State.Map.Node(nodeId).Code}");
+            return $"建设入场效果：{request.Prompt} —— 请直接点地图上的：{string.Join("、", where)}";
+        }
+
+        /// <summary>城市样式特殊行动效果的引导：候选要「点地图」就把位置念出来，否则提示在弹窗里选。</summary>
+        private string SpecialEffectHint()
+        {
+            ChoiceRequest request = specialSession != null ? specialSession.Pending : null;
+            if (request == null) return "特殊行动：正在结算效果……";
+
+            if (request.Pick == null || request.Pick.Kind == ChoicePickKind.None)
+                return $"特殊行动效果：{request.Prompt}";
+
+            var where = new List<string>();
+            if (request.Pick.Kind == ChoicePickKind.InfluenceSlot)
+            {
+                foreach (InfluenceSlotRef slot in request.Pick.Slots) where.Add(SlotName(slot));
+                return $"特殊行动效果：{request.Prompt} —— 请直接点地图上的：{string.Join("、", where)}";
+            }
+
+            foreach (int nodeId in request.Pick.NodeIds) where.Add($"资源点 {engine.State.Map.Node(nodeId).Code}");
+            return $"特殊行动效果：{request.Prompt} —— 请直接点地图上的：{string.Join("、", where)}";
+        }
+
+        /// <summary>角色牌效果的引导：候选要「点地图」就把位置念出来，否则提示在弹窗里选。</summary>
+        private string CharacterEffectHint()
+        {
+            ChoiceRequest request = characterSession != null ? characterSession.Pending : null;
+            if (request == null) return "角色牌：正在结算效果……";
+
+            if (request.Pick == null || request.Pick.Kind == ChoicePickKind.None)
+                return $"角色牌效果：{request.Prompt}";
+
+            var where = new List<string>();
+            if (request.Pick.Kind == ChoicePickKind.InfluenceSlot)
+            {
+                foreach (InfluenceSlotRef slot in request.Pick.Slots) where.Add(SlotName(slot));
+                return $"角色牌效果：{request.Prompt} —— 请直接点地图上的：{string.Join("、", where)}";
+            }
+
+            foreach (int nodeId in request.Pick.NodeIds) where.Add($"资源点 {engine.State.Map.Node(nodeId).Code}");
+            return $"角色牌效果：{request.Prompt} —— 请直接点地图上的：{string.Join("、", where)}";
+        }
+
+        private string SlotName(InfluenceSlotRef slot) => slot.Kind == InfluenceSlotKind.Node
+            ? $"资源点 {engine.State.Map.Node(slot.TargetId).Code} 第 {slot.SlotIndex + 1} 格"
+            : $"航道 {engine.State.Map.RouteLabel(slot.TargetId)} 第 {slot.SlotIndex + 1} 格";
 
         private void SetHint(string text)
         {
@@ -1035,10 +2235,36 @@ namespace NomadCity.UI
             bool buildMode = mode == ActionMode.Build;
 
             if (supplyPanel != null) supplyPanel.Refresh(state, buildMode);
-            if (cityPanel != null) cityPanel.Refresh(state, state.ActiveSeat, buildMode);
+            if (cityPanel != null) cityPanel.Refresh(state, ViewSeat(state), buildMode);
 
-            // 样式牌弹窗只在宣告模式下可点（弹窗本身由 SetMode 开关）。
-            if (patternPanel != null) patternPanel.Refresh(state, mode == ActionMode.Declare);
+            // 样式牌弹窗只在宣告 / 特殊行动模式下可点（弹窗本身由 SetMode 开关）。
+            if (patternPanel != null)
+                patternPanel.Refresh(state, mode == ActionMode.Declare || mode == ActionMode.SpecialAction);
+
+            // 角色牌手牌托盘：控制器只告知「本机玩家还有没有手牌」；是否展开由玩家点小标签自己决定（默认收起）。
+            bool placementPhase = state.Phase == TurnPhase.CharacterPlacement;
+            if (handPanel != null)
+            {
+                int handSeat = ViewSeat(state);
+                PlayerState handPlayer = handSeat >= 0 && handSeat < state.Players.Count ? state.Players[handSeat] : null;
+                handPanel.SetAvailable(handPlayer != null && handPlayer.HandCharacterCards.Count > 0);
+                handPanel.Refresh(state, handSeat, placementPhase);
+            }
+        }
+
+        /// <summary>
+        /// 城市面板固定显示本机玩家的城市（建设模式也一样）：回合结束时座次会自动推进，
+        /// 但本机玩家的面板不该跟着变 —— 否则刚建好的设施会随着座次切走而「看不见」。
+        /// 座位越界时退回行动座位（再退回 0），保证永远有一个合法座位可显示。
+        /// </summary>
+        private int ViewSeat(GameState state)
+        {
+            if (state == null) return 0;
+
+            int seat = localSeat;
+            if (seat < 0 || seat >= state.Players.Count) seat = state.ActiveSeat;
+            if (seat < 0 || seat >= state.Players.Count) seat = 0;
+            return seat;
         }
 
         /// <summary>采集阶段自动结算的简报（本轮为占位实现，见 GameEngine.ResolveHarvestAutomatically）。</summary>

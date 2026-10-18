@@ -37,7 +37,6 @@ namespace NomadCity.Tests
             }
 
             state.Map = map;
-            state.SupplyVouchers = 70;
             return state;
         }
 
@@ -73,7 +72,6 @@ namespace NomadCity.Tests
         {
             GameState state = HarvestState();
             state.Players[0].MobileCityNodeId = 0;
-            int supply = state.SupplyVouchers;
 
             HarvestReport report = HarvestResolver.Resolve(state, Choices(0, 0));
 
@@ -81,24 +79,21 @@ namespace NomadCity.Tests
             AssertNodes(report.Results[0].Nodes, 0);
             Assert.AreEqual(0, report.Results[0].VouchersPaid);
             Assert.AreEqual(1, state.Players[0].Resources.Orirock);
-            Assert.AreEqual(supply, state.SupplyVouchers);
         }
 
         [Test]
-        public void 采集_无自己影响力的航道_付2金券给供应堆()
+        public void 采集_无自己影响力的航道_付2金券()
         {
             GameState state = HarvestState();
             state.Players[0].MobileCityNodeId = 0;
             OwnInfluence(state, 1, 0);
             state.Players[0].Vouchers = 10;
-            int supply = state.SupplyVouchers;
 
             HarvestReport report = HarvestResolver.Resolve(state, Choices(0, 1));
 
             Assert.IsTrue(report.Ok, report.Error);
             Assert.AreEqual(2, report.Results[0].VouchersPaid);
             Assert.AreEqual(8, state.Players[0].Vouchers);
-            Assert.AreEqual(supply + 2, state.SupplyVouchers);
             Assert.AreEqual(1, state.Players[0].Resources.Orirock);
         }
 
@@ -126,14 +121,12 @@ namespace NomadCity.Tests
             state.Map.Route(0).Slots.Place(0, 1); // 座位 1 在 R0 上的影响力
             state.Players[0].Vouchers = 10;
             state.Players[1].Vouchers = 0;
-            int supply = state.SupplyVouchers;
 
             HarvestReport report = HarvestResolver.Resolve(state, Choices(0, 1));
 
             Assert.AreEqual(2, report.Results[0].VouchersPaid);
             Assert.AreEqual(8, state.Players[0].Vouchers);
             Assert.AreEqual(2, state.Players[1].Vouchers);
-            Assert.AreEqual(supply, state.SupplyVouchers); // 付给玩家，不进供应堆
         }
 
         [Test]
@@ -144,7 +137,6 @@ namespace NomadCity.Tests
             OwnInfluence(state, 1, 0);
             OwnInfluence(state, 2, 0);
             state.Players[0].Vouchers = 20;
-            int supply = state.SupplyVouchers;
 
             // 到 N1 要 R0，到 N2 要 R0+R1；并集 {R0,R1} 共 4，而不是 2+4=6。
             HarvestReport report = HarvestResolver.Resolve(state, Choices(0, 1, 2));
@@ -152,7 +144,6 @@ namespace NomadCity.Tests
             AssertNodes(report.Results[0].Nodes, 1, 2);
             Assert.AreEqual(4, report.Results[0].VouchersPaid);
             Assert.AreEqual(16, state.Players[0].Vouchers);
-            Assert.AreEqual(supply + 4, state.SupplyVouchers);
             Assert.AreEqual(2, state.Players[0].Resources.Orirock); // 每点 1 个，共 2 个
         }
 
@@ -178,7 +169,6 @@ namespace NomadCity.Tests
             state.Players[0].MobileCityNodeId = 0;
             OwnInfluence(state, 1, 0);
             state.Players[0].Vouchers = 1; // 不够 2
-            int supply = state.SupplyVouchers;
 
             HarvestReport report = HarvestResolver.Resolve(state, Choices(0, 1));
 
@@ -187,7 +177,6 @@ namespace NomadCity.Tests
             AssertNodes(report.Results[0].SkippedNodes, 1);
             Assert.AreEqual(1, state.Players[0].Vouchers);
             Assert.AreEqual(0, state.Players[0].Resources.Orirock);
-            Assert.AreEqual(supply, state.SupplyVouchers);
         }
 
         [Test]

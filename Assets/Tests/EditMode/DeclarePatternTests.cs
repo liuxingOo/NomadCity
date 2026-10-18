@@ -140,6 +140,34 @@ namespace NomadCity.Tests
             Assert.IsFalse(result.Ok);
         }
 
+        [Test]
+        public void 宣告_多组摆法时_指定用哪几格_只标记挑中的那一组()
+        {
+            // 面板上有两张红设施（左上角 与 第一行第 3 格），「一格雷」因此有 2 组摆法。
+            Put(0, 2, RedFacility);
+
+            List<PatternMatch> matches = CityPanelQuery.FindAll(player, catalog, SingleCell(FacilityColor.Red));
+            Assert.AreEqual(2, matches.Count, "两张红设施就是 2 组摆法。");
+
+            int picked = matches[1].Slots[0];
+            var command = new DeclareCityPatternCommand(0, PatternId, placementIndex: 1);
+            CommandResult result = engine.Dispatch(command);
+
+            Assert.IsTrue(result.Ok, result.Error);
+            Assert.AreEqual(picked, command.Match.Slots[0], "应当用玩家挑的那一组摆法。");
+            Assert.IsTrue(player.CityPanelUsed[picked], "挑中的那一格要标记为已用于宣告。");
+            Assert.IsFalse(player.CityPanelUsed[matches[0].Slots[0]],
+                "没挑中的那一格不该被标记，留给后面的宣告用。");
+        }
+
+        [Test]
+        public void 宣告_指定的摆法下标越界时被拒绝()
+        {
+            CommandResult result = engine.Dispatch(new DeclareCityPatternCommand(0, PatternId, placementIndex: 99));
+
+            Assert.IsFalse(result.Ok, "越界的摆法下标应当被拒绝。");
+        }
+
         // —— 工具 ——
 
         private static PatternCondition SingleCell(FacilityColor color) =>

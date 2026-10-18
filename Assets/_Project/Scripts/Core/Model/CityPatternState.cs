@@ -45,6 +45,14 @@ namespace NomadCity.Core.Model
         /// <summary>轨道格数：I 级 2 格，II 级 5 格。</summary>
         public int TrackLength => Level >= 2 ? 5 : 2;
 
+        /// <summary>深拷贝一份本样式牌的标记状态（供 <see cref="GameState.Clone"/> 的效果会话试跑用）。</summary>
+        public CityPatternState Clone()
+        {
+            var copy = new CityPatternState(CardId, Level);
+            foreach (PatternMarker marker in markers) copy.PlaceMarker(marker.Seat, marker.Position);
+            return copy;
+        }
+
         public IReadOnlyList<PatternMarker> Markers => markers;
 
         /// <summary>该玩家在这张样式牌上的标记数量。</summary>
@@ -61,6 +69,47 @@ namespace NomadCity.Core.Model
             var marker = new PatternMarker(seat, position);
             markers.Add(marker);
             return marker;
+        }
+
+        /// <summary>
+        /// 该玩家在这张样式牌上是否还有可用的标记（用于判断能不能使用特殊行动，§10.2-4）：
+        /// I 级的可用格是「未使用」区（第 0 格）；II 级的可用格是「2」（第 0 格）与「1」（第 2 格）。
+        /// </summary>
+        public bool HasUsableMarker(int seat)
+        {
+            foreach (PatternMarker marker in markers)
+            {
+                if (marker.Seat != seat) continue;
+                if (Level >= 2)
+                {
+                    if (marker.Position == 0 || marker.Position == 2) return true;
+                }
+                else if (marker.Position == 0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 使用特殊行动后把该玩家一个可用格上的标记**下移 1 格**（§10.2-4）：
+        /// I 级 0→1（未使用→已使用）；II 级优先 0→1（「2」→已使用），没有第 0 格的标记时 2→3（「1」→已使用）。
+        /// 返回是否真的移动了标记。
+        /// </summary>
+        public bool AdvanceMarker(int seat)
+        {
+            PatternMarker chosen = null;
+            foreach (PatternMarker marker in markers)
+            {
+                if (marker.Seat != seat) continue;
+                if (marker.Position == 0) { chosen = marker; break; }   // 优先第 0 格
+                if (Level >= 2 && marker.Position == 2) chosen ??= marker;
+            }
+            if (chosen == null) return false;
+
+            chosen.Position = chosen.Position == 0 ? 1 : 3;
+            return true;
         }
 
         /// <summary>

@@ -110,6 +110,20 @@ namespace NomadCity.Tests
         }
 
         [Test]
+        public void 列出所有摆法_同一组格子只出现一次()
+        {
+            Put(0, 0, RedFacility);
+            Put(0, 2, RedFacility);
+
+            List<PatternMatch> matches = CityPanelQuery.FindAll(player, catalog, SingleCell(FacilityColor.Red));
+
+            // 单格条件转 4 个角度都命中同一格，所以只该剩 2 组不同的摆法（两张红设施各一组）。
+            Assert.AreEqual(2, matches.Count, "旋转带出来的重复摆法应当被丢掉。");
+            Assert.AreEqual(CityPanelQuery.SlotOf(0, 0), matches[0].Slots[0]);
+            Assert.AreEqual(CityPanelQuery.SlotOf(0, 2), matches[1].Slots[0]);
+        }
+
+        [Test]
         public void 查询_条件可以旋转()
         {
             // 条件是「左红右蓝」，面板上摆的是竖着的「上红下蓝」→ 只能靠旋转 90° 凑出来。

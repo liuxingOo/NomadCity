@@ -128,9 +128,12 @@ namespace NomadCity.Core.Engine
                 }
             }
 
-            int total = TollCalculator.Compute(state, ActorSeat, path, Payees).Total;
-            if (player.Vouchers < total)
-                return CommandResult.Fail($"路费需要 {total} 金券，你只有 {player.Vouchers}。");
+            if (!ActionRules.IgnoresCosts(state))
+            {
+                int total = TollCalculator.Compute(state, ActorSeat, path, Payees).Total;
+                if (player.Vouchers < total)
+                    return CommandResult.Fail($"路费需要 {total} 金券，你只有 {player.Vouchers}。");
+            }
 
             return CommandResult.Success;
         }
@@ -141,14 +144,17 @@ namespace NomadCity.Core.Engine
             MapNodeState node = state.Map.Node(NodeId);
 
             // 步 1：支付路费（§6.6）——没有自己影响力的航道每条 2 金券；
-            // 该航道上有对手影响力就付给那名对手，否则进公共供应堆。
+            // 该航道上有对手影响力就付给那名对手，否则退给无限的公共池（不记账）。
             RouteIds = PlanRoutes(state);
             Toll = TollCalculator.Compute(state, ActorSeat, RouteIds, Payees);
-            foreach (TollCalculator.Payment payment in Toll.Payments)
+            if (!ActionRules.IgnoresCosts(state)) // 开发者模式：不付路费
             {
-                player.Vouchers -= payment.Amount;
-                if (payment.PayeeSeat == TollCalculator.SupplyPayee) state.SupplyVouchers += payment.Amount;
-                else state.Player(payment.PayeeSeat).Vouchers += payment.Amount;
+                foreach (TollCalculator.Payment payment in Toll.Payments)
+                {
+                    player.Vouchers -= payment.Amount;
+                    if (payment.PayeeSeat != TollCalculator.SupplyPayee)
+                        state.Player(payment.PayeeSeat).Vouchers += payment.Amount;
+                }
             }
 
             // 步 2（前半）：翻开对应颜色的事件牌堆顶，把对应的资源点指示物放到目标点。

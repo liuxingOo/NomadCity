@@ -28,17 +28,14 @@ namespace NomadCity.Tests
                 node.TokenAmount = 1;
             }
 
-            var state = new GameState(new GameSetup(playerCount, expansions))
-            {
-                SupplyOriginitePrime = 35,
-                SupplyVouchers = 70,
-            };
+            var state = new GameState(new GameSetup(playerCount, expansions));
             for (int seat = 0; seat < playerCount; seat++)
             {
                 state.Players.Add(new PlayerState(seat, (PlayerColor)seat) { MarkersInSupply = 30 });
             }
 
             state.Map = map;
+            state.Catalog = PlaceholderCardCatalog.Default; // 条件计数（非彩色设施种数）需要查设施定义
             return state;
         }
 
@@ -59,18 +56,16 @@ namespace NomadCity.Tests
             Assert.AreEqual(4, state.Players[0].Resources.Orirock);
             Assert.AreEqual(7, state.Players[0].Vouchers);
             Assert.AreEqual(2, state.Players[0].Score);
-            Assert.AreEqual(63, state.SupplyVouchers); // 70 - 7
         }
 
         [Test]
-        public void 获得至纯源石_从公共供应堆扣减()
+        public void 获得至纯源石_写入玩家()
         {
             GameState state = State();
 
             EffectResolver.Execute(state, 0, new[] { RewardOp.Gain(ResourceType.OriginitePrime, 2) });
 
             Assert.AreEqual(2, state.Players[0].Resources.OriginitePrime);
-            Assert.AreEqual(33, state.SupplyOriginitePrime);
         }
 
         [Test]
@@ -113,7 +108,6 @@ namespace NomadCity.Tests
             Assert.AreEqual(3, state.Players[1].Vouchers);
             Assert.AreEqual(3, state.Players[2].Vouchers);
             Assert.AreEqual(3, state.Players[3].Vouchers);
-            Assert.AreEqual(61, state.SupplyVouchers); // 70 - 3×3
         }
 
         // ————————————————————— 放置影响力 —————————————————————
@@ -172,6 +166,142 @@ namespace NomadCity.Tests
             Assert.IsTrue(report.AnyApplied);
             Assert.AreEqual(-1, state.Map.Node(1).Slots.OwnerOf(0)); // 点本身不放
             Assert.AreEqual(0, state.Map.Route(0).Slots.OwnerOf(0));
+        }
+
+        // ————————————————————— 二选一（§11.4） —————————————————————
+
+        [Test]
+        public void 二选一_取第一分支执行并跳过另一分支()
+        {
+            GameState state = State();
+            state.Players[0].Score = 5;
+
+            // 默认选择器（FirstAvailableChoices）总是取第一个分支。
+            var op = RewardOp.Alternative(
+                new EffectBranch("获得 2 源岩", RewardOp.Gain(ResourceType.Orirock, 2)),
+                new EffectBranch("失去 1 分", RewardOp.LoseScore(1)));
+
+            EffectReport report = EffectResolver.Execute(state, 0, new[] { op });
+
+            Assert.IsTrue(report.Entries[0].Applied);
+            Assert.AreEqual(2, state.Players[0].Resources.Orirock);
+            Assert.AreEqual(5, state.Players[0].Score); // 另一分支没有被执行
+        }
+
+        // ————————————————————— 拿走／移动／替换影响力 —————————————————————
+
+        [Test]
+        public void 拿走影响力_对手的标记退回其供应堆()
+        {
+            GameState state = State();
+            state.Map.Node(0).Slots.Place(0, 1);
+            state.Players[1].MarkersInSupply = 20;
+
+            EffectReport report = EffectResolver.Execute(state, 0, new[] { RewardOp.RemoveInfluence() });
+
+            Assert.IsTrue(report.AnyApplied);
+            Assert.AreEqual(-1, state.Map.Node(0).Slots.OwnerOf(0));
+            Assert.AreEqual(21, state.Players[1].MarkersInSupply);
+        }
+
+        [Test]
+        public void 拿走影响力_无影响力可拿时跳过但不阻断后续效果()
+        {
+            GameState state = State();
+
+            EffectReport report = EffectResolver.Execute(state, 0, new[]
+            {
+                RewardOp.RemoveInfluence(),
+                RewardOp.Gain(ResourceType.Orirock, 1),
+            });
+
+            Assert.IsFalse(report.Entries[0].Applied);
+            Assert.IsTrue(report.Entries[1].Applied); // 尽量执行
+            Assert.AreEqual(1, state.Players[0].Resources.Orirock);
+        }
+
+        [Test]
+        public void 移动影响力_不改变标记总数()
+        {
+            GameState state = State();
+            state.Map.Node(0).Slots.Place(0, 0);
+            state.Players[0].MarkersInSupply = 29;
+
+            EffectReport report = EffectResolver.Execute(state, 0, new[] { RewardOp.RelocateInfluence() });
+
+            Assert.IsTrue(report.AnyApplied);
+            Assert.AreEqual(-1, state.Map.Node(0).Slots.OwnerOf(0));
+            Assert.AreEqual(29, state.Players[0].MarkersInSupply);   // 清一格、占一格，总数不变
+            Assert.AreEqual(0, state.Map.Node(0).Slots.OwnerOf(1));  // 落到下一个合法空格
+        }
+
+        [Test]
+        public void 替换影响力_在同格放置自己的影响力()
+        {
+            GameState state = State();
+            state.Map.Node(0).Slots.Place(0, 1); // 对手的影响力在 N0 槽 0
+            state.Players[1].MarkersInSupply = 20;
+            state.Players[0].MarkersInSupply = 10;
+
+            EffectReport report = EffectResolver.Execute(state, 0, new[] { RewardOp.ReplaceInfluence() });
+
+            Assert.IsTrue(report.AnyApplied);
+            Assert.AreEqual(0, state.Map.Node(0).Slots.OwnerOf(0)); // 同一个空格换成自己的
+            Assert.AreEqual(9, state.Players[0].MarkersInSupply);
+            Assert.AreEqual(21, state.Players[1].MarkersInSupply);
+        }
+
+        [Test]
+        public void 替换影响力_该点有对手城市时只移除不放置()
+        {
+            GameState state = State();
+            state.Map.Node(0).Slots.Place(0, 1);
+            state.Players[1].MobileCityNodeId = 0; // 对手城市停靠在 N0
+            state.Players[0].MarkersInSupply = 10;
+
+            EffectReport report = EffectResolver.Execute(state, 0, new[] { RewardOp.ReplaceInfluence() });
+
+            Assert.IsTrue(report.Entries[0].Applied); // 移除已经生效
+            Assert.AreEqual(-1, state.Map.Node(0).Slots.OwnerOf(0));
+            Assert.AreEqual(10, state.Players[0].MarkersInSupply); // 没有花掉标记
+            StringAssert.Contains("无法在同一空格放置", report.Entries[0].Note);
+        }
+
+        // ————————————————————— 条件计数 —————————————————————
+        // 「城市化区域」＝每有一个与核心指挥塔十字相邻的设施获得 4 金券；
+        // 「城邦工业区」的费用修正＝面板上每 1 种非彩色设施少付 1 源岩（见 BuildTests）。
+
+        [Test]
+        public void 条件计数_按核心格十字相邻的设施数获得金券()
+        {
+            GameState state = State();
+            // 核心指挥塔在第 8 格（下标 7），十字相邻 = {4, 10, 6, 8}。
+            state.Players[0].CityPanelSlots[4] = CardIds.FacilityBase;      // 城邦行政区
+            state.Players[0].CityPanelSlots[10] = CardIds.FacilityBase + 5; // 另一张设施
+
+            EffectReport report = EffectResolver.Execute(state, 0,
+                new[] { RewardOp.VouchersPerCount(CountSource.AdjacentCoreFacilities, 4) });
+
+            Assert.IsTrue(report.AnyApplied);
+            Assert.AreEqual(8, state.Players[0].Vouchers); // 2 个 × 4
+        }
+
+        [Test]
+        public void 条件计数_非彩色设施按不同牌名去重且排除彩色()
+        {
+            GameState state = State();
+            // 117／131 同名「异铁冶炼厂」（蓝 / 红），只算 1 种；
+            // 100 城邦行政区与核心指挥塔（200）都是彩色，不算。
+            state.Players[0].CityPanelSlots[0] = CardIds.FacilityBase + 17;   // 异铁冶炼厂（蓝）
+            state.Players[0].CityPanelSlots[1] = CardIds.FacilityBase + 31;   // 异铁冶炼厂（红，同名）
+            state.Players[0].CityPanelSlots[2] = CardIds.FacilityBase;        // 城邦行政区（彩色）
+            state.Players[0].CityPanelSlots[3] = CardIds.CoreCommandTowerBase; // 核心指挥塔（彩色）
+
+            EffectReport report = EffectResolver.Execute(state, 0,
+                new[] { RewardOp.VouchersPerCount(CountSource.NonColorFacilityKinds, 2) });
+
+            Assert.IsTrue(report.AnyApplied);
+            Assert.AreEqual(2, state.Players[0].Vouchers); // 只有 1 种非彩色设施 → 1 × 2
         }
 
         // ————————————————————— 条件式效果 —————————————————————

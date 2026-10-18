@@ -7,12 +7,17 @@ using UnityEngine.UI;
 namespace NomadCity.UI
 {
     /// <summary>
-    /// 通用的小选择弹窗：中央一个小面板，一行一个选项按钮，外加一个取消按钮。
-    /// 用于「路费付给这条航道上的哪一位对手」这类需要玩家当场挑一个对象的小决策（§6.6）。
+    /// 通用的小选择弹窗：中央一块面板，若干选项按钮，外加一个取消按钮。
+    /// 用于「路费付给这条航道上的哪一位对手」（§6.6）、入场效果的「二选一」与「挑一个落点／对象」（§11）这类
+    /// 需要玩家当场挑一个的小决策。
     ///
     /// 与 <see cref="EventCardPanel"/> 一样只负责展示与发出意图，不做任何规则判断 ——
-    /// 玩家点了第几个选项，通过 <see cref="Show"/> 传入的回调交回给 GameScreenController；
-    /// 点取消则回调 -1。场景里预先摆好几个选项按钮，面板按需要只启用前 N 个。
+    /// 玩家点了第几个选项，通过 <see cref="Show"/> 传入的回调交回给 GameScreenController；点取消回调 -1。
+    ///
+    /// 选项个数并不固定（入场效果的选择可能十几项），所以按钮是**运行时按需复制**出来的：
+    /// 场景里先摆好 3 个当作模板与前三个槽位，不够时照第 1 个的样子复制到同一父节点下，超过一页自动分页
+    /// （末两个槽位变成「上一页 / 下一页」，页标写在标题后面）。因此 Inspector 里第 1 个按钮的位置就是
+    /// 整体基准位置，改它即可把整块选项区挪走。
     /// </summary>
     public sealed class ChoicePopup : MonoBehaviour
     {
@@ -25,13 +30,40 @@ namespace NomadCity.UI
         [Tooltip("标题行，说明这一次在选什么")]
         [SerializeField] private TMP_Text titleText;
 
-        [Tooltip("选项按钮，按顺序排列；Show 时只启用前 N 个，其余隐藏。至少要能放下一条航道上的全部对手（最多 2 位）")]
+        [Tooltip("选项按钮：第 1 个是模板与基准位置，后两个是第 2、3 个槽位；不够时照第 1 个自动复制")]
         [SerializeField] private Button[] optionButtons = Array.Empty<Button>();
 
-        [Tooltip("取消按钮；点了回调 -1")]
+        [Tooltip("取消按钮；点了回调 -1。这次选择不允许放弃时（如牌面「二选一」）会自动隐藏")]
         [SerializeField] private Button cancelButton;
 
+        [Tooltip("一页最多显示几个选项，超出自动分页（末两个槽位会变成上一页 / 下一页）")]
+        [SerializeField] private int pageSize = 12;
+
+        [Tooltip("同一行相邻按钮的水平间距")]
+        [SerializeField] private float columnStep = 350f;
+
+        [Tooltip("上下两行按钮的垂直间距")]
+        [SerializeField] private float rowStep = 60f;
+
+        /// <summary>选项按钮池：前几项是 Inspector 摆好的，其余是运行时复制出来的。</summary>
+        private readonly List<Button> slots = new List<Button>();
+
+        /// <summary>与 <see cref="slots"/> 一一对应的文案控件（按钮隐藏时取不到，所以开池时就抓好）。</summary>
+        private readonly List<TMP_Text> slotLabels = new List<TMP_Text>();
+
+        /// <summary>每个槽位对应的选项下标；-2 = 分页按钮，-1 = 空槽。</summary>
+        private int[] slotOption = Array.Empty<int>();
+
         private Action<int> onChosen;
+        private string title = string.Empty;
+        private IReadOnlyList<string> optionLabels = Array.Empty<string>();
+        private int page;
+        private int navPrevSlot = -1;
+        private int navNextSlot = -1;
+
+        private float baseX;
+        private float baseY;
+        private Vector2 cancelIdle;
 
         /// <summary>弹窗是不是开着。GameScreenController 用它在地图点击时早退。</summary>
         public bool IsVisible => root != null && root.activeSelf;
@@ -44,72 +76,203 @@ namespace NomadCity.UI
                 Debug.LogWarning("[ChoicePopup] 没有接线「Dim」遮罩：弹窗背后不会变暗。" +
                                  "地图点击与「确认 / 取消 / 结束回合」按钮在代码里已经挡住，但建议把面板上的半透明遮罩 Image " +
                                  "拖到本组件的「Dim」字段，好让玩家一眼看出该先答这个窗口。", this);
-            if (cancelButton != null) cancelButton.onClick.AddListener(() => Choose(-1));
 
-            for (int i = 0; i < optionButtons.Length; i++)
+            if (cancelButton != null)
             {
-                Button button = optionButtons[i];
-                if (button == null) continue;
+                cancelButton.onClick.AddListener(() => Choose(-1));
+                cancelIdle = ((RectTransform)cancelButton.transform).anchoredPosition;
+            }
 
-                int index = i; // 闭包捕获：每个按钮绑定自己的下标
-                button.onClick.AddListener(() => Choose(index));
+            foreach (Button button in optionButtons)
+            {
+                if (button == null) continue;
+                AddSlot(button);
+            }
+
+            if (slots.Count > 0)
+            {
+                var rect = (RectTransform)slots[0].transform;
+                baseX = rect.anchoredPosition.x;
+                baseY = rect.anchoredPosition.y;
             }
 
             Hide();
         }
 
+        /// <summary>把一个按钮登记为槽位（第 0 个同时作为复制的模板）。</summary>
+        private void AddSlot(Button button)
+        {
+            int index = slots.Count;
+            slots.Add(button);
+            slotLabels.Add(FindLabel(button));
+            button.onClick.AddListener(() => OnSlotClicked(index));
+        }
+
+        /// <summary>保证至少有 <paramref name="count"/> 个槽位：不够就照第 0 个复制。</summary>
+        private void EnsureSlots(int count)
+        {
+            if (slots.Count == 0)
+            {
+                Debug.LogError("[ChoicePopup] 这次要弹选项，但 Option Buttons 数组是空的，一个按钮也拿不出来。" +
+                               "请在 Inspector 里至少拖 1 个选项按钮进去当模板。", this);
+                return;
+            }
+
+            Button template = slots[0];
+            while (slots.Count < count && template != null)
+            {
+                Button copy = Instantiate(template, template.transform.parent);
+                copy.name = $"Option{slots.Count + 1}";
+                copy.onClick.RemoveAllListeners(); // 复制出来的按钮只认自己的槽位下标
+                AddSlot(copy);
+            }
+
+            if (slotOption.Length < slots.Count) Array.Resize(ref slotOption, slots.Count);
+        }
+
+        private static TMP_Text FindLabel(Button button)
+        {
+            if (button == null) return null;
+
+            TMP_Text[] texts = button.GetComponentsInChildren<TMP_Text>(true);
+            return texts.Length > 0 ? texts[0] : null;
+        }
+
         /// <summary>
         /// 弹出一个小选择：标题 + 一组选项文案。
-        /// 玩家点了第 <paramref name="onSelected"/> 个就带出那个下标（0 起）；点取消带出 -1。
+        /// 玩家点了第几个就带出那个下标（0 起）；点取消带出 -1。
+        /// <paramref name="allowCancel"/> = false 时隐藏取消键（这一步必须选一个）。
         /// </summary>
-        public void Show(string title, IReadOnlyList<string> options, Action<int> onSelected)
+        public void Show(string title, IReadOnlyList<string> options, Action<int> onSelected, bool allowCancel = true)
         {
             onChosen = onSelected;
+            this.title = title ?? string.Empty;
+            optionLabels = options ?? Array.Empty<string>();
+            page = 0;
 
             // 先把根节点打开再去按钮上找文字 —— 面板平时是隐藏的，
             // 隐藏态下 GetComponentInChildren 有可能取不到子物体上的 TMP_Text。
             if (root != null) root.SetActive(true);
+            if (cancelButton != null) cancelButton.gameObject.SetActive(allowCancel);
 
-            if (titleText != null) titleText.text = title ?? string.Empty;
+            Render();
+        }
 
-            int count = options != null ? options.Count : 0;
+        /// <summary>按当前页把选项铺到槽位上：一列放不下就折成多列，放不下整页就上分页键。</summary>
+        private void Render()
+        {
+            int count = optionLabels.Count;
+            int perPage = Mathf.Max(1, pageSize);
+            int pages = count <= 0 ? 1 : (count + perPage - 1) / perPage;
+            page = Mathf.Clamp(page, 0, pages - 1);
 
-            // 下面几种情况都会让弹窗「有标题、有取消键，就是一个选项都没有」，看起来像按钮坏了。
-            // 与其静默，不如在 Console 里点名，省掉一轮排查。
-            if (count > 0 && optionButtons.Length == 0)
-                Debug.LogError($"[ChoicePopup] 这次要显示 {count} 个选项，但 Option Buttons 数组是空的，" +
-                               "弹窗里不会有任何选项。请把面板上的选项按钮逐个拖进该数组（Size 与按钮个数一致）。", this);
+            int first = page * perPage;
+            int visible = Mathf.Clamp(count - first, 0, perPage);
+            bool paging = pages > 1;
+            int cells = visible + (paging ? 2 : 0);
 
-            if (count > optionButtons.Length && optionButtons.Length > 0)
-                Debug.LogError($"[ChoicePopup] 这次要显示 {count} 个选项，但 Option Buttons 只有 {optionButtons.Length} 个槽位，" +
-                               $"后面 {count - optionButtons.Length} 个显示不出来。", this);
+            EnsureSlots(Mathf.Max(cells, 1));
 
-            for (int i = 0; i < optionButtons.Length; i++)
+            for (int i = 0; i < slots.Count; i++)
             {
-                Button button = optionButtons[i];
-                if (button == null)
-                {
-                    // 只有「这次真的要用到」的槽位是 None 才值得报错（用不到的槽位留空无所谓）。
-                    if (i < count)
-                        Debug.LogError($"[ChoicePopup] Option Buttons 第 {i} 个槽位是 None，本次第 {i} 个选项显示不出来，" +
-                                       "请在 Inspector 里把它拖好。", this);
-                    continue;
-                }
-
-                bool used = i < count;
-                button.gameObject.SetActive(used);
-                if (!used) continue;
-
-                TMP_Text label = button.GetComponentInChildren<TMP_Text>();
-                if (label != null) label.text = options[i];
-                else
-                    Debug.LogWarning($"[ChoicePopup] 选项按钮「{button.name}」下没有 TMP_Text，文案写不上去。", this);
+                slotOption[i] = -1;
+                slots[i].gameObject.SetActive(false);
             }
+
+            navPrevSlot = -1;
+            navNextSlot = -1;
+
+            for (int i = 0; i < visible; i++)
+            {
+                SetSlot(i, optionLabels[first + i]);
+                slotOption[i] = first + i;
+                slots[i].gameObject.SetActive(true);
+            }
+
+            if (paging)
+            {
+                navPrevSlot = visible;
+                navNextSlot = visible + 1;
+
+                SetSlot(navPrevSlot, "◀ 上一页");
+                slotOption[navPrevSlot] = -2;
+                slots[navPrevSlot].gameObject.SetActive(page > 0);
+
+                SetSlot(navNextSlot, "下一页 ▶");
+                slotOption[navNextSlot] = -2;
+                slots[navNextSlot].gameObject.SetActive(page < pages - 1);
+            }
+
+            Layout(cells);
+
+            if (titleText != null)
+                titleText.text = paging ? $"{title}（第 {page + 1}/{pages} 页）" : title;
+
+            if (count == 0 && optionLabels != null)
+                Debug.LogWarning("[ChoicePopup] 这次没有可选事项，只会留下一个取消键。", this);
+        }
+
+        /// <summary>把 <paramref name="cells"/> 个槽位摆成网格（1 列 / 2 列 / 3 列），并把取消键挪到最下一行之下。</summary>
+        private void Layout(int cells)
+        {
+            if (slots.Count == 0 || cells <= 0) return;
+
+            int columns = cells <= 3 ? 1 : cells <= 6 ? 2 : 3;
+            int rows = (cells + columns - 1) / columns;
+
+            for (int i = 0; i < cells && i < slots.Count; i++)
+            {
+                int row = i / columns;
+                int column = i % columns;
+                float x = baseX + (column - (columns - 1) * 0.5f) * columnStep;
+                float y = baseY - row * rowStep;
+                ((RectTransform)slots[i].transform).anchoredPosition = new Vector2(x, y);
+            }
+
+            if (cancelButton != null)
+            {
+                float bottom = baseY - (rows - 1) * rowStep;
+                ((RectTransform)cancelButton.transform).anchoredPosition =
+                    new Vector2(cancelIdle.x, Mathf.Min(cancelIdle.y, bottom - rowStep));
+            }
+        }
+
+        private void SetSlot(int index, string label)
+        {
+            if (index < 0 || index >= slots.Count) return;
+
+            TMP_Text text = slotLabels[index];
+            if (text != null) text.text = label ?? string.Empty;
+            else
+                Debug.LogWarning($"[ChoicePopup] 选项按钮「{slots[index].name}」下没有 TMP_Text，文案写不上去。", this);
+        }
+
+        private void OnSlotClicked(int slotIndex)
+        {
+            if (slotIndex == navPrevSlot)
+            {
+                page--;
+                Render();
+                return;
+            }
+
+            if (slotIndex == navNextSlot)
+            {
+                page++;
+                Render();
+                return;
+            }
+
+            if (slotIndex < 0 || slotIndex >= slotOption.Length) return;
+
+            int optionIndex = slotOption[slotIndex];
+            if (optionIndex >= 0) Choose(optionIndex);
         }
 
         public void Hide()
         {
             onChosen = null;
+            page = 0;
             if (root != null) root.SetActive(false);
         }
 

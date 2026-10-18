@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace NomadCity.Core.Model
@@ -34,6 +35,18 @@ namespace NomadCity.Core.Model
 
         /// <summary>本回合是否已使用过盖放的角色牌（每回合至多一次）。</summary>
         public bool UsedCharacterCardThisTurn;
+
+        /// <summary>本回合是否已用掉盖放角色牌的「策略」（起始玩家可再用「计谋」，§10.1.2）。</summary>
+        public bool UsedCharacterStrategyThisTurn;
+
+        /// <summary>本回合是否已用掉盖放角色牌的「计谋」。</summary>
+        public bool UsedCharacterTacticsThisTurn;
+
+        /// <summary>
+        /// 起始玩家用掉两种效果之一后置位：此时必须**立即**用掉另一种效果或结束使用，
+        /// 期间不得插入其他主要 / 快速行动（§10.1.2）。非起始玩家恒为 false。
+        /// </summary>
+        public bool CharacterSecondEffectPending;
 
         /// <summary>已建设在自己城市面板上的设施牌 id。</summary>
         public readonly List<int> BuiltFacilities = new();
@@ -87,17 +100,66 @@ namespace NomadCity.Core.Model
         /// <summary>本回合已使用过特殊行动的城市样式牌 id（每张样式牌每回合限一次）。</summary>
         public readonly HashSet<int> UsedPatternActionsThisTurn = new();
 
+        /// <summary>
+        /// 本回合尚待执行的「额外主要行动」次数（「源石工业中枢」特殊行动给 2 次）。
+        /// 由效果写入、<see cref="Engine.TurnFlow.CompletePlayerAction"/> 在推进座位前递减并保持当前座位；
+        /// 收尾阶段由 <see cref="ResetTurnScopedState"/> 清零。
+        /// </summary>
+        public int ExtraMainActionsThisTurn;
+
+        /// <summary>
+        /// 禁止使用角色牌的「轮」号（== <see cref="GameState.ActionRound"/> 时本玩家不能使用角色牌，0 = 无限制）。
+        /// 「源石工业中枢」/「高效移动管理体系」特殊行动的「使用此行动的轮中不能使用角色牌」，
+        /// 收尾阶段由 <see cref="ResetTurnScopedState"/> 清零。
+        /// </summary>
+        public int CharacterCardBanRound;
+
         public PlayerState(int seatIndex, PlayerColor color)
         {
             SeatIndex = seatIndex;
             Color = color;
         }
 
+        /// <summary>深拷贝一份本玩家状态（供 <see cref="GameState.Clone"/> 的效果会话试跑用）。</summary>
+        public PlayerState Clone()
+        {
+            var copy = new PlayerState(SeatIndex, Color)
+            {
+                Resources = Resources, // ResourcePool 是值类型结构体，赋值即拷贝
+                Vouchers = Vouchers,
+                Score = Score,
+                MarkersInSupply = MarkersInSupply,
+                PlacedCharacterCard = PlacedCharacterCard,
+                UsedCharacterCardThisTurn = UsedCharacterCardThisTurn,
+                UsedCharacterStrategyThisTurn = UsedCharacterStrategyThisTurn,
+                UsedCharacterTacticsThisTurn = UsedCharacterTacticsThisTurn,
+                CharacterSecondEffectPending = CharacterSecondEffectPending,
+                MobileCityNodeId = MobileCityNodeId,
+                ExtraMainActionsThisTurn = ExtraMainActionsThisTurn,
+                CharacterCardBanRound = CharacterCardBanRound,
+            };
+
+            copy.HandCharacterCards.AddRange(HandCharacterCards);
+            copy.DiscardCharacterCards.AddRange(DiscardCharacterCards);
+            copy.BuiltFacilities.AddRange(BuiltFacilities);
+            Array.Copy(CityPanelSlots, copy.CityPanelSlots, CityPanelSlots.Length);
+            Array.Copy(CityPanelUsed, copy.CityPanelUsed, CityPanelUsed.Length);
+
+            foreach (int cardId in UsedPatternActionsThisTurn) copy.UsedPatternActionsThisTurn.Add(cardId);
+
+            return copy;
+        }
+
         /// <summary>回合收尾时清空「本回合」作用域的标记。</summary>
         public void ResetTurnScopedState()
         {
             UsedCharacterCardThisTurn = false;
+            UsedCharacterStrategyThisTurn = false;
+            UsedCharacterTacticsThisTurn = false;
+            CharacterSecondEffectPending = false;
             UsedPatternActionsThisTurn.Clear();
+            ExtraMainActionsThisTurn = 0;
+            CharacterCardBanRound = 0;
         }
     }
 }

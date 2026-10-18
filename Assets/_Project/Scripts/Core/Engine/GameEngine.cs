@@ -48,11 +48,7 @@ namespace NomadCity.Core.Engine
         public static GameEngine Create(GameSetup setup, int firstPlayerSeat = 0, MapState map = null,
             ICardCatalog catalog = null, Random rng = null)
         {
-            var state = new GameState(setup)
-            {
-                SupplyOriginitePrime = 35, // 规则规格 3：至纯源石 35 个
-                SupplyVouchers = 70,       // 规则规格 3：金券共 70 张
-            };
+            var state = new GameState(setup);
 
             for (int seat = 0; seat < setup.PlayerCount; seat++)
             {

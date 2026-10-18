@@ -39,11 +39,20 @@ namespace NomadCity.App
         [Tooltip("设施供应区：公开的 6 张设施牌（建设用）")]
         [SerializeField] private FacilitySupplyPanel facilitySupplyPanel;
 
-        [Tooltip("城市面板视图：当前行动玩家的 12 个设施格（建设用）")]
+        [Tooltip("城市面板视图：本机玩家的 12 个设施格（建设用；非建设模式点已建成的格子可看放大卡面）")]
         [SerializeField] private CityPanelView cityPanelView;
+
+        [Tooltip("本机玩家座位（0 起）：城市面板固定显示这名玩家的城市，建设也建在这名玩家名下。")]
+        [SerializeField] private int localSeat;
 
         [Tooltip("城市样式牌弹窗：场上的 6 张城市样式牌（宣告用，§6.3b）")]
         [SerializeField] private CityPatternPanel cityPatternPanel;
+
+        [Tooltip("卡面放大弹窗：点已建成的设施时弹出放大卡面")]
+        [SerializeField] private CardPreviewPopup cardPreviewPopup;
+
+        [Tooltip("角色牌手牌托盘：盖放阶段点一张牌即盖放（§4.2 阶段 1）")]
+        [SerializeField] private CharacterHandPanel characterHandPanel;
 
         [Tooltip("行动记录：右上角按钮 + 聊天框式面板")]
         [SerializeField] private ActionLogPanel actionLogPanel;
@@ -89,7 +98,8 @@ namespace NomadCity.App
 
             if (screenController != null)
                 screenController.Initialize(Engine, mapStateRenderer, mapPointerInput, gameHud, actionPanel,
-                    eventCardPanel, choicePopup, facilitySupplyPanel, cityPanelView, cityPatternPanel);
+                    eventCardPanel, choicePopup, facilitySupplyPanel, cityPanelView, cityPatternPanel, cardPreviewPopup,
+                    characterHandPanel, localSeat);
             else
                 Debug.LogWarning("[开局] 未指定 GameScreenController，界面不会响应键鼠操作。", this);
 
@@ -108,6 +118,16 @@ namespace NomadCity.App
                 Debug.LogWarning("[开局] 未指定 CityPatternPanel：点「宣告城市样式」不会弹出样式牌，" +
                                  "也就无法宣告（§6.3b）。请把场景里的 CityPatternPanel 拖进本字段。", this);
 
+            // 接线自检：点已建成的设施会弹放大卡面，漏接的话点了只会弹一句「没接线」的提示。
+            if (cardPreviewPopup == null)
+                Debug.LogWarning("[开局] 未指定 CardPreviewPopup：点已建成的设施不会弹出放大卡面。" +
+                                 "请把场景里的 CardPreviewPopup 拖进本字段。", this);
+
+            // 接线自检：角色牌盖放靠这个手牌托盘，漏接的话盖放阶段没有可点的牌，也就没法盖放（§4.2 阶段 1）。
+            if (characterHandPanel == null)
+                Debug.LogWarning("[开局] 未指定 CharacterHandPanel：角色牌盖放阶段没有手牌托盘可点，" +
+                                 "也就无法盖放角色牌（§4.2 阶段 1）。请把场景里的 CharacterHandPanel 拖进本字段。", this);
+
             // 接线自检：探索的「付给谁」小选择窗靠这个字段，漏接的话界面上不会有任何提示，只会在探索时静默跳过。
             if (choicePopup == null)
                 Debug.LogWarning("[开局] 未指定 ChoicePopup：探索时「路费付给谁」的小选择窗不会弹出" +
@@ -119,7 +139,7 @@ namespace NomadCity.App
             // 场景里只有一个 ActionLogPanel，直接找出来用，并把这件事说清楚。
             if (actionLogPanel == null)
             {
-                actionLogPanel = FindFirstObjectByType<ActionLogPanel>();
+                actionLogPanel = FindAnyObjectByType<ActionLogPanel>();
                 if (actionLogPanel != null)
                     Debug.LogWarning($"[开局] GameBootstrap 上的「Action Log Panel」字段是空的，" +
                                      $"已自动改用场景里的 {actionLogPanel.name}。建议在 Inspector 里把它拖进该字段，" +
@@ -162,9 +182,9 @@ namespace NomadCity.App
         }
 
         /// <summary>
-        /// 开发者模式专用：自动把开局设置跑完 —— 每名玩家依次认领一个绿色资源点、结算翻出的绿色事件牌
-        /// （统一取第 1 个选项），然后推进到玩家行动阶段。全部走命令通道，不直接改状态。
-        /// 4 名玩家各占一个绿色资源点后，其余资源点仍可正常探索，够测试用。
+        /// 开发者模式专用：自动把开局设置跑完 —— 每名玩家依次认领一个绿色资源点、把翻出的绿色事件标记为
+        /// 「已结算」（但**不发放选项奖励**，保持开局资源 / 金券可预测），然后推进到玩家行动阶段。
+        /// 全部走命令通道，不直接改状态。4 名玩家各占一个绿色资源点后，其余资源点仍可正常探索，够测试用。
         /// </summary>
         private void AutoSetupForDeveloperMode(GameState state)
         {
@@ -176,7 +196,9 @@ namespace NomadCity.App
                 {
                     CommandResult pick = Engine.Dispatch(new ChooseStartNodeCommand(seat, nodeId));
                     if (pick.Ok)
-                        Engine.Dispatch(new ResolveEventOptionCommand(seat, nodeId, 0));
+                        // grantRewards: false —— 只标记事件已结算，不替玩家白拿绿色事件选项奖励。
+                        Engine.Dispatch(new ResolveEventOptionCommand(seat, nodeId, 0, acceptCost: true,
+                            grantRewards: false));
                     else
                         Debug.LogWarning($"[开发者模式] 座位 {seat + 1} 自动选初始资源点失败：{pick.Error}", this);
                 }
@@ -184,17 +206,30 @@ namespace NomadCity.App
                 seat = state.NextSeat(seat);
             }
 
+            // 角色牌盖放也要跑完 —— 否则开发者模式一进游戏就没盖放牌，「使用角色牌」按钮点不动（§6.3a）。
+            // 每人盖放自己手牌里的第一张，让任意座位都能直接测策略 / 计谋。
+            for (int i = 0; i < state.Players.Count; i++)
+            {
+                PlayerState player = state.Players[i];
+                if (player.PlacedCharacterCard < 0 && player.HandCharacterCards.Count > 0)
+                    Engine.Dispatch(new PlaceCharacterCardCommand(i, player.HandCharacterCards[0]));
+            }
+
             CommandResult advance = Engine.Dispatch(new AdvancePhaseCommand());
             if (!advance.Ok)
                 Debug.LogWarning($"[开发者模式] 自动推进到玩家行动阶段失败：{advance.Error}", this);
         }
 
-        /// <summary>找一个还没有停靠别人移动城市的绿色资源点（开发者模式自动开局用）。</summary>
+        /// <summary>
+        /// 找一个还没有停靠别人移动城市的绿色资源点（开发者模式自动开局用）。
+        /// 刻意跳过 <c>B-01</c>：选它会按规则白送 2/2/2 资源，会让开发者模式的开局状态显得「莫名多资源」。
+        /// </summary>
         private static int FindFreeGreenNode(GameState state, int seat)
         {
             foreach (MapNodeState node in state.Map.Nodes)
             {
-                if (node.Color == NodeColor.Green && !ActionRules.HasOpponentCity(state, node.Id, seat))
+                if (node.Color == NodeColor.Green && node.Code != "B-01"
+                    && !ActionRules.HasOpponentCity(state, node.Id, seat))
                     return node.Id;
             }
             return -1;

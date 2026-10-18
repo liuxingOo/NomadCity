@@ -36,7 +36,7 @@ namespace NomadCity.Core.Engine
                 return CommandResult.Fail($"目标资源点 {TargetNodeId} 不存在。");
             if (TargetNodeId == origin) return CommandResult.Fail("移动城市已经在目标资源点上。");
 
-            if (player.Resources.Originium < OriginiumCost)
+            if (!ActionRules.IgnoresCosts(state) && player.Resources.Originium < OriginiumCost)
                 return CommandResult.Fail($"城市移动需要 {OriginiumCost} 源石。");
 
             if (state.Map.FindRoute(origin, TargetNodeId) == null)
@@ -60,7 +60,8 @@ namespace NomadCity.Core.Engine
             PlayerState player = state.Player(ActorSeat);
             int origin = player.MobileCityNodeId;
 
-            player.Resources.TrySpend(ResourceType.Originium, OriginiumCost);
+            if (!ActionRules.IgnoresCosts(state))
+                player.Resources.TrySpend(ResourceType.Originium, OriginiumCost);
 
             // 清掉所用航道与目标点上所有对手的影响力。
             RouteState route = state.Map.FindRoute(origin, TargetNodeId);
@@ -68,6 +69,7 @@ namespace NomadCity.Core.Engine
             ActionRules.ClearNodeInfluencesOfOthers(state, TargetNodeId, ActorSeat);
 
             player.MobileCityNodeId = TargetNodeId;
+            state.LastCityMoveRouteId = route.Id; // 供「在经过的航道上放置影响力」取落点候选
 
             // 在出发点放置 1 个自己的影响力。
             int slot = ActionRules.FirstFreeSlot(state.Map.Node(origin).Slots);

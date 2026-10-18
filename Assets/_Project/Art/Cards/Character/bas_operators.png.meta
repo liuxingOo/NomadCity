@@ -74,7 +74,7 @@ TextureImporter:
   platformSettings:
   - serializedVersion: 4
     buildTarget: DefaultTexturePlatform
-    maxTextureSize: 2048
+    maxTextureSize: 4096
     resizeAlgorithm: 0
     textureFormat: -1
     textureCompression: 1
@@ -115,15 +115,15 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: bas_operators_0
+      name: bas_operators_Liskarm
       rect:
         serializedVersion: 2
         x: 0
-        y: 0
-        width: 2400
-        height: 1700
+        y: 850
+        width: 600
+        height: 850
       alignment: 0
-      pivot: {x: 0, y: 0}
+      pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
       customData: 
       outline: []
@@ -136,11 +136,165 @@ TextureImporter:
       indices: 
       edges: []
       weights: []
+    - serializedVersion: 2
+      name: bas_operators_Texas
+      rect:
+        serializedVersion: 2
+        x: 600
+        y: 850
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: b34c1ab5c9fad7b4887f42c844d8eaa9
+      internalID: 1902159239
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: bas_operators_Tin Man
+      rect:
+        serializedVersion: 2
+        x: 1200
+        y: 850
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 5d136e70bb5f90a4c9b5f1f98423bab0
+      internalID: 1780651054
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: bas_operators_Canot
+      rect:
+        serializedVersion: 2
+        x: 1800
+        y: 850
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 4bde471e2cb5fc545841a47248f67ad9
+      internalID: -2099748309
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: bas_operators_Elysium
+      rect:
+        serializedVersion: 2
+        x: 0
+        y: 4
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: fd93cd3c05afff742b64f9dd0be1a202
+      internalID: 306811553
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: "bas_operators_M\u0142ynar_exp"
+      rect:
+        serializedVersion: 2
+        x: 600
+        y: 2
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 23195f2c703edce4d95b4b8c809298f7
+      internalID: 1195666348
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: bas_operators_Mountain_exp
+      rect:
+        serializedVersion: 2
+        x: 1200
+        y: 0
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 1322142544753714dab91ecb953e53c1
+      internalID: -926530063
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: None
+      rect:
+        serializedVersion: 2
+        x: 1800
+        y: 4
+        width: 600
+        height: 850
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 237253bb9f4864c439a0ca4143844f42
+      internalID: -105468992
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
     outline: []
     customData: 
     physicsShape: []
     bones: []
-    spriteID: 
+    spriteID: a04933b6450b7b64daa35066359e446e
     internalID: 0
     vertices: []
     indices: 
@@ -148,9 +302,18 @@ TextureImporter:
     weights: []
     secondaryTextures: []
     spriteCustomMetadata:
-      entries: []
+      entries:
+      - key: SpriteEditor.SliceSettings
+        value: '{"sliceOnImport":false,"gridCellCount":{"x":4.0,"y":2.0},"gridSpriteSize":{"x":600.0,"y":850.0},"gridSpriteOffset":{"x":0.0,"y":0.0},"gridSpritePadding":{"x":0.0,"y":0.0},"pivot":{"x":0.5,"y":0.5},"pivotPixels":{"x":0.0,"y":0.0},"autoSlicingMethod":0,"spriteAlignment":0,"pivotUnitMode":0,"slicingType":2,"keepEmptyRects":false,"isAlternate":false}'
     nameFileIdTable:
-      bas_operators_0: -6332468748009234693
+      None: -105468992
+      bas_operators_Canot: -2099748309
+      bas_operators_Elysium: 306811553
+      bas_operators_Liskarm: -6332468748009234693
+      bas_operators_Mountain_exp: -926530063
+      "bas_operators_M\u0142ynar_exp": 1195666348
+      bas_operators_Texas: 1902159239
+      bas_operators_Tin Man: 1780651054
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

@@ -44,7 +44,8 @@ namespace NomadCity.Core.Engine
         public static HarvestPlan Plan(GameState state, int seat, IReadOnlyList<int> chosenNodeIds)
         {
             PlayerState player = state.Player(seat);
-            int budget = player.Vouchers;      // 本阶段可动用的上限（结算前手里已有的金券）
+            // 本阶段可动用的上限（结算前手里已有的金券）；开发者模式下视为无限，使所有选中的点都能采到。
+            int budget = ActionRules.IgnoresCosts(state) ? int.MaxValue : player.Vouchers;
             int city = player.MobileCityNodeId;
 
             var accepted = new List<int>();
@@ -114,11 +115,14 @@ namespace NomadCity.Core.Engine
                 HarvestPlan plan = plans[seat];
                 PlayerState player = state.Player(seat);
 
-                foreach (TollCalculator.Payment payment in plan.Toll.Payments)
+                if (!ActionRules.IgnoresCosts(state)) // 开发者模式：不付路费
                 {
-                    player.Vouchers -= payment.Amount;
-                    if (payment.PayeeSeat == TollCalculator.SupplyPayee) state.SupplyVouchers += payment.Amount;
-                    else state.Player(payment.PayeeSeat).Vouchers += payment.Amount;
+                    foreach (TollCalculator.Payment payment in plan.Toll.Payments)
+                    {
+                        player.Vouchers -= payment.Amount;
+                        if (payment.PayeeSeat != TollCalculator.SupplyPayee)
+                            state.Player(payment.PayeeSeat).Vouchers += payment.Amount;
+                    }
                 }
 
                 foreach (int nodeId in plan.Nodes)

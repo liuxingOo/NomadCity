@@ -187,25 +187,28 @@ namespace NomadCity.Tests
         }
 
         [Test]
-        public void Setup_公共供应堆与玩家标记_初始数量正确()
+        public void Setup_玩家标记_初始数量正确()
         {
             GameState state = NewGame(4).State;
 
-            Assert.AreEqual(35, state.SupplyOriginitePrime);
-            // 70 张金券里，按顺位 10+12+14+18=54 张发给了玩家，供应堆剩 16。
-            Assert.AreEqual(16, state.SupplyVouchers);
             foreach (PlayerState player in state.Players) Assert.AreEqual(30, player.MarkersInSupply);
         }
 
         [Test]
-        public void Setup_初始资金总额与供应堆减少量一致()
+        public void Setup_各人数局初始资金总额_与人数变体一致()
         {
             foreach (int playerCount in new[] { 2, 3, 4 })
             {
                 GameState state = NewGame(playerCount).State;
+                PlayerCountVariant variant = PlayerCountVariant.For(playerCount);
+
+                int expected = 0;
+                for (int order = 0; order < playerCount; order++) expected += variant.InitialVouchers(order);
+
                 int dealt = 0;
                 foreach (PlayerState player in state.Players) dealt += player.Vouchers;
-                Assert.AreEqual(70 - dealt, state.SupplyVouchers, $"{playerCount} 人局的供应堆金券不对。");
+
+                Assert.AreEqual(expected, dealt, $"{playerCount} 人局的初始资金总额不对。");
             }
         }
 
@@ -495,6 +498,25 @@ namespace NomadCity.Tests
             Assert.AreEqual(30, player.MarkersInSupply, "放弃后结果段不应执行。");
             Assert.IsTrue(command.Report.Declined);
             Assert.IsTrue(engine.State.Map.Node(1).EventResolved);
+        }
+
+        [Test]
+        public void 结算事件选项_带玩家答案时_按选中的空格放置影响力()
+        {
+            GameEngine engine = EventGame(409); // 锈锤领地·选项 0：支付金券×4 → 放置影响力
+            PlayerState player = engine.State.Player(0);
+
+            // 玩家点的是第 2 个候选空格（答案下标 1），而不是引擎默认的第 1 个。
+            var command = new ResolveEventOptionCommand(0, 1, 0, acceptCost: true,
+                choices: new RecordedChoices(new[] { 1 }, strict: false));
+            CommandResult result = engine.Dispatch(command);
+
+            Assert.IsTrue(result.Ok, result.Error);
+            Assert.AreEqual(29, player.MarkersInSupply, "结果段应放置 1 个影响力标记。");
+            Assert.AreEqual(0, engine.State.Map.Node(1).Slots.OwnerOf(1),
+                "应当放在玩家选中的那个空格（下标 1）。");
+            Assert.AreEqual(-1, engine.State.Map.Node(1).Slots.OwnerOf(0),
+                "没选的那一格应当还是空的 —— 界面传答案时不能再取第一项。");
         }
     }
 }

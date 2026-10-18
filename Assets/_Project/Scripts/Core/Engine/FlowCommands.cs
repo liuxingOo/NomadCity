@@ -172,12 +172,29 @@ namespace NomadCity.Core.Engine
         /// <summary>是否支付条件段（「→」前的操作）；选项无代价时无意义。</summary>
         public readonly bool AcceptCost;
 
-        public ResolveEventOptionCommand(int seat, int nodeId, int optionIndex, bool acceptCost = true)
+        /// <summary>
+        /// 是否发放选项奖励。默认为 true（正常玩法）。
+        /// 开发者模式的自动开局传 false：只把该事件标记为「已结算」，不改变任何玩家的资源 / 金券，
+        /// 让开局状态保持可预测（不替玩家白拿奖励）。
+        /// </summary>
+        public readonly bool GrantRewards;
+
+        /// <summary>
+        /// 选项效果里需要玩家点选时由它回答（如「放置影响力」要点一个合法空格）。
+        /// 不传则用「总是取第一个合法项」的自动结算 —— 界面正常玩法都会传
+        /// <see cref="RecordedChoices"/>，由玩家自己选。
+        /// </summary>
+        public readonly IEffectChoices Choices;
+
+        public ResolveEventOptionCommand(int seat, int nodeId, int optionIndex, bool acceptCost = true,
+            bool grantRewards = true, IEffectChoices choices = null)
         {
             ActorSeat = seat;
             NodeId = nodeId;
             OptionIndex = optionIndex;
             AcceptCost = acceptCost;
+            GrantRewards = grantRewards;
+            Choices = choices;
         }
 
         public int ActorSeat { get; }
@@ -230,10 +247,16 @@ namespace NomadCity.Core.Engine
         public void Apply(GameState state)
         {
             MapNodeState node = state.Map.Node(NodeId);
-            EventCardDef card = state.Catalog.Event(node.EventCardId);
-            EventOption option = card.Options[OptionIndex];
 
-            Report = EffectResolver.ExecuteOption(state, ActorSeat, option, AcceptCost, anchorNodeId: NodeId);
+            // GrantRewards=false（开发者模式自动开局）：不结算选项、不发奖励，只把事件标记为已结算，
+            // 避免资源点留下一个谁也点不了的「悬空事件」。
+            if (GrantRewards)
+            {
+                EventCardDef card = state.Catalog.Event(node.EventCardId);
+                EventOption option = card.Options[OptionIndex];
+                Report = EffectResolver.ExecuteOption(state, ActorSeat, option, AcceptCost, Choices,
+                    anchorNodeId: NodeId);
+            }
 
             // 含主动放弃 / 条件不足，都算这个资源点结算过了（不接受反复重试领奖励）。
             node.EventResolved = true;

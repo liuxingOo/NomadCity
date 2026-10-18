@@ -34,8 +34,21 @@ namespace NomadCity.UI
         [Tooltip("每个牌位上的牌名文本，与 Card Buttons 一一对应（可选）")]
         [SerializeField] private TMP_Text[] cardLabels = Array.Empty<TMP_Text>();
 
+        [Tooltip("每个牌位上的卡面 Image，与 Card Buttons 一一对应（可选；装饰用，Raycast Target 关掉）")]
+        [SerializeField] private Image[] cardImages = Array.Empty<Image>();
+
+        [Tooltip("设施牌卡面 sprite 库：下标 → 牌 id 的映射见 SpriteIndexOf（100–140 → 0–40，核心指挥塔 200–203 → 41–44，" +
+                 "延伸枢纽 300–302 → 45–47）。按此顺序把 Assets/_Project/Art/Cards/Facility/card_facility.jpg 切出的子 Sprite 拖进来即可。")]
+        [SerializeField] private Sprite[] cardFaces = Array.Empty<Sprite>();
+
         /// <summary>点了第几个牌位（0 起）。</summary>
         public event Action<int> CardClicked;
+
+        /// <summary>
+        /// 每个牌位 Image 在场景里原本的 sprite（占位贴图）。刷新时若该牌位没有卡面就退回它，
+        /// 而不是把 Image 关掉 —— 关掉会连带关掉 Button 的 Target Graphic，那个牌位就点不动了。
+        /// </summary>
+        private Sprite[] placeholderSprites = Array.Empty<Sprite>();
 
         /// <summary>
         /// 开关弹窗。宿主容器始终激活（避免 Awake 里的按钮绑定失效），只切 Root 的显隐。
@@ -48,6 +61,8 @@ namespace NomadCity.UI
 
         private void Awake()
         {
+            CachePlaceholders();
+
             if (root == null)
                 Debug.LogWarning("[设施供应区] 没有接「Root」——面板会一直显示。要走「点建设才弹出」的话，" +
                                  "请在场景里新建弹窗根并拖进本组件的 Root 字段。", this);
@@ -57,9 +72,40 @@ namespace NomadCity.UI
                 Button button = cardButtons[i];
                 if (button == null) continue;
 
+                NeutralizeDisabledTint(button);
+
                 int index = i; // 闭包捕获：每个按钮绑定自己的下标
                 button.onClick.AddListener(() => CardClicked?.Invoke(index));
             }
+        }
+
+        /// <summary>
+        /// 让「不可点」不再压暗目标图形。卡面位复用的就是这个 Image（Button 的 Target Graphic），
+        /// Unity 默认的禁用色带 50% 透明，会把卡面蒙上一层灰。只动禁用色，按下/高亮反馈保留。
+        /// 幂等：Awake 与 Refresh 各调一次 —— Refresh 可能比 Awake 先被调到，那边是保险。
+        /// </summary>
+        private static void NeutralizeDisabledTint(Button button)
+        {
+            if (button.colors.disabledColor == Color.white) return;
+
+            ColorBlock colors = button.colors;
+            colors.disabledColor = Color.white;
+            button.colors = colors;
+        }
+
+        /// <summary>
+        /// 记下每个牌位 Image 在场景里原本的 sprite（占位贴图）——只记一次。
+        /// 不能只在 Awake 里做一次就完：GameBootstrap 的 Awake 会先一步调到 <see cref="Refresh"/>，
+        /// 那时本组件的 Awake 可能还没执行，缓存仍是空的。这里按需补记，顺带保证下标对齐。
+        /// </summary>
+        private void CachePlaceholders()
+        {
+            if (placeholderSprites.Length == cardImages.Length) return;
+
+            var cached = new Sprite[cardImages.Length];
+            for (int i = 0; i < cardImages.Length; i++)
+                cached[i] = cardImages[i] != null ? cardImages[i].sprite : null;
+            placeholderSprites = cached;
         }
 
         /// <summary>
@@ -68,18 +114,48 @@ namespace NomadCity.UI
         /// </summary>
         public void Refresh(GameState state, bool interactable)
         {
+            CachePlaceholders();
+
             for (int i = 0; i < cardButtons.Length; i++)
             {
                 Button button = cardButtons[i];
                 if (button == null) continue;
 
+                NeutralizeDisabledTint(button);
+
                 int cardId = state != null && i < state.FacilitySupply.Count ? state.FacilitySupply[i] : -1;
                 button.gameObject.SetActive(cardId >= 0);
                 button.interactable = interactable && cardId >= 0;
 
+                int faceIndex = SpriteIndexOf(cardId);
+                Sprite face = faceIndex >= 0 && faceIndex < cardFaces.Length ? cardFaces[faceIndex] : null;
+
+                if (i < cardImages.Length && cardImages[i] != null)
+                    cardImages[i].sprite = face != null ? face : placeholderSprites[i];
+
+                // 卡面自带设施名，有卡面时就不再叠文本（否则名字压在图上）。
                 if (i < cardLabels.Length && cardLabels[i] != null)
-                    cardLabels[i].text = cardId >= 0 ? NameOf(state, cardId) : string.Empty;
+                    cardLabels[i].text = cardId >= 0 && face == null ? NameOf(state, cardId) : string.Empty;
             }
+        }
+
+        /// <summary>
+        /// 设施牌 id → <see cref="cardFaces"/> 下标。
+        /// 普通设施 100–140 → 0–40（按素材拼版图从左到右、从上到下编号，跳过其中的延伸枢纽槽位）；
+        /// 核心指挥塔 200–203 → 41–44；延伸枢纽 300–302 → 45–47；其余 id 返回 -1。
+        /// </summary>
+        public static int SpriteIndexOf(int cardId)
+        {
+            if (cardId >= CardIds.FacilityBase && cardId < CardIds.FacilityBase + CardCounts.StandardFacilities)
+                return cardId - CardIds.FacilityBase;
+
+            if (cardId >= CardIds.CoreCommandTowerBase && cardId < CardIds.CoreCommandTowerBase + CardCounts.CoreCommandTowers)
+                return CardCounts.StandardFacilities + (cardId - CardIds.CoreCommandTowerBase);
+
+            if (cardId >= CardIds.ExtensionHubBase && cardId < CardIds.ExtensionHubBase + CardCounts.ExtensionHubs)
+                return CardCounts.StandardFacilities + CardCounts.CoreCommandTowers + (cardId - CardIds.ExtensionHubBase);
+
+            return -1;
         }
 
         private static string NameOf(GameState state, int cardId)
