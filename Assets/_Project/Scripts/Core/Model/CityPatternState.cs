@@ -72,44 +72,47 @@ namespace NomadCity.Core.Model
         }
 
         /// <summary>
-        /// 该玩家在这张样式牌上是否还有可用的标记（用于判断能不能使用特殊行动，§10.2-4）：
-        /// I 级的可用格是「未使用」区（第 0 格）；II 级的可用格是「2」（第 0 格）与「1」（第 2 格）。
+        /// 该玩家在这张样式牌上**第一个**放下的标记（越早放下就越靠前，见 <see cref="Markers"/> 的追加顺序）。
+        /// **剩余可用次数只认它**：同一玩家重复宣告同一张样式牌时，新标记照样落在「2」区（§6.5b 步 2），
+        /// 但次数由本局第一次宣告时定下的那个标记决定，后面的标记不会把次数重置或累加
+        /// （2026-10-19 与规则持有者确认）。
         /// </summary>
-        public bool HasUsableMarker(int seat)
+        public PatternMarker FirstMarkerOf(int seat)
         {
             foreach (PatternMarker marker in markers)
-            {
-                if (marker.Seat != seat) continue;
-                if (Level >= 2)
-                {
-                    if (marker.Position == 0 || marker.Position == 2) return true;
-                }
-                else if (marker.Position == 0)
-                {
-                    return true;
-                }
-            }
-            return false;
+                if (marker.Seat == seat) return marker;
+            return null;
         }
 
         /// <summary>
-        /// 使用特殊行动后把该玩家一个可用格上的标记**下移 1 格**（§10.2-4）：
-        /// I 级 0→1（未使用→已使用）；II 级优先 0→1（「2」→已使用），没有第 0 格的标记时 2→3（「1」→已使用）。
+        /// 该玩家在这张样式牌上是否还有可用的特殊行动次数（§10.2-4）：只看
+        /// <see cref="FirstMarkerOf"/> 停在哪一格 —— I 级的「未使用」（第 0 格）、
+        /// II 级的「2」（第 0 格）与「1」（第 2 格）才算可用，停在「已使用」或「0」时不可用。
+        /// 堆在「2」区的后续标记不计入次数。
+        /// </summary>
+        public bool HasUsableMarker(int seat)
+        {
+            PatternMarker marker = FirstMarkerOf(seat);
+            if (marker == null) return false;
+
+            if (Level >= 2) return marker.Position == 0 || marker.Position == 2;
+            return marker.Position == 0;
+        }
+
+        /// <summary>
+        /// 使用特殊行动后把该玩家的第一个标记**下移 1 格**（§10.2-4）：
+        /// I 级 0→1（未使用→已使用）；II 级 0→1（「2」→已使用）、2→3（「1」→已使用）。
+        /// 只动第一个标记，所以重复宣告堆上来的标记不会让可用次数变多。
         /// 返回是否真的移动了标记。
         /// </summary>
         public bool AdvanceMarker(int seat)
         {
-            PatternMarker chosen = null;
-            foreach (PatternMarker marker in markers)
-            {
-                if (marker.Seat != seat) continue;
-                if (marker.Position == 0) { chosen = marker; break; }   // 优先第 0 格
-                if (Level >= 2 && marker.Position == 2) chosen ??= marker;
-            }
-            if (chosen == null) return false;
+            PatternMarker marker = FirstMarkerOf(seat);
+            if (marker == null) return false;
 
-            chosen.Position = chosen.Position == 0 ? 1 : 3;
-            return true;
+            if (marker.Position == 0) { marker.Position = 1; return true; }
+            if (Level >= 2 && marker.Position == 2) { marker.Position = 3; return true; }
+            return false;
         }
 
         /// <summary>

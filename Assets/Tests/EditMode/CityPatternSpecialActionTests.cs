@@ -299,6 +299,32 @@ namespace NomadCity.Tests
             Assert.IsTrue(new UsePatternSpecialActionCommand(0, SupplyRelay).ConsumesAction);
         }
 
+        // —— 剩余次数只认第一个标记（2026-10-19 与规则持有者确认） ——
+
+        [Test]
+        public void 二级样式_重复宣告不重置特殊行动剩余次数()
+        {
+            CityPatternState pattern = state.PatternStateOf(MobilitySystem);
+
+            Mark(MobilitySystem);                      // 本局第一次宣告 → 标记落在「2」区（可用 2 次）
+            Assert.IsTrue(pattern.HasUsableMarker(0));
+
+            Assert.IsTrue(pattern.AdvanceMarker(0));   // 用掉 1 次：0→1（已使用）
+            pattern.ResetForCleanup();                 // 收尾：1→2（「1」，还剩 1 次）
+            Assert.IsTrue(pattern.HasUsableMarker(0));
+
+            Assert.IsTrue(pattern.AdvanceMarker(0));   // 用掉最后 1 次：2→3
+            pattern.ResetForCleanup();                 // 收尾：3→4（「0」，次数用尽）
+            Assert.IsFalse(pattern.HasUsableMarker(0));
+
+            Mark(MobilitySystem);                      // 重复宣告 → 新标记照样落在「2」区
+            Mark(MobilitySystem);
+
+            Assert.IsFalse(pattern.HasUsableMarker(0),
+                "重复宣告堆在「2」区的标记不该把次数重置回来，剩余次数只看第一个标记。");
+            Assert.AreEqual(3, pattern.Markers.Count, "宣告次数照常记录（供按标记数结算的效果使用）。");
+        }
+
         // —— 工具 ——
 
         private void Mark(int patternId, int position = 0) => state.PatternStateOf(patternId).PlaceMarker(0, position);
