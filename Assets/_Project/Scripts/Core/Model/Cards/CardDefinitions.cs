@@ -8,9 +8,12 @@ namespace NomadCity.Core.Model
     /// 引擎内部一律用 int id 表示卡牌，牌堆 / 手牌 / 供应区里存的都是 id；
     /// 这些定义只用于查名字与读取静态属性，规则实现不依赖卡面文案。
     ///
-    /// 事件牌与 41 张普通设施牌的牌面数据**已录入**（见 `Doc/EventCards.md`、`Doc/FacilityCards.md`）；
-    /// 角色牌等其余尚未录入的牌仍留默认值，待后续扫描录入。
-    /// 届时数据由 Data 层的 ScriptableObject 转换为这些定义（见 <see cref="ICardCatalog"/>）。
+    /// 基础版牌面数据**均已录入**：22 张事件牌（`Doc/EventCards.md`）、41 张普通设施牌（`Doc/FacilityCards.md`）、
+    /// 20 张角色牌（`Doc/CardEffects.md` §3）、6 张城市样式牌（阵型 / 分数 / 特殊行动费用与效果，`Doc/RuleSpec.md` §10.2 / §6.3f）。
+    /// 城市样式牌牌面只有「宣告条件 + 宣告分数 + 解锁的特殊行动 + 标记轨道」四块，**没有**独立的「宣告效果」栏
+    /// （2026-10-19 核对实体牌面 `Art/Cards/CityPattern/card_cp_lv1.jpg` / `card_cp_lv2.jpg`）。
+    /// 企业扩展部分见 `Doc/EnterpriseExpansion.md`。
+    /// 后续数据会由 Data 层的 ScriptableObject 转换为这些定义（见 <see cref="ICardCatalog"/>）。
     /// </summary>
 
     /// <summary>角色牌的两种互相独立的效果（RuleSpec §6.5a）。</summary>
@@ -710,7 +713,7 @@ namespace NomadCity.Core.Model
         /// <summary>资源点指示物提供的数量：1 或 2（红色区域「X2」，RuleSpec §10.3）。</summary>
         public readonly int TokenAmount;
 
-        /// <summary>牌名右上角带「4」标记 = 三人局放回游戏盒（RuleSpec §4.1）。</summary>
+        /// <summary>牌名右上角带「4」标记 = 2／3 人局放回游戏盒（RuleSpec §4.1 / §12）。</summary>
         public readonly bool FourPlayerOnly;
 
         /// <summary>牌名右上角带「E」标记 = 企业扩展专用替换件。</summary>
@@ -806,9 +809,8 @@ namespace NomadCity.Core.Model
 
     /// <summary>
     /// 城市样式牌定义。基础版 6 张 + 企业扩展 6 张：I 级 4 张、II 级 2 张（RuleSpec §3 / §10.2；
-    /// 扩展见 <c>Doc/EnterpriseExpansion.md</c> §2 / §3.1）。宣告条件与奖励分数已按牌面录入；
-    /// 宣告效果 / 解锁的特殊行动等牌面数据在录入前一律留默认值，因此本类仍是「数据驱动」的：
-    /// 录入后 <c>DeclareCityPatternCommand</c> 自动生效，无需改动规则代码。
+    /// 扩展见 <c>Doc/EnterpriseExpansion.md</c> §2 / §3.1）。宣告条件、奖励分数与解锁的特殊行动均已按牌面录入；
+    /// 牌面无独立的「宣告效果」栏，所以宣告时只结算分数与放标记（<c>DeclareCityPatternCommand</c>），不另设效果字段。
     /// </summary>
     public sealed class CityPatternCardDef
     {
@@ -826,9 +828,6 @@ namespace NomadCity.Core.Model
         /// <summary>宣告条件：一组带颜色的相对格子（位置 + 颜色）。牌面未录入时为 null。</summary>
         public readonly PatternCondition Condition;
 
-        /// <summary>宣告效果，宣告第三步结算（§6.5b 步 3 / §11）；空表示这张牌没有宣告效果。牌面未录入时为空。</summary>
-        public readonly IReadOnlyList<RewardOp> DeclareEffects;
-
         /// <summary>
         /// 解锁的特殊行动的费用（§6.3f / §10.2-4），使用特殊行动时先结算；空表示这次行动不花费用。
         /// 与设施的「资源费用」不同，这里是直接可执行的效果序列（可含 <see cref="RewardKind.PaySpread"/> 之类的自由分配）。
@@ -839,7 +838,7 @@ namespace NomadCity.Core.Model
         public readonly IReadOnlyList<RewardOp> SpecialActionEffects;
 
         public CityPatternCardDef(int id, int level, string name = null, int score = 0,
-            PatternCondition condition = null, IReadOnlyList<RewardOp> declareEffects = null,
+            PatternCondition condition = null,
             IReadOnlyList<RewardOp> specialActionCost = null,
             IReadOnlyList<RewardOp> specialActionEffects = null)
         {
@@ -848,7 +847,6 @@ namespace NomadCity.Core.Model
             Name = name;
             Score = score;
             Condition = condition;
-            DeclareEffects = declareEffects ?? Array.Empty<RewardOp>();
             SpecialActionCost = specialActionCost ?? Array.Empty<RewardOp>();
             SpecialActionEffects = specialActionEffects ?? Array.Empty<RewardOp>();
         }

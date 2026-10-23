@@ -518,5 +518,163 @@ namespace NomadCity.Tests
             Assert.AreEqual(-1, engine.State.Map.Node(1).Slots.OwnerOf(0),
                 "没选的那一格应当还是空的 —— 界面传答案时不能再取第一项。");
         }
+
+        // ————————————————————— 人数变体（§12）—————————————————————
+
+        private static int TotalEvents(GameState state) =>
+            state.EventDeckGreen.Count + state.EventDeckYellow.Count + state.EventDeckRed.Count;
+
+        private static bool HasEvent(GameState state, int cardId) =>
+            state.EventDeckGreen.Contains(cardId) || state.EventDeckYellow.Contains(cardId)
+            || state.EventDeckRed.Contains(cardId);
+
+        // 标「4」的四张（§4.1）：405 废弃矿坑 / 410 情报交换 / 413 敌对生态圈 / 420 深层矿床。
+        private static readonly int[] FourPlayerOnlyEvents = { 405, 410, 413, 420 };
+
+        [Test]
+        public void Setup_二三人局_事件牌放回标4的四张()
+        {
+            foreach (int playerCount in new[] { 2, 3 })
+            {
+                GameState state = NewGame(playerCount).State;
+
+                Assert.AreEqual(CardCounts.EventCards - FourPlayerOnlyEvents.Length, TotalEvents(state),
+                    $"{playerCount} 人局的事件牌总数应为 18。");
+                foreach (int id in FourPlayerOnlyEvents)
+                    Assert.IsFalse(HasEvent(state, id), $"{playerCount} 人局不该出现标「4」的牌 {id}。");
+            }
+        }
+
+        [Test]
+        public void Setup_四人局_事件牌放齐标4的四张()
+        {
+            GameState state = NewGame(4).State;
+
+            Assert.AreEqual(CardCounts.EventCards, TotalEvents(state));
+            foreach (int id in FourPlayerOnlyEvents)
+                Assert.IsTrue(HasEvent(state, id), $"4 人局应保留标「4」的牌 {id}。");
+        }
+
+        /// <summary>
+        /// 2 人局测试地图：N0=B-01(绿)、N1=A-01(绿)、N2=A-03(绿)，由 N0—N1—N2 两条航道相连。
+        /// B-01 在 2 人局被禁选（§12 变体 2），所以除它之外还要留两个绿色点够两个人各选一个。
+        /// </summary>
+        private static GameEngine TwoPlayerStartGame(int firstSeat = 0)
+        {
+            var map = new MapState();
+            map.Nodes.Add(new MapNodeState(0, "B-01", District.B, NodeColor.Green, false, 2));
+            map.Nodes.Add(new MapNodeState(1, "A-01", District.A, NodeColor.Green, false, 2));
+            map.Nodes.Add(new MapNodeState(2, "A-03", District.A, NodeColor.Green, false, 2));
+            map.Routes.Add(new RouteState(0, new[] { 0, 1 }, District.A, 1));
+            map.Routes.Add(new RouteState(1, new[] { 1, 2 }, District.B, 1));
+
+            GameEngine engine = GameEngine.Create(new GameSetup(2), firstSeat, map,
+                PlaceholderCardCatalog.Default, new Random(Seed));
+            engine.Dispatch(new StartGameCommand(firstSeat));
+            return engine;
+        }
+
+        [Test]
+        public void 开局选点_二人局禁选B01_四人局可以选()
+        {
+            Assert.IsFalse(TwoPlayerStartGame().Dispatch(new ChooseStartNodeCommand(0, 0)).Ok,
+                "2 人局不能选 B-01（§12 变体 2）。");
+            Assert.IsTrue(StartNodeGame(4).Dispatch(new ChooseStartNodeCommand(0, 0)).Ok,
+                "4 人局可以选 B-01。");
+        }
+
+        [Test]
+        public void 开局选点_二人局非起始玩家选完_立即在该点放1个影响力()
+        {
+            GameEngine engine = TwoPlayerStartGame(firstSeat: 0);
+            GameState state = engine.State;
+
+            Assert.IsTrue(engine.Dispatch(new ChooseStartNodeCommand(0, 1)).Ok, "起始玩家先选。");
+            Assert.AreEqual(-1, state.Map.Node(1).Slots.OwnerOf(0), "起始玩家按规则书不放影响力。");
+            Assert.AreEqual(30, state.Player(0).MarkersInSupply);
+
+            int before = state.Player(1).MarkersInSupply;
+            Assert.IsTrue(engine.Dispatch(new ChooseStartNodeCommand(1, 2)).Ok, "非起始玩家后选。");
+            Assert.AreEqual(1, state.Map.Node(2).Slots.OwnerOf(0), "影响力要放在自己刚选的资源点上。");
+            Assert.AreEqual(before - 1, state.Player(1).MarkersInSupply);
+        }
+
+        [Test]
+        public void 开局选点_二人局起始玩家是座位1时_座位0放影响力()
+        {
+            GameEngine engine = TwoPlayerStartGame(firstSeat: 1);
+            GameState state = engine.State;
+
+            Assert.IsTrue(engine.Dispatch(new ChooseStartNodeCommand(1, 1)).Ok);
+            Assert.IsTrue(engine.Dispatch(new ChooseStartNodeCommand(0, 2)).Ok);
+
+            Assert.AreEqual(-1, state.Map.Node(1).Slots.OwnerOf(0), "起始玩家（座位 1）不放。");
+            Assert.AreEqual(0, state.Map.Node(2).Slots.OwnerOf(0), "非起始玩家（座位 0）放 1 个。");
+        }
+
+        // ————————————————————— 2 人局：回合开头弃设施牌（§12 变体 4）—————————————————————
+
+        [Test]
+        public void 二人局_回合开头先弃设施牌_顺序与补牌正确()
+        {
+            GameEngine engine = NewGame(2, firstSeat: 0);
+            GameState state = engine.State;
+            Assert.IsTrue(engine.Dispatch(new StartGameCommand(0)).Ok);
+
+            Assert.AreEqual(2, state.SupplyDiscardRemaining, "2 人局本回合要弃 2 张。");
+            Assert.AreEqual(0, state.SupplyDiscardSeat, "从本回合起始玩家（座位 0）起。");
+
+            // 还没弃完之前不许盖放角色牌。
+            int card0 = state.Player(0).HandCharacterCards[0];
+            Assert.IsFalse(engine.Dispatch(new PlaceCharacterCardCommand(0, card0)).Ok,
+                "弃设施牌之前不能盖放角色牌。");
+
+            // 阶段也不能被推进：命令本身合法，但 TurnFlow 会拦住。
+            Assert.IsTrue(engine.Dispatch(new AdvancePhaseCommand()).Ok);
+            Assert.AreEqual(TurnPhase.CharacterPlacement, state.Phase, "还没弃完设施牌，阶段不能被推进。");
+
+            // 顺序不对（座位 1 抢先弃）被拒。
+            Assert.IsFalse(engine.Dispatch(new DiscardSupplyFacilityCommand(1, state.FacilitySupply[0])).Ok);
+
+            // 座位 0 弃 1 张：供应区补回 6 张、牌堆少 1 张、被弃牌不在供应区。
+            int deckBefore = state.FacilityDeck.Count;
+            int discarded = state.FacilitySupply[0];
+            Assert.IsTrue(engine.Dispatch(new DiscardSupplyFacilityCommand(0, discarded)).Ok);
+            Assert.AreEqual(BoardSetup.FacilitySupplySize, state.FacilitySupply.Count, "要立刻补到 6 张。");
+            Assert.AreEqual(deckBefore - 1, state.FacilityDeck.Count);
+            CollectionAssert.DoesNotContain(state.FacilitySupply, discarded);
+            Assert.AreEqual(1, state.SupplyDiscardRemaining);
+            Assert.AreEqual(1, state.SupplyDiscardSeat, "轮到座位 1。");
+
+            // 轮到座位 1 了，座位 0 再弃一张被拒。
+            Assert.IsFalse(engine.Dispatch(new DiscardSupplyFacilityCommand(0, state.FacilitySupply[0])).Ok);
+
+            // 座位 1 弃完：整步结束，闸门放开。
+            Assert.IsTrue(engine.Dispatch(new DiscardSupplyFacilityCommand(1, state.FacilitySupply[0])).Ok);
+            Assert.AreEqual(0, state.SupplyDiscardRemaining);
+            Assert.AreEqual(-1, state.SupplyDiscardSeat);
+            Assert.IsTrue(engine.Dispatch(new PlaceCharacterCardCommand(0, card0)).Ok, "弃完之后才允许盖放。");
+        }
+
+        [Test]
+        public void 三人四人局_回合开头没有弃设施牌这一步()
+        {
+            foreach (int playerCount in new[] { 3, 4 })
+            {
+                GameEngine engine = NewGame(playerCount, firstSeat: 0);
+                Assert.IsTrue(engine.Dispatch(new StartGameCommand(0)).Ok);
+
+                Assert.AreEqual(0, engine.State.SupplyDiscardRemaining, $"{playerCount} 人局不该要弃牌。");
+                Assert.AreEqual(-1, engine.State.SupplyDiscardSeat);
+            }
+        }
+
+        [Test]
+        public void 二人局_不在盖放阶段的弃设施牌被拒()
+        {
+            GameEngine engine = NewGame(2, firstSeat: 0);
+            Assert.IsFalse(engine.Dispatch(new DiscardSupplyFacilityCommand(0, 1)).Ok,
+                "还没开始游戏（不是盖放阶段）时不能弃设施牌。");
+        }
     }
 }

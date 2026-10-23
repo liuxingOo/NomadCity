@@ -37,6 +37,11 @@ namespace NomadCity.Core.Engine
             if (player.PlacedCharacterCard >= 0)
                 return CommandResult.Fail("你本回合已经盖放过角色牌了（§10.1.1）。");
 
+            // 2 人局（§12 变体 4）：盖放前要先弃完设施牌，先弃后盖。
+            if (state.SupplyDiscardRemaining > 0)
+                return CommandResult.Fail(
+                    "2 人局盖放角色牌前，每名玩家要先从设施供应区弃 1 张设施牌（§12 变体 4）。");
+
             // 手牌空时按规则先回收弃牌区，所以候选池是「手牌 ∪ 弃牌区」。
             IReadOnlyList<int> pool = player.HandCharacterCards.Count > 0
                 ? player.HandCharacterCards

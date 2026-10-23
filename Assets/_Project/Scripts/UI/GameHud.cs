@@ -26,10 +26,30 @@ namespace NomadCity.UI
 
         private GameEngine engine;
 
+        /// <summary>各座位的玩家昵称（按座位号）；缺省时回退成「玩家 N」。</summary>
+        private string[] playerNames = Array.Empty<string>();
+
+        /// <summary>本机座位（-1 = 单机热座，不标「你」）。</summary>
+        private int localSeat = -1;
+
         /// <summary>绑定引擎并刷新一次。之后每次状态变化由 GameScreenController 调 <see cref="Refresh"/>。</summary>
         public void Bind(GameEngine engine)
         {
             this.engine = engine;
+            Refresh();
+        }
+
+        /// <summary>准备房间同步来的昵称，按座位号排列。</summary>
+        public void SetPlayerNames(string[] names)
+        {
+            playerNames = names ?? Array.Empty<string>();
+            Refresh();
+        }
+
+        /// <summary>本机座位；联机时用来在名字后面标「（你）」，免得分不清自己是哪一边。</summary>
+        public void SetLocalSeat(int seat)
+        {
+            localSeat = seat;
             Refresh();
         }
 
@@ -63,21 +83,36 @@ namespace NomadCity.UI
             }
         }
 
-        private static string Describe(GameState state, PlayerState player)
+        private string Describe(GameState state, PlayerState player)
         {
             ResourcePool r = player.Resources;
             string city = player.MobileCityNodeId < 0
                 ? "未停靠"
                 : state.Map.Node(player.MobileCityNodeId).Code;
 
-            return $"{SeatName(state, player.SeatIndex)}  分 {player.Score} · 券 {player.Vouchers} · " +
+            // 行动顺位：SeatOrder[0] 是起始玩家（持有起始玩家标记）；旧快照没有顺序时按座位号回退。
+            int orderIndex = Array.IndexOf(state.SeatOrder ?? Array.Empty<int>(), player.SeatIndex);
+            string order = orderIndex >= 0
+                ? $"顺位 {orderIndex + 1}{(orderIndex == 0 ? "（起始）" : string.Empty)}"
+                : $"顺位 {player.SeatIndex + 1}";
+
+            return $"{SeatName(state, player.SeatIndex)}  {EntrepreneurCatalog.NameOf(player.Color)} · {order}  " +
+                   $"分 {player.Score} · 券 {player.Vouchers} · " +
                    $"岩 {r.Orirock} 石 {r.Originium} 铁 {r.Oriron} 纯 {r.OriginitePrime} · " +
                    $"标记 {player.MarkersInSupply} · 城市 {city}";
         }
 
-        /// <summary>座位名：玩家 1..N；座位号非法（如 -1）时显示「—」。</summary>
-        private static string SeatName(GameState state, int seat) =>
-            seat < 0 || seat >= state.Players.Count ? "—" : $"玩家 {seat + 1}";
+        /// <summary>座位名：优先用准备房间同步来的昵称；没有时回退成「玩家 1..N」；座位号非法（如 -1）时显示「—」。</summary>
+        private string SeatName(GameState state, int seat)
+        {
+            if (seat < 0 || seat >= state.Players.Count) return "—";
+
+            string name = seat < playerNames.Length && !string.IsNullOrWhiteSpace(playerNames[seat])
+                ? playerNames[seat]
+                : $"玩家 {seat + 1}";
+
+            return seat == localSeat ? name + "（你）" : name;
+        }
 
         /// <summary>
         /// 玩家行动阶段显示「（第 x/2 轮）」—— 一个回合里要走两轮玩家行动（§5 / §6.1），

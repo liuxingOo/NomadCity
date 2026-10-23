@@ -32,8 +32,8 @@ namespace NomadCity.Core.Engine
         public event Action<GameState> GameEnded;
 
         /// <summary>
-        /// 采集阶段结算完成：(state, 报告)。UI 可据此显示本次采集的收成与路费。
-        /// ⚠️ 临时占位（M3）：目前进入采集阶段即自动结算，见 <see cref="ResolveHarvestAutomatically"/>。
+        /// 采集阶段结算完成：(state, 报告)。UI 据此显示本次采集的收成与路费。
+        /// 由 <see cref="ResolveHarvest"/> 广播 —— 界面收集完各玩家的选择后调用它。
         /// </summary>
         public event Action<GameState, HarvestReport> HarvestResolved;
 
@@ -46,13 +46,23 @@ namespace NomadCity.Core.Engine
         /// 卡牌一律用 id 表示：catalog 决定「id 对应什么牌」，rng 决定洗牌结果（同种子可复现）。
         /// </summary>
         public static GameEngine Create(GameSetup setup, int firstPlayerSeat = 0, MapState map = null,
-            ICardCatalog catalog = null, Random rng = null)
+            ICardCatalog catalog = null, Random rng = null, PlayerColor[] seatColors = null,
+            int[] seatOrder = null)
         {
             var state = new GameState(setup);
 
+            // 开局随机排出的行动顺序：必须先于 BoardSetup（初始资金按顺序发放）。
+            if (seatOrder != null && seatOrder.Length == setup.PlayerCount)
+                state.SeatOrder = (int[])seatOrder.Clone();
+
             for (int seat = 0; seat < setup.PlayerCount; seat++)
             {
-                state.Players.Add(new PlayerState(seat, (PlayerColor)seat)
+                // 座位颜色由开局前的选色决定；没传时退回「座位号即颜色」的默认分配。
+                PlayerColor color = seatColors != null && seat < seatColors.Length
+                    ? seatColors[seat]
+                    : (PlayerColor)seat;
+
+                state.Players.Add(new PlayerState(seat, color)
                 {
                     MarkersInSupply = 30, // 规则规格 4.2：每人 30 个玩家标记
                 });
@@ -83,6 +93,13 @@ namespace NomadCity.Core.Engine
 
             if (command.ConsumesAction) TurnFlow.CompletePlayerAction(State);
 
+            // 采集结算也走命令通道；界面仍按原有事件接收结算简报（§7）。
+            // 联机时由各玩家提交自己的选择，最后一条提交会当场结算并带回报告。
+            if (command is ResolveHarvestCommand harvest && harvest.Report != null)
+                HarvestResolved?.Invoke(State, harvest.Report);
+            else if (command is SubmitHarvestChoiceCommand submit && submit.Report != null)
+                HarvestResolved?.Invoke(State, submit.Report);
+
             // 座位推进发生在 CommandApplied 之后，界面不会因为上面那次广播再刷新一次 ——
             // 不在这里补一次，顶栏与行动提示就会一直显示上一位玩家。
             if (State.ActiveSeat != beforeSeat) SeatAdvanced?.Invoke(State, beforeSeat, State.ActiveSeat);
@@ -93,29 +110,25 @@ namespace NomadCity.Core.Engine
             if (State.Phase != beforePhase)
             {
                 PhaseChanged?.Invoke(State, beforePhase, State.Phase);
-
-                // ⚠️ 临时占位（M3）：进入采集阶段就自动结算。
-                // 完整的 §7「玩家自选资源点 + 路费预览」UI 留到下一期，届时删除这里。
-                if (State.Phase == TurnPhase.Harvest) ResolveHarvestAutomatically();
             }
 
             return result;
         }
 
-        /// <summary>
-        /// ⚠️ 临时占位（M3）：进入采集阶段时，按「每个座位采集其全部合法资源点」直接结算。
-        /// <see cref="HarvestResolver.Plan"/> 内部会按预算自动跳过付不起的点，所以这个默认值不会产生非法状态。
-        /// 采集不是「轮到某人」的主要行动，所以不走命令通道，直接作用于 state（与 TurnFlow 的其它阶段边界一致）。
-        /// </summary>
-        private void ResolveHarvestAutomatically()
-        {
-            var chosen = new Dictionary<int, IReadOnlyList<int>>();
-            for (int seat = 0; seat < State.Players.Count; seat++)
-            {
-                chosen[seat] = HarvestResolver.EligibleNodes(State, seat);
-            }
+        /// <summary>采集阶段是否还等着玩家自选资源点（界面据此进入选点流程）。</summary>
+        public bool HarvestNeedsChoices => State.Phase == TurnPhase.Harvest && State.HarvestPending;
 
-            HarvestResolved?.Invoke(State, HarvestResolver.Resolve(State, chosen));
+        /// <summary>
+        /// 结算整个采集阶段（§7）：传入每个座位选择的资源点后统一结算，并广播 <see cref="HarvestResolved"/>。
+        /// 采集不是「轮到某人」的主要行动（没有 ActiveSeat、不占行动名额），所以不推进座位；
+        /// 但它同样包成 <see cref="ResolveHarvestCommand"/> 走 <see cref="Dispatch"/> 唯一入口，
+        /// 这样联机时客户端可以靠重放同一条命令复现结算。
+        /// </summary>
+        public HarvestReport ResolveHarvest(IReadOnlyDictionary<int, IReadOnlyList<int>> chosenBySeat)
+        {
+            var command = new ResolveHarvestCommand(chosenBySeat);
+            Dispatch(command);
+            return command.Report;
         }
     }
 }

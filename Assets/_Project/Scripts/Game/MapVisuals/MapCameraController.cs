@@ -44,6 +44,11 @@ namespace NomadCity.Game
         [Tooltip("缩放速度倍率。滚一格变化太小就把这个调大，太猛就调小。")]
         [SerializeField, Min(0.1f)] private float zoomSpeed = 1f;
 
+        [Header("窗口位置")]
+        [Tooltip("地图窗口相对「屏幕正中」的像素偏移：x 正 = 往右，y 正 = 往上。" +
+                 "屏幕坐标系原点在左下角，所以「往下」要填负数。地图、边框、外圈遮罩会一起跟着走。")]
+        [SerializeField] private Vector2 windowOffset;
+
         [Header("边框")]
         [Tooltip("可选：你自己做的边框图。填了之后代码会把它的位置和大小自动摆成紧贴地图窗口，你只要给一张图。")]
         [SerializeField] private RectTransform borderFrame;
@@ -158,8 +163,9 @@ namespace NomadCity.Game
             float pixelsPerUnit = screenHeight / (2f * Mathf.Max(startSize, 1e-3f));
             var windowSize = new Vector2(mapWidth * pixelsPerUnit, mapHeight * pixelsPerUnit);
 
-            // ② 窗口居中，并把相机渲染区域裁到窗口上 —— 地图从此只会画在窗口里面。
-            windowPixels = new Rect((screenWidth - windowSize.x) * 0.5f, (screenHeight - windowSize.y) * 0.5f,
+            // ② 窗口默认居中，再按 windowOffset 偏移；并把相机渲染区域裁到窗口上 —— 地图从此只会画在窗口里面。
+            windowPixels = new Rect((screenWidth - windowSize.x) * 0.5f + windowOffset.x,
+                (screenHeight - windowSize.y) * 0.5f + windowOffset.y,
                 windowSize.x, windowSize.y);
             camera.rect = new Rect(windowPixels.x / screenWidth, windowPixels.y / screenHeight,
                 windowPixels.width / screenWidth, windowPixels.height / screenHeight);

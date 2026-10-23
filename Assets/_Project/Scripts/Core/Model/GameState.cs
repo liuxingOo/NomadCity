@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using NomadCity.Core.Rules;
 
@@ -26,8 +27,43 @@ namespace NomadCity.Core.Model
         /// <summary>当前轮到行动的玩家座位号。</summary>
         public int ActiveSeat;
 
+        /// <summary>
+        /// 本局的行动顺序：元素是座位号，下标 0 即起始玩家。开局随机排出后在整局内固定不变，
+        /// <see cref="NextSeat"/> 按它顺时针推进；为空时退回「座位号 +1」的自然顺序。
+        /// </summary>
+        public int[] SeatOrder = Array.Empty<int>();
+
+        /// <summary>
+        /// 联机采集（§7）各座位已经提交的选点。收齐所有玩家后由最后一条
+        /// <see cref="Engine.SubmitHarvestChoiceCommand"/> 当场统一结算并清空；
+        /// 单机热座仍然走 <see cref="Engine.ResolveHarvestCommand"/>，不用这个字段。
+        /// </summary>
+        public readonly Dictionary<int, List<int>> HarvestChoices = new();
+
         /// <summary>玩家行动阶段内的轮次，1 或 2。</summary>
         public int ActionRound = 1;
+
+        /// <summary>
+        /// 采集阶段是否还等着玩家做选择（§7）：进入采集阶段时置 true，
+        /// 由 <see cref="Engine.GameEngine.ResolveHarvest"/> 结算后置 false。
+        /// 为 true 时不允许推进到收尾阶段，避免有人跳过整个采集。
+        /// </summary>
+        public bool HarvestPending;
+
+        /// <summary>
+        /// 城市移动（§6.4d）已走完步 1–2、正等着玩家在**出发点**放置影响力：值是出发点的资源点 id
+        /// （-1 = 没有待收尾的城市移动）。步 3 由 <see cref="Engine.MoveCityInfluenceCommand"/> 执行并把它清回 -1。
+        /// </summary>
+        public int CityMoveOriginNodeId = -1;
+
+        /// <summary>
+        /// 2 人局（§12 变体 4）本回合角色牌盖放前还要弃掉的设施牌张数：进盖放阶段时置为玩家人数，
+        /// 每弃 1 张减 1；为 0 表示没有这一步（3／4 人局恒为 0）。大于 0 时不允许盖放角色牌或推进阶段。
+        /// </summary>
+        public int SupplyDiscardRemaining;
+
+        /// <summary>2 人局本次弃设施牌轮到谁（-1 = 不需要弃牌）。顺序从本回合起始玩家起顺时针。</summary>
+        public int SupplyDiscardSeat = -1;
 
         /// <summary>整局是否已结束（第 8 回合收尾之后置为 true，进入终局结算）。</summary>
         public bool IsGameOver;
@@ -124,7 +160,12 @@ namespace NomadCity.Core.Model
                 FirstPlayerSeat = FirstPlayerSeat,
                 ActiveSeat = ActiveSeat,
                 ActionRound = ActionRound,
+                SeatOrder = SeatOrder == null ? Array.Empty<int>() : (int[])SeatOrder.Clone(),
                 IsGameOver = IsGameOver,
+                HarvestPending = HarvestPending,
+                CityMoveOriginNodeId = CityMoveOriginNodeId,
+                SupplyDiscardRemaining = SupplyDiscardRemaining,
+                SupplyDiscardSeat = SupplyDiscardSeat,
                 DeveloperMode = DeveloperMode,
                 Catalog = Catalog,
                 DistrictScores = (int[])DistrictScores.Clone(),
@@ -150,6 +191,11 @@ namespace NomadCity.Core.Model
                 copy.CityPatternStates.Add(pattern.Clone());
             }
 
+            foreach (KeyValuePair<int, List<int>> choice in HarvestChoices)
+            {
+                copy.HarvestChoices[choice.Key] = new List<int>(choice.Value);
+            }
+
             return copy;
         }
 
@@ -157,8 +203,25 @@ namespace NomadCity.Core.Model
 
         public PlayerState ActivePlayer => Players[ActiveSeat];
 
-        /// <summary>座位号顺时针方向的下一位玩家。</summary>
-        public int NextSeat(int seat) => (seat + 1) % Players.Count;
+        /// <summary>
+        /// 行动顺序里的下一位玩家。开局随机排出的顺序写在 <see cref="SeatOrder"/> 里，
+        /// 找不到该座位（或顺序没设置）时退回「座位号 +1」。
+        /// </summary>
+        public int NextSeat(int seat)
+        {
+            int count = Players.Count;
+            if (count <= 0) return 0;
+
+            if (SeatOrder == null || SeatOrder.Length != count)
+                return (seat + 1) % count;
+
+            for (int i = 0; i < count; i++)
+            {
+                if (SeatOrder[i] == seat) return SeatOrder[(i + 1) % count];
+            }
+
+            return (seat + 1) % count;
+        }
 
         /// <summary>取某张城市样式牌的标记状态；不在场上时返回 null。</summary>
         public CityPatternState PatternStateOf(int cardId)

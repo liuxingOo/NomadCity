@@ -1,4 +1,5 @@
 using NomadCity.Core.Model;
+using NomadCity.Core.Rules;
 
 namespace NomadCity.Core.Engine
 {
@@ -23,7 +24,28 @@ namespace NomadCity.Core.Engine
             state.FirstPlayerSeat = firstPlayerSeat;
             state.ActiveSeat = firstPlayerSeat;
             state.ActionRound = 1;
+            state.HarvestPending = false;
+            BeginCharacterPlacement(state);
+        }
+
+        /// <summary>
+        /// 进入「角色牌盖放」阶段。2 人局（§12 变体 4）要先要求每名玩家从设施供应区弃 1 张设施牌，
+        /// 从本回合起始玩家起顺时针；其余人数没有这一步，<see cref="GameState.SupplyDiscardRemaining"/> 置 0。
+        /// </summary>
+        private static void BeginCharacterPlacement(GameState state)
+        {
             state.Phase = TurnPhase.CharacterPlacement;
+
+            if (PlayerCountVariant.For(state).DiscardsSupplyCardEachTurn)
+            {
+                state.SupplyDiscardRemaining = state.Players.Count;
+                state.SupplyDiscardSeat = state.FirstPlayerSeat;
+            }
+            else
+            {
+                state.SupplyDiscardRemaining = 0;
+                state.SupplyDiscardSeat = -1;
+            }
         }
 
         /// <summary>
@@ -37,12 +59,17 @@ namespace NomadCity.Core.Engine
             switch (state.Phase)
             {
                 case TurnPhase.CharacterPlacement:
+                    // 2 人局还等着弃设施牌时不放行（§12 变体 4），免得整个步骤被跳过。
+                    if (state.SupplyDiscardRemaining > 0) return;
                     BeginPlayerActions(state);
                     break;
                 case TurnPhase.PlayerActions:
                     state.Phase = TurnPhase.Harvest;
+                    state.HarvestPending = true; // 采集要先由玩家自选资源点，见 GameEngine.ResolveHarvest
                     break;
                 case TurnPhase.Harvest:
+                    // 采集还没结算完（还有人没做选择）时不放行，免得整个采集阶段被跳过（§7）。
+                    if (state.HarvestPending) return;
                     // 进入收尾阶段即执行收尾结算（§8）：样式标记复位、角色牌回收等。
                     state.Phase = TurnPhase.Cleanup;
                     CleanupResolver.Resolve(state);
@@ -86,6 +113,7 @@ namespace NomadCity.Core.Engine
             if (state.ActionRound > ActionRoundsPerTurn)
             {
                 state.Phase = TurnPhase.Harvest; // 两轮结束 → 采集（规则规格 5）
+                state.HarvestPending = true;      // 采集由玩家自选资源点后再结算，见 GameEngine.ResolveHarvest
                 return;
             }
 
@@ -111,7 +139,7 @@ namespace NomadCity.Core.Engine
             state.PendingStartMarkerSeat = -1;
             state.ActiveSeat = state.FirstPlayerSeat;
             state.ActionRound = 1;
-            state.Phase = TurnPhase.CharacterPlacement;
+            BeginCharacterPlacement(state);
         }
     }
 }

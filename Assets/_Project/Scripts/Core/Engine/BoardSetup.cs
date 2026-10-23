@@ -35,13 +35,40 @@ namespace NomadCity.Core.Engine
             // （移动城市停靠 + 翻开绿色事件牌放上资源点指示物 + B-01 特例）。
         }
 
-        /// <summary>洗切三色事件牌堆，分别牌背朝上放好（§4.1 步 2）。</summary>
+        /// <summary>
+        /// 洗切三色事件牌堆，分别牌背朝上放好（§4.1 步 2）。
+        /// 2／3 人局要把正面标有「4」的事件牌放回游戏盒（§4.1 步 2 / §12 / §13.2）：
+        /// 那 4 张正好对应 3 人地图相较 4 人地图少掉的 G 区，留着会在三人面地图上无处可放。
+        /// </summary>
         public static void PrepareEventDecks(GameState state, ICardCatalog catalog, Random rng)
         {
             bool enterprise = state.Setup.IsEnterpriseEnabled;
-            FillShuffled(state.EventDeckGreen, catalog.EventDeckIds(NodeColor.Green, enterprise), rng);
-            FillShuffled(state.EventDeckYellow, catalog.EventDeckIds(NodeColor.Yellow, enterprise), rng);
-            FillShuffled(state.EventDeckRed, catalog.EventDeckIds(NodeColor.Red, enterprise), rng);
+            bool fourPlayerMap = state.Players.Count >= 4;
+
+            FillShuffled(state.EventDeckGreen,
+                EventIdsFor(catalog, NodeColor.Green, enterprise, fourPlayerMap), rng);
+            FillShuffled(state.EventDeckYellow,
+                EventIdsFor(catalog, NodeColor.Yellow, enterprise, fourPlayerMap), rng);
+            FillShuffled(state.EventDeckRed,
+                EventIdsFor(catalog, NodeColor.Red, enterprise, fourPlayerMap), rng);
+        }
+
+        /// <summary>
+        /// 某一颜色的事件牌 id 列表；四人面保留全部，2／3 人面剔除标有「4」的那几张（§12 / §13.2）。
+        /// </summary>
+        private static IReadOnlyList<int> EventIdsFor(ICardCatalog catalog, NodeColor color,
+            bool enterprise, bool fourPlayerMap)
+        {
+            IReadOnlyList<int> all = catalog.EventDeckIds(color, enterprise);
+            if (fourPlayerMap) return all;
+
+            var kept = new List<int>(all.Count);
+            foreach (int id in all)
+            {
+                if (catalog.Event(id).FourPlayerOnly) continue; // 放回游戏盒
+                kept.Add(id);
+            }
+            return kept;
         }
 
         /// <summary>把 6 张城市样式牌牌面朝上放到场上（§4.1 步 3）。</summary>

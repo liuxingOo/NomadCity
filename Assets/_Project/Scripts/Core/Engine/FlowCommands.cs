@@ -1,4 +1,5 @@
 using NomadCity.Core.Model;
+using NomadCity.Core.Rules;
 
 namespace NomadCity.Core.Engine
 {
@@ -61,6 +62,8 @@ namespace NomadCity.Core.Engine
     /// 2. 翻开一张绿色事件牌，把对应的资源点指示物放到该资源点上；
     /// 3. 特例：选 <c>B-01</c> 时立即获得 2 源岩 / 2 源石 / 2 异铁。
     ///
+    /// 2 人局另有两条变体（§12 变体 2）：禁选 <c>B-01</c>；非起始玩家选完**立即在自己这个点上放 1 个影响力**。
+    ///
     /// 牌面文案只通过 <see cref="GameState.Catalog"/> 查表取用（引擎只存 id）。
     /// 翻出的牌会记在资源点状态上（<see cref="MapNodeState.EventCardId"/>），
     /// 选项奖励由随后的 <see cref="ResolveEventOptionCommand"/> 结算，本命令不替玩家做选择。
@@ -101,6 +104,13 @@ namespace NomadCity.Core.Engine
             MapNodeState node = state.Map.Node(NodeId);
             if (node.Color != NodeColor.Green)
                 return CommandResult.Fail($"只有绿色事件牌对应的资源点能作为初始资源点，{node.Code} 不是。");
+
+            // §12 变体 2：2 人局禁选 B-01（它会白送 2/2/2 资源，2 人局里过强）。
+            PlayerCountVariant variant = PlayerCountVariant.For(state);
+            if (variant.ForbiddenStartNodeCode != null && node.Code == variant.ForbiddenStartNodeCode)
+                return CommandResult.Fail(
+                    $"2 人局不能选择 {node.Code} 作为初始资源点（§12 变体 2）。");
+
             if (ActionRules.HasOpponentCity(state, NodeId, ActorSeat))
                 return CommandResult.Fail($"资源点 {node.Code} 上已经停靠了其他玩家的移动城市。");
 
@@ -134,6 +144,19 @@ namespace NomadCity.Core.Engine
                 player.Resources.Add(ResourceType.Orirock, 2);
                 player.Resources.Add(ResourceType.Originium, 2);
                 player.Resources.Add(ResourceType.Oriron, 2);
+            }
+
+            // 4. 2 人局特例（§12 变体 2）：非起始玩家决定初始资源点后，立即在自己这个初始资源点上放 1 个影响力。
+            //    按规则书字面「立即放置」处理，不给放弃选项；供应堆没标记或该点没有空格时跳过（不因此中断开局）。
+            if (PlayerCountVariant.For(state).NonFirstPlayerPlacesStartInfluence
+                && ActorSeat != state.FirstPlayerSeat && player.MarkersInSupply > 0)
+            {
+                int slot = ActionRules.FirstFreeSlot(node.Slots);
+                if (slot >= 0)
+                {
+                    node.Slots.Place(slot, ActorSeat);
+                    player.MarkersInSupply--;
+                }
             }
         }
 
@@ -272,6 +295,57 @@ namespace NomadCity.Core.Engine
                       || (id >= CardIds.EventEnterpriseBase
                           && id < CardIds.EventEnterpriseBase + CardIds.EventEnterpriseCount);
             return known ? state.Catalog.Event(id) : null;
+        }
+    }
+
+    /// <summary>
+    /// 2 人局的一条回合开头步骤（§12 变体 4）：角色牌盖放前，从本回合起始玩家起，
+    /// 每名玩家把设施供应区里的一张设施牌放回游戏盒，并**立刻**从设施牌堆补牌，让供应区始终 6 张。
+    ///
+    /// 它不占主要行动名额，也不属于任何「主要行动」；3／4 人局没有这一步（<see cref="GameState.SupplyDiscardRemaining"/> 为 0）。
+    /// </summary>
+    public sealed class DiscardSupplyFacilityCommand : ICommand
+    {
+        /// <summary>要弃置（放回游戏盒）的设施牌 id，必须来自设施供应区。</summary>
+        public readonly int FacilityId;
+
+        public DiscardSupplyFacilityCommand(int seat, int facilityId)
+        {
+            ActorSeat = seat;
+            FacilityId = facilityId;
+        }
+
+        public int ActorSeat { get; }
+        public string Name => "弃置设施牌（2 人局）";
+
+        /// <summary>回合开头的准备步骤，不占主要行动名额。</summary>
+        public bool ConsumesAction => false;
+
+        public CommandResult Validate(GameState state)
+        {
+            if (state == null) return CommandResult.Fail("引擎没有游戏状态。");
+            if (state.IsGameOver) return CommandResult.Fail("本局已经结束。");
+            if (state.Phase != TurnPhase.CharacterPlacement)
+                return CommandResult.Fail("弃置设施牌只发生在回合的「角色牌盖放」阶段（§12 变体 4）。");
+            if (state.SupplyDiscardRemaining <= 0)
+                return CommandResult.Fail("本回合不需要弃置设施牌。");
+            if (state.SupplyDiscardSeat != ActorSeat)
+                return CommandResult.Fail(
+                    $"当前轮到玩家 {state.SupplyDiscardSeat + 1} 弃置设施牌（从本回合起始玩家起顺时针）。");
+
+            if (!state.FacilitySupply.Contains(FacilityId))
+                return CommandResult.Fail("这张设施牌不在设施供应区里，不能弃置。");
+
+            return CommandResult.Success;
+        }
+
+        public void Apply(GameState state)
+        {
+            state.FacilitySupply.Remove(FacilityId);
+            BoardSetup.RefillFacilitySupply(state); // 立刻补牌，供应区维持 6 张
+
+            state.SupplyDiscardRemaining--;
+            state.SupplyDiscardSeat = state.SupplyDiscardRemaining > 0 ? state.NextSeat(ActorSeat) : -1;
         }
     }
 }

@@ -60,6 +60,13 @@ namespace NomadCity.Game
         [Tooltip("高亮底盘的世界宽度（比空格圈大一些，套在它外面）。")]
         [SerializeField, Min(0.01f)] private float routeHighlightSize = 0.34f;
 
+        [Header("采集自选高亮（采集阶段点选资源点）")]
+        [Tooltip("采集阶段里，当前玩家已选中的资源点会套一个圈亮起来；这是圈的颜色。")]
+        [SerializeField] private Color nodeHighlightColor = new Color(1f, 0.82f, 0.20f, 0.45f);
+
+        [Tooltip("资源点高亮圈的世界直径（比资源点本体大一些，套在它外面）。")]
+        [SerializeField, Min(0.01f)] private float nodeHighlightSize = 0.50f;
+
         // 排序：底图 -10（约定）；往上依次是高亮、空格、指示物、影响力、移动城市、标签。
         private const int SortHighlight = 0;
         private const int SortSlot = 1;
@@ -86,6 +93,9 @@ namespace NomadCity.Game
 
         /// <summary>当前高亮的航道 id（探索点选路线用）；空表示没有高亮。</summary>
         private readonly HashSet<int> highlightedRoutes = new HashSet<int>();
+
+        /// <summary>当前高亮的资源点 id（采集阶段点选采集点用）；空表示没有高亮。</summary>
+        private readonly HashSet<int> highlightedNodes = new HashSet<int>();
 
         private struct HitTarget
         {
@@ -146,6 +156,18 @@ namespace NomadCity.Game
             if (routeIds != null)
             {
                 foreach (int routeId in routeIds) highlightedRoutes.Add(routeId);
+            }
+
+            if (IsReady) Refresh();
+        }
+
+        /// <summary>高亮若干资源点（采集阶段把当前玩家已选中的采集点亮起来）；传 null 清空。</summary>
+        public void SetHighlightedNodes(IEnumerable<int> nodeIds)
+        {
+            highlightedNodes.Clear();
+            if (nodeIds != null)
+            {
+                foreach (int nodeId in nodeIds) highlightedNodes.Add(nodeId);
             }
 
             if (IsReady) Refresh();
@@ -213,6 +235,13 @@ namespace NomadCity.Game
         private void DrawNode(MapNodeState node, MapNodeView view)
         {
             Vector3 origin = view.transform.position;
+
+            // 采集阶段：当前玩家已选中的采集点套一圈高亮（排在空格与影响力之下，不挡它们）。
+            if (highlightedNodes.Contains(node.Id))
+            {
+                Spawn(MapSpriteFactory.Ring(), origin, nodeHighlightSize, nodeHighlightColor, SortHighlight,
+                    $"NodeHighlight_{node.Code}");
+            }
 
             for (int slot = 0; slot < node.Slots.Capacity; slot++)
             {

@@ -59,7 +59,7 @@ namespace NomadCity.Core.Model
     /// <summary>
     /// 卡牌目录：id → 定义 的唯一查询入口，并提供各类牌堆的 id 列表。
     /// 引擎只看这个接口，因此日后把它换成「从 Data 层 ScriptableObject 读取」的实现即可，
-    /// 无需改动规则代码。当前由 <see cref="PlaceholderCardCatalog"/> 提供占位数据。
+    /// 无需改动规则代码。当前由 <see cref="PlaceholderCardCatalog"/> 提供全部牌面数据。
     /// </summary>
     public interface ICardCatalog
     {
@@ -77,7 +77,8 @@ namespace NomadCity.Core.Model
         /// <summary>
         /// 某一颜色的事件牌堆。启用企业扩展（<paramref name="enterpriseEnabled"/>）时，
         /// 用带「E」标记的替换件顶替对应基础牌（见 <c>Doc/EventCards.md</c> §6）。
-        /// 不按人数裁剪：三人局剔除「4」牌由上层按 <see cref="EventCardDef.FourPlayerOnly"/> 处理。
+        /// 不按人数裁剪：2／3 人局剔除标有「4」的牌由 <c>BoardSetup</c> 按
+        /// <see cref="EventCardDef.FourPlayerOnly"/> 处理。
         /// </summary>
         IReadOnlyList<int> EventDeckIds(NodeColor backColor, bool enterpriseEnabled);
 
@@ -92,8 +93,9 @@ namespace NomadCity.Core.Model
     }
 
     /// <summary>
-    /// 占位卡牌目录：只保证 id 分段、数量与颜色正确，牌面属性（费用 / 分数 / 效果）留空。
-    /// 卡面切片完成后，用 Data 层的实现替换它，本类即可退役。
+    /// 内置卡牌目录：早期只是一个占位实现（只保证 id 分段、数量与颜色正确），现已填入全部
+    /// 基础版牌面数据（角色 / 设施 / 事件 / 城市样式）——类名沿用早期实现，不再改动。
+    /// 卡面切片完成后，可用 Data 层的 ScriptableObject 实现替换它。
     /// </summary>
     public sealed class PlaceholderCardCatalog : ICardCatalog
     {
@@ -340,9 +342,8 @@ namespace NomadCity.Core.Model
         /// <summary>
         /// 41 张普通设施牌，按 id 顺序（100–140）写入 <paramref name="defs"/> 的前 41 个槽位。
         /// 同名多张的牌逐张登记，数值完全相同。
-        /// 入场效果与费用修正中能用现有 <see cref="RewardOp"/> / <see cref="FacilityCostModifier"/> 表达的
-        /// 直接录入；仍需新增效果节点的（以单价售卖资源、结算他牌入场效果、传递起始标记、图标型效果）
-        /// 留空，见 FacilityCards.md §7。
+        /// 费用 / 分数 / 关键词与入场效果（含以单价售卖资源、结算他牌入场效果、传递起始标记、
+        /// 图标型效果等专用节点）均已录入，详见 FacilityCards.md。
         /// </summary>
         private static void BuildStandardFacilities(FacilityCardDef[] defs)
         {
@@ -789,6 +790,6 @@ namespace NomadCity.Core.Model
         private static CityPatternCardDef Pattern(int id, int level, string name, int score,
             RewardOp[] specialActionCost, RewardOp[] specialActionEffects, params PatternCell[] cells) =>
             new CityPatternCardDef(id, level, name, score, new PatternCondition(cells),
-                null, specialActionCost, specialActionEffects);
+                specialActionCost, specialActionEffects);
     }
 }

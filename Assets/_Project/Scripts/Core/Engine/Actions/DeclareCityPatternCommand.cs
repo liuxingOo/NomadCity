@@ -8,11 +8,11 @@ namespace NomadCity.Core.Engine
     /// 1) 用已建设的设施凑出这张样式牌的宣告条件（位置 + 颜色，可旋转、不可翻转，§10.2 步 3）；
     ///    用到的设施格随即标记为「已用于宣告」（§6.5b 步 1：同一设施只能用一次）；
     /// 2) 从玩家供应堆拿 1 个玩家标记，放到这张样式牌上（§6.5b 步 2 / §10.2 步 2）；
-    /// 3) 结算牌面奖励分数与宣告效果（§6.5b 步 3 / §9.1）。
+    /// 3) 结算牌面奖励分数（§6.5b 步 3 / §9.1）。牌面只有「宣告条件 + 宣告分数 + 解锁的特殊行动 + 标记轨道」，
+    ///    没有独立的「宣告效果」栏，所以本步只加分数（2026-10-19 核对实体牌面）。
     ///
-    /// **数据现状**：6 张基础城市样式牌的宣告条件与奖励分数**已录入**（<c>CardCatalog.BuildCityPatterns</c>），
-    /// 所以本命令可以直接宣告；「宣告效果」（<see cref="CityPatternCardDef.DeclareEffects"/>）字段尚未录入，
-    /// 牌面若有该效果则需补录（RuleSpec §14 待核实）。条件未录入的牌会被直接拒绝，不会凭空造出规则。
+    /// **数据现状**：6 张基础城市样式牌的宣告条件、奖励分数与解锁的特殊行动**均已录入**
+    /// （<c>CardCatalog.BuildCityPatterns</c>），所以本命令可以直接宣告；条件未录入的牌会被直接拒绝，不会凭空造出规则。
     ///
     /// **组合方式**由玩家从所有合法摆法里挑一组（<see cref="CityPanelQuery.FindAll"/> 的顺序固定，
     /// 按 0°→90°→180°→270° 再从上到下、从左到右）；<see cref="PlacementIndex"/> 为 -1 时退回「取第一组」，
@@ -33,9 +33,6 @@ namespace NomadCity.Core.Engine
 
         /// <summary>本次实际用到的组合方式（用到的面板格子 + 旋转角度）；<see cref="Apply"/> 之后才有值。</summary>
         public PatternMatch Match { get; private set; }
-
-        /// <summary>宣告效果的结算报告；<see cref="Apply"/> 之后才有值。</summary>
-        public EffectReport Report { get; private set; }
 
         public DeclareCityPatternCommand(int seat, int patternCardId, int placementIndex = -1)
         {
@@ -113,13 +110,13 @@ namespace NomadCity.Core.Engine
 
             // 步 2：从供应堆拿 1 个玩家标记放到这张样式牌上，并把标记记进样式牌的运行时状态。
             // 格位固定放起点格 0：I 级 = 「未使用」区，II 级 = 次数上限「2」区（§6.5b 步 2 第一次的情形）。
-            // 「其他情况」（同一玩家反复宣告、II 级推进格位）要等特殊行动接入后再细化。
+            // §10.2-4：同一玩家重复宣告只把新标记放进 2 区，不重置也不累加已有标记决定的特殊行动次数
+            //（次数由该玩家放下的第一个标记决定，见 CityPatternState.HasUsableMarker / AdvanceMarker）。
             player.MarkersInSupply--;
             state.PatternStateOf(PatternCardId)?.PlaceMarker(ActorSeat, 0);
 
-            // 步 3：结算奖励分数与宣告效果（§6.5b 步 3）。
+            // 步 3：结算奖励分数（§6.5b 步 3）。
             player.Score += card.Score;
-            Report = EffectResolver.Execute(state, ActorSeat, card.DeclareEffects);
         }
 
         /// <summary>这张样式牌是不是「场上那 6 张」之一。</summary>

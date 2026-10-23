@@ -32,6 +32,13 @@ namespace NomadCity.UI
         /// <summary>本机玩家座位（0 起）：非建设模式下城市面板固定显示这名玩家，建设模式下改用行动玩家。</summary>
         private int localSeat;
 
+        /// <summary>
+        /// 联机模式下只允许操作本机座位。单机热座为 false：一台机器轮着操作所有座位。
+        /// 开启后，凡是「按当前行动座位」构造的命令都会被本机座位闸门拦下，
+        /// 避免主机顺手替客户端把行动做完（那样客户端会永远轮不到操作）。
+        /// </summary>
+        private bool lockToLocalSeat;
+
         private ActionMode mode = ActionMode.None;
 
         /// <summary>建设流程（§6.4e）走到哪一步；<see cref="BuildStep.NotBuilding"/> 表示不在建设。</summary>
@@ -95,6 +102,20 @@ namespace NomadCity.UI
         /// <summary>特殊行动效果里「要玩家点选」的收集会话；已跑完或没在收集时为 null。</summary>
         private EffectChoiceSession specialSession;
 
+        // —— 采集阶段（§7）：玩家自选资源点（不再是自动结算） ——
+
+        /// <summary>进入采集阶段后按「起始玩家起顺时针」排好的座位顺序。</summary>
+        private readonly List<int> harvestOrder = new List<int>();
+
+        /// <summary>正在选点的座位在 <see cref="harvestOrder"/> 里的下标；-1 表示没在采集选点。</summary>
+        private int harvestIndex = -1;
+
+        /// <summary>已定下的采集选择：座位号 → 要采的资源点 id（逐位玩家「确认」后写入）。</summary>
+        private readonly Dictionary<int, List<int>> harvestChosen = new Dictionary<int, List<int>>();
+
+        /// <summary>当前这位玩家此刻选中的资源点（默认全选，可在图上点进点出）。</summary>
+        private readonly List<int> harvestCurrent = new List<int>();
+
         /// <summary>调度模式下已选中的起点（尚未组成一步）。</summary>
         private InfluenceSlotRef? relocateFrom;
 
@@ -141,6 +162,15 @@ namespace NomadCity.UI
         /// <summary>这张事件卡是不是「探索」（§6.4c）翻出来的 —— 是的话结算完选项还要补上第三步。</summary>
         private bool pendingEventFromExplore;
 
+        /// <summary>这张事件卡是不是「城市移动」（§6.4d）步 2 翻出来的 —— 是的话结算完选项还要补上步 3。</summary>
+        private bool pendingEventFromCityMove;
+
+        /// <summary>城市移动的出发点资源点 id（步 1–2 时记下，步 3 要在这里放影响力）。</summary>
+        private int pendingEventOriginNode = -1;
+
+        /// <summary>2 人局（§12 变体 4）：正用设施供应区面板做「盖放前弃 1 张设施牌」这一步。</summary>
+        private bool supplyDiscardMode;
+
         /// <summary>正在结算的那个选项下标；结算完回到 -1。</summary>
         private int pendingEventOption = -1;
 
@@ -154,7 +184,7 @@ namespace NomadCity.UI
             GameHud hud, ActionPanel panel, EventCardPanel eventCardPanel = null, ChoicePopup choicePopup = null,
             FacilitySupplyPanel supplyPanel = null, CityPanelView cityPanel = null,
             CityPatternPanel patternPanel = null, CardPreviewPopup cardPreview = null,
-            CharacterHandPanel handPanel = null, int localSeat = 0)
+            CharacterHandPanel handPanel = null, int localSeat = 0, bool lockToLocalSeat = false)
         {
             this.engine = engine;
             this.renderer = renderer;
@@ -169,6 +199,7 @@ namespace NomadCity.UI
             this.cardPreview = cardPreview;
             this.handPanel = handPanel;
             this.localSeat = localSeat;
+            this.lockToLocalSeat = lockToLocalSeat;
 
             if (engine != null)
             {
@@ -186,6 +217,7 @@ namespace NomadCity.UI
                 panel.ModeRequested += OnModeRequested;
                 panel.CommitRequested += OnCommitRequested;
                 panel.CancelRequested += OnCancelRequested;
+                // 测试用：联机版由流程自动推进阶段，可连同按钮一起删掉（本文件删这一行 + OnAdvancePhaseRequested 方法）。
                 panel.AdvancePhaseRequested += OnAdvancePhaseRequested;
                 panel.CharacterCardRequested += OnCharacterCardRequested;
             }
@@ -200,6 +232,9 @@ namespace NomadCity.UI
 
             SetMode(ActionMode.None);
             RefreshAll();
+
+            // 万一进场时已经停在「等玩家选点」的采集阶段（例如重载场景），直接接上选点流程。
+            if (engine != null && engine.HarvestNeedsChoices) BeginHarvestFlow();
         }
 
         private void OnDestroy()
@@ -220,6 +255,7 @@ namespace NomadCity.UI
                 panel.ModeRequested -= OnModeRequested;
                 panel.CommitRequested -= OnCommitRequested;
                 panel.CancelRequested -= OnCancelRequested;
+                // 测试用：同上，联机版删掉这一行。
                 panel.AdvancePhaseRequested -= OnAdvancePhaseRequested;
                 panel.CharacterCardRequested -= OnCharacterCardRequested;
             }
@@ -236,7 +272,13 @@ namespace NomadCity.UI
         private void OnCommandApplied(GameState state, ICommand command) => RefreshAll();
 
         // 阶段推进（含两轮行动自动进采集）发生在命令之后，这里补一次刷新，保证画面与状态一致。
-        private void OnPhaseChanged(GameState state, TurnPhase from, TurnPhase to) => RefreshAll();
+        private void OnPhaseChanged(GameState state, TurnPhase from, TurnPhase to)
+        {
+            RefreshAll();
+
+            // 进入采集阶段：不再自动结算，改成逐位玩家自选资源点（§7）。
+            if (to == TurnPhase.Harvest && state.HarvestPending) BeginHarvestFlow();
+        }
 
         // 行动座位推进同样发生在命令之后（CommandApplied 已经发过了），不补这一刷，
         // 顶栏与行动提示就会一直显示上一位玩家 —— 看起来就是「座次永远慢一拍」。
@@ -312,6 +354,13 @@ namespace NomadCity.UI
                 return;
             }
 
+            // 采集选点的「确认」= 定下这位玩家的选择，轮到下一位；全部选完即统一结算（§7）。
+            if (mode == ActionMode.Harvest)
+            {
+                ConfirmHarvest();
+                return;
+            }
+
             if (mode != ActionMode.Relocate) return;
 
             if (pendingMoves.Count == 0)
@@ -361,6 +410,15 @@ namespace NomadCity.UI
                 return;
             }
 
+            // 采集选点的「取消」= 放弃手改，恢复成默认全选（不会动已定下的其他玩家的选择）。
+            if (mode == ActionMode.Harvest)
+            {
+                LoadHarvestDefaults(HarvestSeat);
+                SetStatus("已恢复为默认全选——不想采的点直接在图上点掉即可。");
+                UpdateHint();
+                return;
+            }
+
             // 建设的「取消」= 返回键：逐层往回退一层，不撤销引擎状态（所有选择都在派发命令前完成）。
             if (mode == ActionMode.Build && buildStep != BuildStep.NotBuilding && buildStep != BuildStep.PickCard)
             {
@@ -388,6 +446,10 @@ namespace NomadCity.UI
             SetStatus("已取消当前行动。");
         }
 
+        /// <summary>
+        /// 测试用：推进阶段（正式对局 / 联机版由流程自动推进，可整段删掉）。
+        /// 它在玩家行动阶段会被引擎拒绝 —— 两轮走完由 TurnFlow.CompletePlayerAction 自动进采集。
+        /// </summary>
         private void OnAdvancePhaseRequested()
         {
             if (engine == null) return;
@@ -396,6 +458,13 @@ namespace NomadCity.UI
             if (choicePopup != null && choicePopup.IsVisible)
             {
                 SetStatus("请先答完当前弹出的选择。");
+                return;
+            }
+
+            // 采集还没结算完时不许推进阶段：否则整个采集阶段会被跳过（§7）。
+            if (engine.State.Phase == TurnPhase.Harvest && engine.State.HarvestPending)
+            {
+                SetStatus("采集还没结算完——先完成本阶段的采集选择。");
                 return;
             }
 
@@ -435,6 +504,13 @@ namespace NomadCity.UI
             if (mode == ActionMode.None && IsSetupPhase(state))
             {
                 HandleChooseStartNode(hit, state);
+                return;
+            }
+
+            // 采集阶段（§7）：点地图资源点加入 / 移除当前玩家的采集选择。
+            if (mode == ActionMode.Harvest)
+            {
+                HandleHarvestPick(hit, state);
                 return;
             }
 
@@ -484,6 +560,10 @@ namespace NomadCity.UI
 
             Dispatch(new ChooseStartNodeCommand(seat, hit.NodeId));
             ShowEventCard(seat, hit.NodeId);
+
+            // 最后一名玩家定完初始资源点后，2 人局（§12 变体 4）的弃设施牌窗本该弹出 —— 但事件卡
+            //  正开着，所以上面刻意先不弹；这里再刷一次，等事件结算完 <see cref="ResolveEventOption"/> 会把它放出来。
+            RefreshFacilityViews();
         }
 
         // —— 事件卡（开局翻出的牌） ——
@@ -499,6 +579,7 @@ namespace NomadCity.UI
 
             MapNodeState node = engine.State.Map.Node(nodeId);
             if (!node.HasResourceToken || node.EventCardId < 0) return false;
+            if (node.EventResolved) return false; // 已经结算过的牌不再弹（城市移动的目标点可能是早先探索过的点）
 
             // 先挡掉未知号段：ICardCatalog.Event 对无效 id 会抛异常而不是返回 null。
             if (EventCardPanel.SpriteIndexOf(node.EventCardId) < 0) return false;
@@ -678,6 +759,8 @@ namespace NomadCity.UI
             int nodeId = pendingEventNodeId;
             int optionIndex = pendingEventOption;
             bool fromExplore = pendingEventFromExplore;
+            bool fromCityMove = pendingEventFromCityMove;
+            int cityMoveOrigin = pendingEventOriginNode;
 
             IEffectChoices choices = answers == null ? null : new RecordedChoices(answers, strict: false);
             var command = new ResolveEventOptionCommand(seat, nodeId, optionIndex, acceptCost,
@@ -696,7 +779,19 @@ namespace NomadCity.UI
             pendingEventSeat = -1;
             pendingEventNodeId = -1;
             pendingEventFromExplore = false;
+            pendingEventFromCityMove = false;
+            pendingEventOriginNode = -1;
             pendingEventOption = -1;
+
+            // 事件卡关掉了，若正好轮到 2 人局弃设施牌（§12 变体 4），这一步把弃牌窗放出来。
+            RefreshFacilityViews();
+
+            if (fromCityMove)
+            {
+                // 城市移动·步 3：事件结算完，在出发点放 1 个自己的影响力（走完这步才占用主要行动名额）。
+                FinishCityMove(seat, cityMoveOrigin, DescribeEventStep(command));
+                return;
+            }
 
             if (!fromExplore)
             {
@@ -706,7 +801,7 @@ namespace NomadCity.UI
 
             // 探索·步 3：事件结算完，在目标资源点放 1 个自己的影响力（走完这步才占用主要行动名额）。
             var place = new ExploreInfluenceCommand(seat, nodeId);
-            CommandResult result = engine.Dispatch(place);
+            CommandResult result = DispatchToEngine(place);
             SetMode(ActionMode.None);
             SetStatus(result.Ok
                 ? $"{DescribeEventStep(command)}；[探索] 已在目标资源点放置 1 个影响力。"
@@ -1020,8 +1115,39 @@ namespace NomadCity.UI
                 return;
             }
 
-            if (Dispatch(new MoveMobileCityCommand(state.ActiveSeat, hit.NodeId)))
-                SetMode(ActionMode.None);
+            int seat = state.ActiveSeat;
+
+            // 步 1–2（§6.4d）：付 3 源石、移动、清对手影响力，目标点没有指示物就翻牌补上。它不占行动名额。
+            if (!Dispatch(new MoveMobileCityCommand(seat, hit.NodeId))) return;
+
+            SetMode(ActionMode.None);
+
+            // 步 2 翻出了事件牌：先让玩家结算选项，结算完在 ResolveEventOption 里补上步 3。
+            if (ShowEventCard(seat, hit.NodeId))
+            {
+                pendingEventFromCityMove = true;
+                pendingEventOriginNode = state.CityMoveOriginNodeId;
+                SetStatus("[城市移动] 目标资源点翻出了事件牌，请先选择事件选项。");
+                return;
+            }
+
+            FinishCityMove(seat, state.CityMoveOriginNodeId, null);
+        }
+
+        /// <summary>
+        /// 城市移动（§6.4d）步 3：在**出发点**放 1 个自己的影响力。走完这步才占用主要行动名额，
+        /// 所以前面的步 1–2（以及中途的事件选项）都不能替它收尾。
+        /// <paramref name="prefix"/> 是前面事件结算的简报（没有就传 null）。
+        /// </summary>
+        private void FinishCityMove(int seat, int originNodeId, string prefix)
+        {
+            CommandResult result = DispatchToEngine(new MoveCityInfluenceCommand(seat, originNodeId));
+            SetMode(ActionMode.None);
+
+            string lead = string.IsNullOrEmpty(prefix) ? "[城市移动]" : prefix + "；[城市移动]";
+            SetStatus(result.Ok
+                ? $"{lead} 已在出发点放置 1 个影响力。"
+                : $"{lead} 放置影响力失败：{result.Error}");
         }
 
         // —— 建设（§6.4e）——
@@ -1032,7 +1158,16 @@ namespace NomadCity.UI
         /// </summary>
         private void OnSupplyCardClicked(int index)
         {
-            if (engine == null || mode != ActionMode.Build || buildStep != BuildStep.PickCard) return;
+            if (engine == null) return;
+
+            // 2 人局（§12 变体 4）：这块面板此刻是「弃设施牌窗」，点一张 = 把它放回游戏盒。
+            if (supplyDiscardMode)
+            {
+                HandleSupplyDiscard(index);
+                return;
+            }
+
+            if (mode != ActionMode.Build || buildStep != BuildStep.PickCard) return;
 
             GameState state = engine.State;
             int cardId = SupplyCardAt(state, index);
@@ -1044,6 +1179,22 @@ namespace NomadCity.UI
             // 选中即收起：把选牌窗口让位给「放大卡面 + 选费用」这一步。
             if (supplyPanel != null) supplyPanel.SetOpen(false);
             EnterBuildPay();
+        }
+
+        /// <summary>
+        /// 2 人局（§12 变体 4）：在设施供应区面板上点一张牌 = 把它放回游戏盒。
+        /// 引擎会立刻从牌堆补牌让供应区保持 6 张；还有下一位玩家要弃就留在面板上，弃完自动收起。
+        /// </summary>
+        private void HandleSupplyDiscard(int index)
+        {
+            GameState state = engine.State;
+            int cardId = SupplyCardAt(state, index);
+            if (cardId < 0) return;
+
+            if (!Dispatch(new DiscardSupplyFacilityCommand(state.SupplyDiscardSeat, cardId))) return;
+
+            if (state.SupplyDiscardRemaining > 0)
+                SetStatus($"轮到玩家 {state.SupplyDiscardSeat + 1}：请从设施供应区选 1 张牌放回游戏盒（§12 变体 4）。");
         }
 
         /// <summary>
@@ -1507,14 +1658,11 @@ namespace NomadCity.UI
             int seat = state.ActiveSeat;
             string slots = DescribePatternSlots(command.Match);
             int rotation = command.Match.RotationDegrees;
-            string suffix = command.Report != null && command.Report.Entries.Count > 0
-                ? $"；宣告效果：{command.Report.Describe()}"
-                : string.Empty;
 
             SetMode(ActionMode.None); // 收起弹窗
 
             SetStatus($"[宣告] 玩家{seat + 1} 宣告了《{PatternName(state, cardId)}》" +
-                      $"，使用城市面板 {slots}（旋转 {rotation}°）{suffix}");
+                      $"，使用城市面板 {slots}（旋转 {rotation}°）");
         }
 
         /// <summary>把匹配用到的面板格子写成「第 N 格」（下标 0 起，显示按 1 起）。</summary>
@@ -1971,10 +2119,40 @@ namespace NomadCity.UI
 
         // —— 内部工具 ——
 
-        /// <summary>走命令通道。失败时把引擎的原因原样透出；成功时提示已执行。</summary>
+        /// <summary>联机层的命令入口：由 GameBootstrap 注入；为 null 时直接进引擎（单机默认行为）。</summary>
+        private Func<ICommand, CommandResult> commandGateway;
+
+        /// <summary>
+        /// 由 GameBootstrap 注入联机会话的命令入口（阶段 3）。单机不注入，保持直连引擎。
+        /// 注入后联机的主机 / 客户端分流全部发生在联机会话（App 层的 NetworkGameSession）内，界面无感知。
+        /// </summary>
+        public void SetCommandGateway(Func<ICommand, CommandResult> gateway) => commandGateway = gateway;
+
+        /// <summary>
+        /// **全项目唯一的引擎命令写入口**：单机直接进引擎；联机经注入的网关交给联机会话分流，
+        /// 而不是让各个调用点各自直连引擎。
+        /// 需要自定义提示文案的调用点（探索步 3 / 城市移动步 3）直接用本方法拿 <see cref="CommandResult"/> 自己拼字。
+        /// </summary>
+        private CommandResult DispatchToEngine(ICommand command)
+        {
+            // 联机座位闸门：界面里不少行动是「按当前行动座位」构造的（单机热座靠它轮转）。
+            // 联机时轮到别人就得停手，否则主机能替客户端把行动全部做完，客户端永远没有可点的时候。
+            if (lockToLocalSeat && command != null && command.ActorSeat >= 0 && command.ActorSeat != localSeat)
+            {
+                string waiting = $"现在轮到玩家 {engine.State.ActiveSeat + 1} 行动，请等待。";
+                SetStatus(waiting);
+                return CommandResult.Fail(waiting);
+            }
+
+            return commandGateway != null ? commandGateway(command) : engine.Dispatch(command);
+        }
+
+        /// <summary>
+        /// 通用命令下发：失败时把引擎的原因原样透出，成功时提示已执行。
+        /// </summary>
         private bool Dispatch(ICommand command)
         {
-            CommandResult result = engine.Dispatch(command);
+            CommandResult result = DispatchToEngine(command);
 
             if (!result.Ok)
             {
@@ -1986,8 +2164,21 @@ namespace NomadCity.UI
             return true;
         }
 
-        private void SetMode(ActionMode next)
+        private void SetMode(ActionMode next) => SetMode(next, false);
+
+        /// <summary>
+        /// 切换模式。<paramref name="force"/> 为 false 时，如果采集选点流程已经在跑，就忽略「切回 None」——
+        /// 因为最后一轮主要行动派发完命令后，调用方还会补一句 SetMode(None)，
+        /// 那句会把刚起步的采集选点流程顶掉（§7）。采集自己收尾要走 <c>force=true</c>。
+        /// </summary>
+        private void SetMode(ActionMode next, bool force)
         {
+            if (!force && next == ActionMode.None && mode == ActionMode.Harvest
+                && engine != null && engine.HarvestNeedsChoices)
+            {
+                return;
+            }
+
             mode = next;
             relocateFrom = null;
             pendingMoves.Clear();
@@ -1998,6 +2189,16 @@ namespace NomadCity.UI
             explorePayees.Clear();
             payeeQueue.Clear();
             RefreshExploreHighlight();
+
+            // 退出采集选点（或换模式）时把采集流程整个丢掉：换模式后再点地图不该还留在采集语义里。
+            if (next != ActionMode.Harvest)
+            {
+                harvestOrder.Clear();
+                harvestIndex = -1;
+                harvestChosen.Clear();
+                harvestCurrent.Clear();
+            }
+            RefreshHarvestHighlight();
 
             // 建设整条流程复位：换行动 / 建成退出后，选中的牌、落点、付费方式与收集到的答案都不该还算数。
             buildStep = next == ActionMode.Build ? BuildStep.PickCard : BuildStep.NotBuilding;
@@ -2013,8 +2214,8 @@ namespace NomadCity.UI
             specialSession = null;
 
             // 设施牌弹窗不常驻：进建设模式才弹出，退出（含「取消」、建成后自动退出）就收起。
-            // 宿主容器保持激活，这里只切弹窗根。
-            if (supplyPanel != null) supplyPanel.SetOpen(next == ActionMode.Build);
+            // 宿主容器保持激活，这里只切弹窗根。2 人局弃设施牌（§12 变体 4）借用同一块面板，也把它留着。
+            if (supplyPanel != null) supplyPanel.SetOpen(next == ActionMode.Build || supplyDiscardMode);
 
             // 城市样式牌弹窗同理（§6.3b）：进宣告模式弹出 6 张样式牌，选中一张或取消即收起；
             // 使用特殊行动（§6.3f）也要从这 6 张里点一张，所以一并弹出。
@@ -2072,6 +2273,23 @@ namespace NomadCity.UI
                     panel.SetHint("角色牌：请在弹出的窗口里选「继续使用另一种效果」或「结束角色牌使用」（§10.1.2）。");
                     return;
                 }
+
+                // 采集阶段三种情形：还在选点（走下面的 Harvest 分支）、自己已提交等别人、已结算等「结束回合」。
+                if (state.Phase == TurnPhase.Harvest && state.HarvestPending
+                    && lockToLocalSeat && state.HarvestChoices.ContainsKey(localSeat))
+                {
+                    panel.SetHint("你已提交本回合的采集选择，等待其他玩家提交…");
+                    return;
+                }
+
+                if (state.Phase == TurnPhase.Harvest && !state.HarvestPending)
+                {
+                    // 推进阶段由房主发起（主机座位固定为 0），客户端只能等。
+                    panel.SetHint(lockToLocalSeat && localSeat != 0
+                        ? "采集合计已结算（见状态行）。等待房主点「结束回合」进入收尾阶段。"
+                        : "采集合计已结算（见状态行）。点「结束回合」进入收尾阶段。");
+                    return;
+                }
             }
 
             switch (mode)
@@ -2120,6 +2338,9 @@ namespace NomadCity.UI
                     panel.SetHint(specialStep == SpecialStep.Effect
                         ? SpecialEffectHint()
                         : "特殊行动：请从弹出的 6 张样式牌里点一张——付费用并结算它解锁的特殊行动（§6.3f）。");
+                    break;
+                case ActionMode.Harvest:
+                    panel.SetHint(HarvestHintText());
                     break;
                 case ActionMode.Explore:
                 {
@@ -2205,6 +2426,172 @@ namespace NomadCity.UI
             ? $"资源点 {engine.State.Map.Node(slot.TargetId).Code} 第 {slot.SlotIndex + 1} 格"
             : $"航道 {engine.State.Map.RouteLabel(slot.TargetId)} 第 {slot.SlotIndex + 1} 格";
 
+        // —— 采集阶段（§7）：逐位玩家自选资源点 ——
+
+        /// <summary>当前正在选点的那位玩家的座位号；-1 表示没在采集选点。</summary>
+        private int HarvestSeat =>
+            harvestIndex >= 0 && harvestIndex < harvestOrder.Count ? harvestOrder[harvestIndex] : -1;
+
+        /// <summary>
+        /// 进入采集阶段：按「起始玩家起顺时针」排好顺序，默认全选当前玩家的合法采集点，
+        /// 把别的行动按钮锁死、只留「确认 / 取消」。逐位选完才统一结算（§7）。
+        /// </summary>
+        private void BeginHarvestFlow()
+        {
+            GameState state = engine.State;
+
+            harvestOrder.Clear();
+            harvestChosen.Clear();
+
+            // 联机：每台机器只选自己的座位，提交给主机汇总；单机热座仍按起始玩家起的顺序逐位选。
+            if (lockToLocalSeat)
+            {
+                if (state.HarvestChoices.ContainsKey(localSeat))
+                {
+                    // 已经交过了（例如中途重连后收到快照）：不再弹选点，等其他人。
+                    SetMode(ActionMode.None, true);
+                    SetStatus("你已提交本回合的采集选择，等待其他玩家…");
+                    return;
+                }
+
+                if (localSeat >= 0 && localSeat < state.Players.Count) harvestOrder.Add(localSeat);
+            }
+            else if (state.Players.Count > 0)
+            {
+                int seat = state.FirstPlayerSeat;
+                for (int i = 0; i < state.Players.Count; i++)
+                {
+                    harvestOrder.Add(seat);
+                    seat = state.NextSeat(seat);
+                }
+            }
+
+            harvestIndex = harvestOrder.Count > 0 ? 0 : -1;
+            LoadHarvestDefaults(HarvestSeat);
+            SetMode(ActionMode.Harvest);
+            if (panel != null) panel.SetLocked(true); // 采集期间不是选行动，其它按钮锁死
+
+            int current = HarvestSeat;
+            if (current < 0)
+                SetStatus("进入采集阶段：没有可采集的资源点，点「确认」继续即可。");
+            else if (lockToLocalSeat)
+                SetStatus("进入采集阶段：请选择你要采的资源点（默认全选，可点地图上的资源点增删），提交后等待其他人。");
+            else
+                SetStatus($"进入采集阶段：轮到玩家 {current + 1} 选择要采的资源点（默认全选，可点地图上的资源点增删）。");
+        }
+
+        /// <summary>把某位玩家的采集选择重置为「全部合法资源点」（采集的惯例：能采就采）。</summary>
+        private void LoadHarvestDefaults(int seat)
+        {
+            harvestCurrent.Clear();
+            if (seat >= 0) harvestCurrent.AddRange(HarvestResolver.EligibleNodes(engine.State, seat));
+
+            RefreshHarvestHighlight();
+        }
+
+        /// <summary>采集选点期间把当前选中的资源点亮到地图上；退出采集时清空。</summary>
+        private void RefreshHarvestHighlight()
+        {
+            if (renderer != null)
+                renderer.SetHighlightedNodes(mode == ActionMode.Harvest ? harvestCurrent : null);
+        }
+
+        /// <summary>点地图资源点：合法就加入 / 移除当前选择，提示行实时显示已选点与路费。</summary>
+        private void HandleHarvestPick(MapHit hit, GameState state)
+        {
+            int seat = HarvestSeat;
+            if (seat < 0) return;
+
+            if (hit.NodeId < 0)
+            {
+                SetStatus("请点资源点本体（或它上面的影响力）来加入 / 移除采集。");
+                return;
+            }
+
+            MapNodeState node = state.Map.Node(hit.NodeId);
+            if (!HarvestResolver.IsEligible(state, seat, node))
+            {
+                SetStatus($"{node.Code} 上没有你的影响力，也没有你的移动城市停靠，采不了。");
+                return;
+            }
+
+            if (harvestCurrent.Contains(node.Id)) harvestCurrent.Remove(node.Id);
+            else harvestCurrent.Add(node.Id);
+
+            RefreshHarvestHighlight();
+            UpdateHint();
+        }
+
+        /// <summary>定下当前玩家的选择、轮到下一位；全部选完即调用引擎统一结算（§7）。</summary>
+        private void ConfirmHarvest()
+        {
+            int seat = HarvestSeat;
+
+            // 联机：只提交自己这一份，由引擎在最后一位提交时统一结算（SubmitHarvestChoiceCommand）。
+            if (lockToLocalSeat)
+            {
+                if (seat < 0) return;
+
+                var pick = new List<int>(harvestCurrent);
+                SetMode(ActionMode.None, true); // 提交后不再允许改选
+
+                CommandResult submit = DispatchToEngine(new SubmitHarvestChoiceCommand(seat, pick));
+                if (!submit.Ok)
+                {
+                    SetStatus($"[采集] 提交失败：{submit.Error}");
+                    return;
+                }
+
+                // 别人还没交完就提示等待；最后一人的结算简报由 OnHarvestResolved 覆盖。
+                if (engine.State.HarvestPending)
+                    SetStatus("已提交本回合的采集选择，等待其他玩家…");
+                return;
+            }
+
+            if (seat >= 0) harvestChosen[seat] = new List<int>(harvestCurrent);
+
+            harvestIndex++;
+
+            int next = HarvestSeat;
+            if (next >= 0)
+            {
+                LoadHarvestDefaults(next);
+                SetStatus($"玩家 {seat + 1} 的选择已记下。轮到玩家 {next + 1}（默认全选，可点地图上的资源点增删）。");
+                UpdateHint();
+                return;
+            }
+
+            // 全部选完：交给引擎统一结算（先算后付，保证「不能用本阶段收到的金券」）。
+            var chosen = new Dictionary<int, IReadOnlyList<int>>();
+            foreach (KeyValuePair<int, List<int>> pair in harvestChosen)
+                chosen[pair.Key] = pair.Value;
+
+            SetMode(ActionMode.None, true); // 强制退出采集选点（内部会清掉采集流程并解锁按钮）
+            // 采集结算同样包成了命令，走唯一入口下发；联机时客户端能靠重放这条命令复现结算。
+            CommandResult result = DispatchToEngine(new ResolveHarvestCommand(chosen));
+            if (!result.Ok) SetStatus($"[采集] 结算失败：{result.Error}"); // 成功简报由 OnHarvestResolved 播报
+        }
+
+        /// <summary>采集选点的引导文本：列出已选资源点、路费与可选上限。</summary>
+        private string HarvestHintText()
+        {
+            int seat = HarvestSeat;
+            if (seat < 0) return "采集阶段：选点已完成。";
+
+            HarvestPlan plan = HarvestResolver.Plan(engine.State, seat, harvestCurrent);
+
+            var codes = new List<string>();
+            foreach (int nodeId in plan.Nodes) codes.Add(engine.State.Map.Node(nodeId).Code);
+            string list = codes.Count == 0 ? "无" : string.Join("、", codes);
+
+            string who = lockToLocalSeat ? "你" : $"玩家 {seat + 1}";
+            string tail = lockToLocalSeat
+                ? "点地图上的资源点可加入或移除；「确认」提交给主机，「取消」恢复默认全选。"
+                : "点地图上的资源点可加入或移除；「确认」交给下一位，「取消」恢复默认全选。";
+
+            return $"采集（{who}）：已选 {plan.Nodes.Count} 个点〔{list}〕，路费 {plan.Toll.Total} / 手上 {plan.Budget} 金券。" + tail;
+        }
+
         private void SetHint(string text)
         {
             if (panel != null) panel.SetHint(text);
@@ -2234,7 +2621,31 @@ namespace NomadCity.UI
             GameState state = engine.State;
             bool buildMode = mode == ActionMode.Build;
 
-            if (supplyPanel != null) supplyPanel.Refresh(state, buildMode);
+            // 2 人局（§12 变体 4）：盖放角色牌前每名玩家要先弃 1 张设施牌 —— 借设施供应区面板当弃牌窗。
+            // 第 1 回合的「开局入场」（§4.3 决定初始资源点）在回合结构之前，所以弃牌窗要等初始资源点
+            // 都定完再弹，否则遮罩会挡住开局选点的地图点击。进出这一步只在这里同步一次
+            //（命令与阶段事件都会走到 RefreshAll），避免散落的开关时机。
+            bool setupDone = ChooseStartNodeCommand.NextChooser(state) < 0;
+            bool discard = state.Phase == TurnPhase.CharacterPlacement
+                           && state.SupplyDiscardRemaining > 0 && setupDone
+                           && pendingEventNodeId < 0 // 事件卡还开着时先让位，免得遮罩挡住卡面
+                           // 联机：弃牌也由本人操作，别人的回合不打开这块面板
+                           && (!lockToLocalSeat || state.SupplyDiscardSeat == localSeat);
+            if (discard != supplyDiscardMode)
+            {
+                supplyDiscardMode = discard;
+                if (supplyPanel != null) supplyPanel.SetOpen(discard || buildMode);
+
+                if (discard)
+                    SetStatus($"轮到玩家 {state.SupplyDiscardSeat + 1}：请从设施供应区选 1 张牌放回游戏盒（§12 变体 4）。");
+                else if (lockToLocalSeat && setupDone && pendingEventNodeId < 0
+                         && state.Phase == TurnPhase.CharacterPlacement && state.SupplyDiscardRemaining > 0)
+                    SetStatus($"轮到玩家 {state.SupplyDiscardSeat + 1} 弃设施牌（§12 变体 4），完成前不能盖放角色牌。");
+                else if (state.SupplyDiscardRemaining == 0 && state.Phase == TurnPhase.CharacterPlacement)
+                    SetStatus("设施牌已弃置完毕，可以盖放角色牌了。");
+            }
+
+            if (supplyPanel != null) supplyPanel.Refresh(state, buildMode || supplyDiscardMode);
             if (cityPanel != null) cityPanel.Refresh(state, ViewSeat(state), buildMode);
 
             // 样式牌弹窗只在宣告 / 特殊行动模式下可点（弹窗本身由 SetMode 开关）。
@@ -2267,10 +2678,10 @@ namespace NomadCity.UI
             return seat;
         }
 
-        /// <summary>采集阶段自动结算的简报（本轮为占位实现，见 GameEngine.ResolveHarvestAutomatically）。</summary>
+        /// <summary>采集阶段结算的简报（全部玩家选点确认后由 GameEngine.ResolveHarvest 统一结算）。</summary>
         private static string DescribeHarvest(HarvestReport report)
         {
-            var sb = new StringBuilder("[采集] 自动结算 —— ");
+            var sb = new StringBuilder("[采集] 结算 —— ");
             for (int i = 0; i < report.Results.Count; i++)
             {
                 HarvestResult result = report.Results[i];

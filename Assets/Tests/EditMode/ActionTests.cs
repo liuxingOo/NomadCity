@@ -180,6 +180,7 @@ namespace NomadCity.Tests
             state.Players[0].Resources.Add(ResourceType.Originium, 5);
             state.Players[0].MobileCityNodeId = 0;
             state.Map.Node(0).HasResourceToken = true;
+            state.Map.Node(1).HasResourceToken = true; // 目标点已有指示物 → 不触发翻牌，专注测移动本身
             return engine;
         }
 
@@ -189,13 +190,59 @@ namespace NomadCity.Tests
             GameEngine engine = CityGame(out GameState state);
             int markers = state.Players[0].MarkersInSupply;
 
+            // 步 1–2：付钱 + 移动（不占名额，见 §6.4d）。
             CommandResult result = engine.Dispatch(new MoveMobileCityCommand(0, 1));
-
             Assert.IsTrue(result.Ok, result.Error);
             Assert.AreEqual(2, state.Players[0].Resources.Originium);
             Assert.AreEqual(1, state.Players[0].MobileCityNodeId);
+            Assert.AreEqual(0, state.CityMoveOriginNodeId); // 出发点：0
+            Assert.AreEqual(-1, state.Map.Node(0).Slots.OwnerOf(0), "步 3 之前出发点还没有影响力。");
+
+            // 步 3：在出发点放 1 个自己的影响力，走完这步才占主要行动名额。
+            CommandResult place = engine.Dispatch(new MoveCityInfluenceCommand(0, 0));
+            Assert.IsTrue(place.Ok, place.Error);
             Assert.AreEqual(0, state.Map.Node(0).Slots.OwnerOf(0)); // 出发点
             Assert.AreEqual(markers - 1, state.Players[0].MarkersInSupply);
+            Assert.AreEqual(-1, state.CityMoveOriginNodeId, "三步走完应当结清。");
+        }
+
+        [Test]
+        public void 城市移动_目标点没有指示物_翻开事件牌补上()
+        {
+            GameEngine engine = CityGame(out GameState state);
+            state.Map.Node(1).HasResourceToken = false; // 目标点还没被探索过
+            int deckBefore = state.EventDeckYellow.Count + state.EventDeckGreen.Count + state.EventDeckRed.Count;
+
+            CommandResult result = engine.Dispatch(new MoveMobileCityCommand(0, 1));
+            Assert.IsTrue(result.Ok, result.Error);
+
+            MapNodeState target = state.Map.Node(1);
+            Assert.IsTrue(target.HasResourceToken, "目标点应当补上资源点指示物。");
+            Assert.GreaterOrEqual(target.EventCardId, 0, "应当翻开一张事件牌。");
+            Assert.IsFalse(target.EventResolved, "翻开的事件牌等着玩家选选项。");
+
+            // 事件没结算之前，不许在出发点放影响力。
+            Assert.IsFalse(engine.Dispatch(new MoveCityInfluenceCommand(0, 0)).Ok);
+
+            // 结算事件选项后放行。
+            EventCardDef card = state.Catalog.Event(target.EventCardId);
+            Assert.IsTrue(engine.Dispatch(new ResolveEventOptionCommand(0, 1, 0)).Ok, "应当能结算事件选项。");
+            Assert.IsTrue(engine.Dispatch(new MoveCityInfluenceCommand(0, 0)).Ok);
+            Assert.AreEqual(0, state.Map.Node(0).Slots.OwnerOf(0));
+
+            int deckAfter = state.EventDeckYellow.Count + state.EventDeckGreen.Count + state.EventDeckRed.Count;
+            Assert.AreEqual(deckBefore - 1, deckAfter, "翻开一张牌，牌堆应当少一张。");
+            Assert.IsNotNull(card);
+        }
+
+        [Test]
+        public void 城市移动_步3的出发点必须与记录一致()
+        {
+            GameEngine engine = CityGame(out GameState state);
+            Assert.IsTrue(engine.Dispatch(new MoveMobileCityCommand(0, 1)).Ok);
+
+            // 出发点记录的是 0，却拿别的点来收尾 → 拒绝。
+            Assert.IsFalse(engine.Dispatch(new MoveCityInfluenceCommand(0, 2)).Ok);
         }
 
         [Test]

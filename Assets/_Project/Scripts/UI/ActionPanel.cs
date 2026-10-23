@@ -18,6 +18,7 @@ namespace NomadCity.UI
         Build = 5,     // 建设
         Declare = 6,   // 宣告城市样式（快速行动，§6.3b）：弹出场上的 6 张样式牌供挑选
         SpecialAction = 7, // 使用城市样式特殊行动（主要行动，§6.3f）：点「特殊行动」→ 点场上一张样式牌 → 结算
+        Harvest = 8,   // 采集阶段选点（§7）：不挂按钮，由 GameScreenController 进入采集阶段时主动切入；此时只留「确认 / 取消」
     }
 
     /// <summary>
@@ -28,10 +29,24 @@ namespace NomadCity.UI
     /// - 主要行动（部署 / 调度 / 探索 / 城市移动 / 建设 / 特殊行动）：每轮 6 选 1；
     /// - 流程与子步骤：结束回合，以及行动进行中的「确认 / 取消」。
     ///
-    /// 其余尚未接通的行动若挂在 <see cref="notImplementedButtons"/> 上，会自动置灰并标注「待实现」。
+    /// 基础版 6 个主要行动 + 2 个快速行动已全部实现，没有「待实现」按钮。
+    ///
+    /// 现在这块面板整体是一个**弹窗**：游戏主界面上只留一个「行动」按钮（<see cref="openButton"/>）用来展开；
+    /// 展开后这个按钮自己藏起来，收起只能靠弹窗里的「关闭」键（<see cref="closeButton"/>）。
+    /// 点弹窗里的行动按钮**不会**自动收起 —— 面板停在屏幕边上不挡地图，提示文本与「确认 / 取消」全程可用。
     /// </summary>
     public sealed class ActionPanel : MonoBehaviour
     {
+        [Header("弹窗")]
+        [Tooltip("弹窗的根节点：展开 / 收起时开关它。把下面全部行动按钮与提示文本都放进这个节点下面")]
+        [SerializeField] private GameObject popupRoot;
+
+        [Tooltip("游戏主界面上唯一的「行动」按钮：点它展开弹窗，展开后它自己会隐藏")]
+        [SerializeField] private Button openButton;
+
+        [Tooltip("弹窗里的「关闭」按钮：展开后「行动」按钮会藏起来，这是唯一能收起弹窗、把按钮放回来的入口，必须接线")]
+        [SerializeField] private Button closeButton;
+
         [Header("主要行动：引擎已实现")]
         [Tooltip("部署（§6.4a）")]
         [SerializeField] private Button placeButton;
@@ -52,8 +67,10 @@ namespace NomadCity.UI
         [Tooltip("宣告城市样式（§6.3b）：点按钮弹出场上的 6 张城市样式牌 → 选中一张 → 引擎自动匹配组合并结算")]
         [SerializeField] private Button declarePatternButton;
 
-        [Header("流程")]
-        [Tooltip("结束回合 / 推进阶段。注意：它不是规则里的行动，而是阶段流转（§5）。")]
+        [Header("测试专用（联机版用不上，正式版可整段删除）")]
+        [Tooltip("推进阶段。它不是规则里的行动，只是阶段流转（§5）：联机时由流程自动推进，所以这里只留一个本地测试用的按钮。\n" +
+                 "建议单独摆在面板外（例如屏幕右上角），不要和行动按钮混在一起。\n" +
+                 "删除时只需删掉这个按钮物体、清空本字段，再把本文件里标注「测试用」的三处代码删掉。")]
         [SerializeField] private Button advanceButton;
 
         [Header("行动中的子步骤")]
@@ -62,16 +79,14 @@ namespace NomadCity.UI
         [Tooltip("取消：退出当前行动，并丢弃已做的选点。选中任一行动后都可点。")]
         [SerializeField] private Button cancelButton;
 
-        [Header("待实现的行动（自动置灰并标注「待实现」）")]
-        [Tooltip("特殊行动")]
-        [SerializeField] private Button[] notImplementedButtons = Array.Empty<Button>();
-
         [Tooltip("引导文本，如「已选 1/2 步」")]
         [SerializeField] private TMP_Text hintText;
 
         public event Action<ActionMode> ModeRequested;
         public event Action CommitRequested;
         public event Action CancelRequested;
+
+        /// <summary>测试用：点「推进阶段」按钮。联机版由流程自动推进，可连同按钮一起删掉。</summary>
         public event Action AdvancePhaseRequested;
 
         /// <summary>点了「使用角色牌」：轮到 GameScreenController 弹手牌 / 选策略计谋（§6.3a）。</summary>
@@ -83,16 +98,28 @@ namespace NomadCity.UI
         private ActionMode currentMode = ActionMode.None;
         private bool locked;
 
+        /// <summary>不可点时按钮文字用的灰褐色，跟 Button 的 Disabled Color 配套。</summary>
+        private static readonly Color DisabledLabelColor = new Color(0.42f, 0.40f, 0.36f, 1f);
+
+        private TMP_Text commitLabel;
+        private TMP_Text cancelLabel;
+        private Color commitLabelColor;
+        private Color cancelLabelColor;
+
         private void Awake()
         {
+            On(openButton, Show);
+            On(closeButton, Hide);
+
             On(placeButton, () => ModeRequested?.Invoke(ActionMode.Place));
             On(relocateButton, () => ModeRequested?.Invoke(ActionMode.Relocate));
             On(exploreButton, () => ModeRequested?.Invoke(ActionMode.Explore));
             On(moveCityButton, () => ModeRequested?.Invoke(ActionMode.MoveCity));
             On(buildButton, () => ModeRequested?.Invoke(ActionMode.Build));
             On(specialActionButton, () => ModeRequested?.Invoke(ActionMode.SpecialAction));
-            On(characterCardButton, () => CharacterCardRequested?.Invoke());
             On(declarePatternButton, () => ModeRequested?.Invoke(ActionMode.Declare));
+            On(characterCardButton, () => CharacterCardRequested?.Invoke());
+            // 测试用：联机版删掉这一行即可（连同上面的 AdvancePhaseRequested 事件声明）。
             On(advanceButton, () => AdvancePhaseRequested?.Invoke());
             On(commitButton, () => CommitRequested?.Invoke());
             On(cancelButton, () => CancelRequested?.Invoke());
@@ -105,26 +132,45 @@ namespace NomadCity.UI
             gatedButtons.Add(specialActionButton);
             gatedButtons.Add(characterCardButton);
             gatedButtons.Add(declarePatternButton);
+            // 测试用：联机版删掉这一行。
             gatedButtons.Add(advanceButton);
 
-            if (notImplementedButtons != null)
-            {
-                foreach (Button button in notImplementedButtons)
-                {
-                    if (button == null) continue;
-
-                    TMP_Text label = button.GetComponentInChildren<TMP_Text>();
-                    if (label != null && !label.text.Contains("待实现")) label.text += "（待实现）";
-                }
-            }
+            // 确认 / 取消常驻显示，只靠 interactable 控制能否点击，所以先记住各自的正常文字色。
+            commitLabel = commitButton != null ? commitButton.GetComponentInChildren<TMP_Text>(true) : null;
+            cancelLabel = cancelButton != null ? cancelButton.GetComponentInChildren<TMP_Text>(true) : null;
+            if (commitLabel != null) commitLabelColor = commitLabel.color;
+            if (cancelLabel != null) cancelLabelColor = cancelLabel.color;
 
             SetMode(ActionMode.None);
+            Hide(); // 弹窗默认收起，主界面上只留那个「行动」按钮
         }
 
         /// <summary>显示引导文本。</summary>
         public void SetHint(string text)
         {
             if (hintText != null) hintText.text = text ?? string.Empty;
+        }
+
+        // —— 弹窗开关 ——
+
+        /// <summary>弹窗是不是开着。</summary>
+        public bool IsVisible => popupRoot != null && popupRoot.activeSelf;
+
+        /// <summary>展开弹窗，同时把主界面上那个「行动」按钮藏起来 —— 展开期间不再显示它。</summary>
+        public void Show()
+        {
+            // 没接「弹窗根节点」时什么都不做：否则会把唯一的入口按钮也藏掉，玩家再也点不开面板。
+            if (popupRoot == null) return;
+
+            popupRoot.SetActive(true);
+            if (openButton != null) openButton.gameObject.SetActive(false);
+        }
+
+        /// <summary>收起弹窗，把「行动」按钮放回原位。</summary>
+        public void Hide()
+        {
+            if (popupRoot != null) popupRoot.SetActive(false);
+            if (openButton != null) openButton.gameObject.SetActive(true);
         }
 
         /// <summary>
@@ -148,6 +194,11 @@ namespace NomadCity.UI
             UpdateInteractable();
         }
 
+        /// <summary>
+        /// 刷新按钮的可用状态（两个键常驻显示，不能点时变灰且点不动）：
+        /// 「确认」只在调度 / 探索 / 采集这三个「先排定再落地」的行动里可用；
+        /// 「取消」是返回 / 退出键，只在行动进行中、或多步流程把面板锁住时可用。
+        /// </summary>
         private void UpdateInteractable()
         {
             bool inAction = currentMode != ActionMode.None;
@@ -157,21 +208,34 @@ namespace NomadCity.UI
                 if (button != null) button.interactable = !locked;
             }
 
-            if (notImplementedButtons != null)
+            // 确认键用于「先排定再落地」的分步行动：调度、探索、采集。
+            // 采集阶段虽会把其它按钮锁死，但仍要留「确认」推进到下一位玩家，所以采集模式下无视锁定态。
+            bool needsCommit = currentMode == ActionMode.Relocate
+                || currentMode == ActionMode.Explore
+                || currentMode == ActionMode.Harvest;
+
+            if (commitButton != null)
             {
-                foreach (Button button in notImplementedButtons)
-                {
-                    if (button != null) button.interactable = false;
-                }
+                commitButton.gameObject.SetActive(true);
+                commitButton.interactable = needsCommit && (!locked || currentMode == ActionMode.Harvest);
+                SetLabelEnabled(commitLabel, commitLabelColor, commitButton.interactable);
             }
 
             // 取消键在锁定期间仍然可点：它是这一层子步骤的返回键。
             // 事件选项点地图作答时行动模式可能本来就是 None（如开局入场那一次），所以锁定态也要放行。
-            if (cancelButton != null) cancelButton.interactable = inAction || locked;
+            if (cancelButton != null)
+            {
+                cancelButton.gameObject.SetActive(true);
+                cancelButton.interactable = inAction || locked;
+                SetLabelEnabled(cancelLabel, cancelLabelColor, cancelButton.interactable);
+            }
+        }
 
-            if (commitButton != null)
-                commitButton.interactable = !locked
-                    && (currentMode == ActionMode.Relocate || currentMode == ActionMode.Explore);
+        /// <summary>按钮不可点时把文字一起压灰 —— Color Tint 只染按钮自己的 Image，管不到子物体上的文字。</summary>
+        private static void SetLabelEnabled(TMP_Text label, Color idleColor, bool enabled)
+        {
+            if (label == null) return;
+            label.color = enabled ? idleColor : DisabledLabelColor;
         }
 
         private static void On(Button button, UnityAction action)

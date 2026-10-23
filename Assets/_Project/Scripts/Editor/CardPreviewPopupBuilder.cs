@@ -22,7 +22,8 @@ namespace NomadCity.EditorTools
         [MenuItem("NomadCity/界面：生成卡面放大弹窗（Card Preview Popup）")]
         private static void Build()
         {
-            CardPreviewPopup existing = Object.FindFirstObjectByType<CardPreviewPopup>(FindObjectsInactive.Include);
+            // Unity 6.6 起 FindFirstObjectByType 因依赖 instance ID 排序被标记过时，改用 FindAnyObjectByType。
+            CardPreviewPopup existing = Object.FindAnyObjectByType<CardPreviewPopup>(FindObjectsInactive.Include);
             if (existing != null)
             {
                 bool rebuild = EditorUtility.DisplayDialog("卡面放大弹窗已存在",

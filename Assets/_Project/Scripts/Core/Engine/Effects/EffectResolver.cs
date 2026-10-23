@@ -264,8 +264,8 @@ namespace NomadCity.Core.Engine
     /// 分界：本类只实现**基础规则**的效果；扩展专属效果（如企业扩展的「选择 1 家企业」）不在这里
     /// 实现，而是转交 <see cref="IEffectExtension"/>，未接入时跳过（§11.4）。
     ///
-    /// 尚未实现（等对应牌面数据到位再补，避免空造）：§11.4 的「延迟结算（本回合收尾阶段）」
-    /// —— 现有 22 张事件牌与 2 张「E」牌都未使用这一节点。
+    /// 「延迟结算（本回合收尾阶段）」（§11.4）已实现：<see cref="RewardKind.Deferred"/> 把该项排进
+    /// <see cref="GameState.DeferredEffects"/>，由 <c>CleanupResolver.ResolveDeferredEffects</c> 在收尾阶段统一执行。
     /// </summary>
     public static class EffectResolver
     {

@@ -1,0 +1,22 @@
+{
+    "name": "NomadCity.Net",
+    "rootNamespace": "NomadCity.Net",
+    "references": [
+        "NomadCity.Core",
+        "Unity.Collections",
+        "Unity.Networking.Transport",
+        "Unity.Services.Core",
+        "Unity.Services.Authentication",
+        "Unity.Services.Relay",
+        "Unity.Services.Lobbies"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

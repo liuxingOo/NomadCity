@@ -5,7 +5,9 @@
         "NomadCity.Core",
         "NomadCity.Data",
         "NomadCity.Game",
-        "NomadCity.UI"
+        "NomadCity.UI",
+        "NomadCity.Net",
+        "Unity.TextMeshPro"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
