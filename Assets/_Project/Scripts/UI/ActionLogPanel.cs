@@ -50,6 +50,15 @@ namespace NomadCity.UI
         private readonly List<string> lines = new List<string>();
         private GameEngine engine;
 
+        /// <summary>各座位昵称（联机来自准备房间名单）；为空时回退成「玩家 N」。</summary>
+        private string[] playerNames = System.Array.Empty<string>();
+
+        private static readonly System.Text.RegularExpressions.Regex PlayerRef =
+            new System.Text.RegularExpressions.Regex(@"玩家\s*(\d+)");
+
+        /// <summary>准备房间同步来的昵称，按座位号排列；在 Bind 之前调用，开局那一行也能用上。</summary>
+        public void SetPlayerNames(string[] names) => playerNames = names ?? System.Array.Empty<string>();
+
         /// <summary>记录面板是不是开着。</summary>
         public bool IsVisible => root != null && root.activeSelf;
 
@@ -83,7 +92,22 @@ namespace NomadCity.UI
             if (engine != null) engine.Dispatcher.CommandApplied -= OnCommandApplied;
         }
 
-        private void OnCommandApplied(GameState state, ICommand command) => Append(Describe(state, command));
+        private void OnCommandApplied(GameState state, ICommand command) =>
+            Append(LocalizePlayerRefs(Describe(state, command)));
+
+        /// <summary>把引擎/界面拼出来的「玩家 N」换成昵称；没有昵称时原样返回。</summary>
+        private string LocalizePlayerRefs(string text)
+        {
+            if (string.IsNullOrEmpty(text) || playerNames.Length == 0) return text;
+
+            return PlayerRef.Replace(text, match =>
+            {
+                int seat = int.Parse(match.Groups[1].Value) - 1;
+                return seat >= 0 && seat < playerNames.Length && !string.IsNullOrWhiteSpace(playerNames[seat])
+                    ? playerNames[seat]
+                    : match.Value;
+            });
+        }
 
         public void Toggle() => SetVisible(!IsVisible);
 
@@ -159,7 +183,7 @@ namespace NomadCity.UI
 
         // —— 把一条命令翻成一行中文 ——
 
-        private static string Describe(GameState state, ICommand command)
+        private string Describe(GameState state, ICommand command)
         {
             switch (command)
             {
@@ -200,7 +224,7 @@ namespace NomadCity.UI
         }
 
         /// <summary>开局入场（§4.3）：设初始资源点 → 翻牌 → 落指示物 → 顺带说出资源点类型。</summary>
-        private static string DescribeChooseStartNode(GameState state, ChooseStartNodeCommand command)
+        private string DescribeChooseStartNode(GameState state, ChooseStartNodeCommand command)
         {
             MapNodeState node = state.Map.Node(command.NodeId);
 
@@ -215,7 +239,7 @@ namespace NomadCity.UI
         }
 
         /// <summary>事件牌选项结算（§4.3 后半 / §6.4c 步 2）：选了什么、实际拿到什么。</summary>
-        private static string DescribeEventOption(GameState state, ResolveEventOptionCommand command)
+        private string DescribeEventOption(GameState state, ResolveEventOptionCommand command)
         {
             MapNodeState node = state.Map.Node(command.NodeId);
             EventCardDef card = state.Catalog.Event(node.EventCardId);
@@ -228,7 +252,7 @@ namespace NomadCity.UI
         }
 
         /// <summary>探索（§6.4c）：走了几条航道、付了多少路费、翻出什么牌、落什么指示物。</summary>
-        private static string DescribeExplore(GameState state, ExploreCommand command)
+        private string DescribeExplore(GameState state, ExploreCommand command)
         {
             MapNodeState node = state.Map.Node(command.NodeId);
             int hops = command.RouteIds != null ? command.RouteIds.Count : 0;
@@ -248,7 +272,7 @@ namespace NomadCity.UI
         /// 路费明细（§6.6）：每条航道付了几券、付给谁、这条航道上当时有几位对手、这个收款方是玩家挑的还是引擎兜底。
         /// 记这一笔是为了让「为什么没弹收款方窗口」变成一个能直接读到的事实，而不是靠猜。
         /// </summary>
-        private static string DescribeTollDetail(GameState state, ExploreCommand command)
+        private string DescribeTollDetail(GameState state, ExploreCommand command)
         {
             IReadOnlyList<TollCalculator.Payment> payments = command.Toll.Payments;
             if (payments.Count == 0) return string.Empty;
@@ -269,7 +293,7 @@ namespace NomadCity.UI
             return sb.ToString();
         }
 
-        private static string DescribeRelocate(GameState state, RelocateInfluenceCommand command)
+        private string DescribeRelocate(GameState state, RelocateInfluenceCommand command)
         {
             var sb = new StringBuilder($"{SeatName(command.ActorSeat)} 调度了 {command.Moves.Count} 处影响力：");
             for (int i = 0; i < command.Moves.Count; i++)
@@ -282,7 +306,7 @@ namespace NomadCity.UI
         }
 
         /// <summary>建设（§6.4e）：建了哪张牌、放在第几格、拿了多少分、入场效果是什么。</summary>
-        private static string DescribeBuild(GameState state, BuildFacilityCommand command)
+        private string DescribeBuild(GameState state, BuildFacilityCommand command)
         {
             FacilityCardDef card = state.Catalog.Facility(command.FacilityId);
 
@@ -330,7 +354,13 @@ namespace NomadCity.UI
             _ => op.ToString(),
         };
 
-        private static string SeatName(int seat) => seat < 0 ? "系统" : $"玩家{seat + 1}";
+        private string SeatName(int seat)
+        {
+            if (seat < 0) return "系统";
+            return seat < playerNames.Length && !string.IsNullOrWhiteSpace(playerNames[seat])
+                ? playerNames[seat]
+                : $"玩家{seat + 1}";
+        }
 
         /// <summary>影响力空格的写法：资源点上写「A-01 的第 2 个空格」，航道上写「航道 A-01–B-01」。</summary>
         private static string SlotLabel(GameState state, InfluenceSlotRef slot) =>

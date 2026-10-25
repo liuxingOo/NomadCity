@@ -74,7 +74,7 @@ namespace NomadCity.UI
             if (dim != null) dim.raycastTarget = true;
             else
                 Debug.LogWarning("[ChoicePopup] 没有接线「Dim」遮罩：弹窗背后不会变暗。" +
-                                 "地图点击与「确认 / 取消 / 结束回合」按钮在代码里已经挡住，但建议把面板上的半透明遮罩 Image " +
+                                 "地图点击与行动按钮在代码里已经挡住，但建议把面板上的半透明遮罩 Image " +
                                  "拖到本组件的「Dim」字段，好让玩家一眼看出该先答这个窗口。", this);
 
             if (cancelButton != null)

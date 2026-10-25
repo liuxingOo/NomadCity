@@ -27,7 +27,7 @@ namespace NomadCity.UI
     /// 按规则规格 §6 分三块：
     /// - 快速行动（使用角色牌 / 宣告城市样式）：主要行动前后可做任意次；
     /// - 主要行动（部署 / 调度 / 探索 / 城市移动 / 建设 / 特殊行动）：每轮 6 选 1；
-    /// - 流程与子步骤：结束回合，以及行动进行中的「确认 / 取消」。
+    /// - 流程与子步骤：行动进行中的「确认 / 取消」。阶段推进由引擎自动判断，面板上不再有「结束回合」。
     ///
     /// 基础版 6 个主要行动 + 2 个快速行动已全部实现，没有「待实现」按钮。
     ///
@@ -67,12 +67,6 @@ namespace NomadCity.UI
         [Tooltip("宣告城市样式（§6.3b）：点按钮弹出场上的 6 张城市样式牌 → 选中一张 → 引擎自动匹配组合并结算")]
         [SerializeField] private Button declarePatternButton;
 
-        [Header("测试专用（联机版用不上，正式版可整段删除）")]
-        [Tooltip("推进阶段。它不是规则里的行动，只是阶段流转（§5）：联机时由流程自动推进，所以这里只留一个本地测试用的按钮。\n" +
-                 "建议单独摆在面板外（例如屏幕右上角），不要和行动按钮混在一起。\n" +
-                 "删除时只需删掉这个按钮物体、清空本字段，再把本文件里标注「测试用」的三处代码删掉。")]
-        [SerializeField] private Button advanceButton;
-
         [Header("行动中的子步骤")]
         [Tooltip("确认：把已排定的调度步骤落地。只有「调度」是分步行动，所以只在调度模式下可点。")]
         [SerializeField] private Button commitButton;
@@ -85,9 +79,6 @@ namespace NomadCity.UI
         public event Action<ActionMode> ModeRequested;
         public event Action CommitRequested;
         public event Action CancelRequested;
-
-        /// <summary>测试用：点「推进阶段」按钮。联机版由流程自动推进，可连同按钮一起删掉。</summary>
-        public event Action AdvancePhaseRequested;
 
         /// <summary>点了「使用角色牌」：轮到 GameScreenController 弹手牌 / 选策略计谋（§6.3a）。</summary>
         public event Action CharacterCardRequested;
@@ -119,8 +110,6 @@ namespace NomadCity.UI
             On(specialActionButton, () => ModeRequested?.Invoke(ActionMode.SpecialAction));
             On(declarePatternButton, () => ModeRequested?.Invoke(ActionMode.Declare));
             On(characterCardButton, () => CharacterCardRequested?.Invoke());
-            // 测试用：联机版删掉这一行即可（连同上面的 AdvancePhaseRequested 事件声明）。
-            On(advanceButton, () => AdvancePhaseRequested?.Invoke());
             On(commitButton, () => CommitRequested?.Invoke());
             On(cancelButton, () => CancelRequested?.Invoke());
 
@@ -132,8 +121,6 @@ namespace NomadCity.UI
             gatedButtons.Add(specialActionButton);
             gatedButtons.Add(characterCardButton);
             gatedButtons.Add(declarePatternButton);
-            // 测试用：联机版删掉这一行。
-            gatedButtons.Add(advanceButton);
 
             // 确认 / 取消常驻显示，只靠 interactable 控制能否点击，所以先记住各自的正常文字色。
             commitLabel = commitButton != null ? commitButton.GetComponentInChildren<TMP_Text>(true) : null;

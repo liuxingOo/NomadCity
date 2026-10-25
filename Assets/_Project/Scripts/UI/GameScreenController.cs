@@ -32,6 +32,13 @@ namespace NomadCity.UI
         /// <summary>本机玩家座位（0 起）：非建设模式下城市面板固定显示这名玩家，建设模式下改用行动玩家。</summary>
         private int localSeat;
 
+        /// <summary>各座位昵称（联机来自准备房间名单）；为空时回退成「玩家 N」。</summary>
+        private string[] playerNames = new string[0];
+
+        /// <summary>把界面文本里的「玩家 N」替换成昵称：Core 的错误原因、效果说明都走这一道。</summary>
+        private static readonly System.Text.RegularExpressions.Regex PlayerRef =
+            new System.Text.RegularExpressions.Regex(@"玩家\s*(\d+)");
+
         /// <summary>
         /// 联机模式下只允许操作本机座位。单机热座为 false：一台机器轮着操作所有座位。
         /// 开启后，凡是「按当前行动座位」构造的命令都会被本机座位闸门拦下，
@@ -184,7 +191,8 @@ namespace NomadCity.UI
             GameHud hud, ActionPanel panel, EventCardPanel eventCardPanel = null, ChoicePopup choicePopup = null,
             FacilitySupplyPanel supplyPanel = null, CityPanelView cityPanel = null,
             CityPatternPanel patternPanel = null, CardPreviewPopup cardPreview = null,
-            CharacterHandPanel handPanel = null, int localSeat = 0, bool lockToLocalSeat = false)
+            CharacterHandPanel handPanel = null, int localSeat = 0, bool lockToLocalSeat = false,
+            string[] playerNames = null)
         {
             this.engine = engine;
             this.renderer = renderer;
@@ -200,6 +208,7 @@ namespace NomadCity.UI
             this.handPanel = handPanel;
             this.localSeat = localSeat;
             this.lockToLocalSeat = lockToLocalSeat;
+            this.playerNames = playerNames ?? new string[0];
 
             if (engine != null)
             {
@@ -217,8 +226,6 @@ namespace NomadCity.UI
                 panel.ModeRequested += OnModeRequested;
                 panel.CommitRequested += OnCommitRequested;
                 panel.CancelRequested += OnCancelRequested;
-                // 测试用：联机版由流程自动推进阶段，可连同按钮一起删掉（本文件删这一行 + OnAdvancePhaseRequested 方法）。
-                panel.AdvancePhaseRequested += OnAdvancePhaseRequested;
                 panel.CharacterCardRequested += OnCharacterCardRequested;
             }
 
@@ -255,8 +262,6 @@ namespace NomadCity.UI
                 panel.ModeRequested -= OnModeRequested;
                 panel.CommitRequested -= OnCommitRequested;
                 panel.CancelRequested -= OnCancelRequested;
-                // 测试用：同上，联机版删掉这一行。
-                panel.AdvancePhaseRequested -= OnAdvancePhaseRequested;
                 panel.CharacterCardRequested -= OnCharacterCardRequested;
             }
 
@@ -332,7 +337,7 @@ namespace NomadCity.UI
             if (requested != ActionMode.None && !engine.State.DeveloperMode
                 && engine.State.Phase != TurnPhase.PlayerActions)
             {
-                SetStatus("当前不是玩家行动阶段——先点「结束回合」把阶段推进过去。");
+                SetStatus("当前不是玩家行动阶段——阶段会由流程自动推进。");
                 return;
             }
 
@@ -446,32 +451,6 @@ namespace NomadCity.UI
             SetStatus("已取消当前行动。");
         }
 
-        /// <summary>
-        /// 测试用：推进阶段（正式对局 / 联机版由流程自动推进，可整段删掉）。
-        /// 它在玩家行动阶段会被引擎拒绝 —— 两轮走完由 TurnFlow.CompletePlayerAction 自动进采集。
-        /// </summary>
-        private void OnAdvancePhaseRequested()
-        {
-            if (engine == null) return;
-
-            // 同上：还有待回答的小选择窗时不许推进阶段，否则这次探索会被整段丢弃。
-            if (choicePopup != null && choicePopup.IsVisible)
-            {
-                SetStatus("请先答完当前弹出的选择。");
-                return;
-            }
-
-            // 采集还没结算完时不许推进阶段：否则整个采集阶段会被跳过（§7）。
-            if (engine.State.Phase == TurnPhase.Harvest && engine.State.HarvestPending)
-            {
-                SetStatus("采集还没结算完——先完成本阶段的采集选择。");
-                return;
-            }
-
-            SetMode(ActionMode.None);
-            Dispatch(new AdvancePhaseCommand());
-        }
-
         // —— 地图点击 ——
 
         private void OnMapClicked(MapHit hit)
@@ -548,13 +527,17 @@ namespace NomadCity.UI
             int seat = ChooseStartNodeCommand.NextChooser(state);
             if (seat < 0)
             {
-                SetStatus("所有玩家都已经决定了初始资源点。");
+                // 城市都放下了，但可能还有人的事件牌没结算完（CurrentOperator 会停在那位身上）。
+                int pending = ChooseStartNodeCommand.CurrentOperator(state);
+                SetStatus(pending >= 0
+                    ? $"{SeatLabel(pending)} 还在结算翻出的事件牌，选完奖励才轮得下一位。"
+                    : "所有玩家都已经决定了初始资源点。");
                 return;
             }
 
             if (hit.Kind != MapHitKind.NodeBody)
             {
-                SetHint($"轮到玩家 {seat + 1}：请点击一个绿色资源点本体作为初始资源点。");
+                SetHint($"轮到 {SeatLabel(seat)}：请点击一个绿色资源点本体作为初始资源点。");
                 return;
             }
 
@@ -971,7 +954,7 @@ namespace NomadCity.UI
             }
 
             var labels = new List<string>(opponents.Count);
-            for (int i = 0; i < opponents.Count; i++) labels.Add($"付给 玩家{opponents[i] + 1}");
+            for (int i = 0; i < opponents.Count; i++) labels.Add($"付给 {SeatLabel(opponents[i])}");
 
             choicePopup.Show($"航道 {RouteLabel(routeId)} 上有 {opponents.Count} 位对手，路费付给谁？", labels, index =>
             {
@@ -1845,13 +1828,39 @@ namespace NomadCity.UI
                 return;
             }
 
+            // 第 1 回合：开局入场（选初始资源点、结算事件牌）还没走完，先别盖放。
+            if (state.TurnNumber == 1 && ChooseStartNodeCommand.CurrentOperator(state) >= 0)
+            {
+                SetStatus("请先完成各自的初始资源点与事件牌结算，再一起盖放角色牌。");
+                return;
+            }
+
+            // 2 人局变体：弃设施牌完成前不能盖放（§12 变体 4）。
+            if (state.SupplyDiscardRemaining > 0)
+            {
+                SetStatus("2 人局要先从设施供应区弃 1 张设施牌，然后才能盖放角色牌。");
+                return;
+            }
+
             int seat = ViewSeat(state);
             PlayerState player = state.Players[seat];
-            if (index < 0 || index >= player.HandCharacterCards.Count) return;
 
-            int cardId = player.HandCharacterCards[index];
+            // 与 CharacterHandPanel.Refresh 用同一套候选池：手牌为空时盖放要从弃牌区选（§10.1.1）。
+            IReadOnlyList<int> pool = player.HandCharacterCards.Count > 0
+                ? player.HandCharacterCards
+                : player.DiscardCharacterCards;
+            if (index < 0 || index >= pool.Count) return;
+
+            int cardId = pool[index];
             if (Dispatch(new PlaceCharacterCardCommand(seat, cardId)))
             {
+                // 最后一名玩家盖放完，引擎已经自动进入玩家行动；状态行给一句明确交代。
+                if (state.Phase == TurnPhase.PlayerActions)
+                {
+                    SetStatus("所有人已盖放完毕——自动进入玩家行动第 1 轮。");
+                    return;
+                }
+
                 CharacterCardDef def = state.Catalog.Character(cardId);
                 SetStatus($"[盖放] 玩家{seat + 1} 盖放了《{(def != null ? def.Name : cardId.ToString())}》。");
             }
@@ -2253,18 +2262,40 @@ namespace NomadCity.UI
 
                 if (mode == ActionMode.None && IsSetupPhase(state))
                 {
-                    int seat = ChooseStartNodeCommand.NextChooser(state);
+                    int seat = ChooseStartNodeCommand.CurrentOperator(state);
                     const string place = "先点「手牌」小标签展开手牌，再点其中一张盖放（§4.2 阶段 1）。";
-                    panel.SetHint(seat < 0
-                        ? $"{place}初始资源点都决定好了——点「结束回合」进入玩家行动。"
-                        : $"{place}轮到玩家 {seat + 1}：请点击一个绿色资源点本体作为初始资源点。");
+
+                    // 已经放下移动城市、正被事件牌挡住的那位：提示先选奖励，别急着切给下一位。
+                    if (seat >= 0 && state.Player(seat).MobileCityNodeId >= 0)
+                    {
+                        SetHint($"{SeatLabel(seat)} 正在结算事件牌：请选择这次翻出的奖励，选完才轮到下一位选初始资源点。");
+                        return;
+                    }
+
+                    SetHint(seat < 0
+                        ? $"{place}初始资源点都决定好了——所有人盖放完自动进入玩家行动。"
+                        : $"{place}轮到 {SeatLabel(seat)}：请点击一个绿色资源点本体作为初始资源点。");
+                    return;
+                }
+
+                // 第 2 回合起没有开局入场，盖放阶段直接开始；所有人盖放完由引擎自动进入玩家行动。
+                if (mode == ActionMode.None && state.Phase == TurnPhase.CharacterPlacement)
+                {
+                    if (state.SupplyDiscardRemaining > 0)
+                    {
+                        SetHint($"2 人局：轮到 {SeatLabel(state.SupplyDiscardSeat)} 从设施供应区弃 1 张设施牌，然后开始盖放。");
+                        return;
+                    }
+
+                    string who = lockToLocalSeat ? string.Empty : $"{SeatLabel(ViewSeat(state))} ";
+                    SetHint($"{who}盖放角色牌：先点「手牌」小标签展开手牌，再点其中一张盖放；所有人盖放完自动进入玩家行动。");
                     return;
                 }
 
                 // 角色牌效果收集 / 连用确认期间，优先显示它的引导。
                 if (characterStep == CharacterStep.Effect && characterSession != null)
                 {
-                    panel.SetHint(CharacterEffectHint());
+                    SetHint(CharacterEffectHint());
                     return;
                 }
 
@@ -2274,20 +2305,11 @@ namespace NomadCity.UI
                     return;
                 }
 
-                // 采集阶段三种情形：还在选点（走下面的 Harvest 分支）、自己已提交等别人、已结算等「结束回合」。
+                // 采集阶段：还在选点（走下面的 Harvest 分支）或自己已提交、等其他人提交（引擎收齐后自动结算并进入下一回合）。
                 if (state.Phase == TurnPhase.Harvest && state.HarvestPending
                     && lockToLocalSeat && state.HarvestChoices.ContainsKey(localSeat))
                 {
                     panel.SetHint("你已提交本回合的采集选择，等待其他玩家提交…");
-                    return;
-                }
-
-                if (state.Phase == TurnPhase.Harvest && !state.HarvestPending)
-                {
-                    // 推进阶段由房主发起（主机座位固定为 0），客户端只能等。
-                    panel.SetHint(lockToLocalSeat && localSeat != 0
-                        ? "采集合计已结算（见状态行）。等待房主点「结束回合」进入收尾阶段。"
-                        : "采集合计已结算（见状态行）。点「结束回合」进入收尾阶段。");
                     return;
                 }
             }
@@ -2324,7 +2346,7 @@ namespace NomadCity.UI
                             panel.SetHint("建设：确认弹窗里点「确定建造」，或点「取消」返回选位。");
                             break;
                         case BuildStep.Effect:
-                            panel.SetHint(BuildEffectHint());
+                            SetHint(BuildEffectHint());
                             break;
                         default:
                             panel.SetHint("建设：点窗口里的任意一张设施牌。");
@@ -2335,7 +2357,7 @@ namespace NomadCity.UI
                     panel.SetHint("宣告城市样式：请从弹出的 6 张样式牌里点一张（引擎会自动匹配组合）。");
                     break;
                 case ActionMode.SpecialAction:
-                    panel.SetHint(specialStep == SpecialStep.Effect
+                    SetHint(specialStep == SpecialStep.Effect
                         ? SpecialEffectHint()
                         : "特殊行动：请从弹出的 6 张样式牌里点一张——付费用并结算它解锁的特殊行动（§6.3f）。");
                     break;
@@ -2584,7 +2606,7 @@ namespace NomadCity.UI
             foreach (int nodeId in plan.Nodes) codes.Add(engine.State.Map.Node(nodeId).Code);
             string list = codes.Count == 0 ? "无" : string.Join("、", codes);
 
-            string who = lockToLocalSeat ? "你" : $"玩家 {seat + 1}";
+            string who = lockToLocalSeat ? "你" : SeatLabel(seat);
             string tail = lockToLocalSeat
                 ? "点地图上的资源点可加入或移除；「确认」提交给主机，「取消」恢复默认全选。"
                 : "点地图上的资源点可加入或移除；「确认」交给下一位，「取消」恢复默认全选。";
@@ -2594,18 +2616,59 @@ namespace NomadCity.UI
 
         private void SetHint(string text)
         {
-            if (panel != null) panel.SetHint(text);
+            if (panel != null) panel.SetHint(LocalizePlayerRefs(text));
         }
 
         private void SetStatus(string text)
         {
-            if (hud != null) hud.SetStatus(text);
+            if (hud != null) hud.SetStatus(LocalizePlayerRefs(text));
+        }
+
+        /// <summary>座位显示名：优先用准备房间同步来的昵称，没有时回退成「玩家 N」。</summary>
+        private string SeatLabel(int seat)
+        {
+            if (seat < 0) return "—";
+
+            string name = seat < playerNames.Length && !string.IsNullOrWhiteSpace(playerNames[seat])
+                ? playerNames[seat]
+                : $"玩家 {seat + 1}";
+            return name;
+        }
+
+        /// <summary>
+        /// 把文本里的「玩家 N」换成昵称。引擎给的原因、效果说明都是 Core 拼出来的，
+        /// 不持有昵称，所以在界面这一层统一翻译一次；单机热座没有昵称时原样返回。
+        /// </summary>
+        private string LocalizePlayerRefs(string text)
+        {
+            if (string.IsNullOrEmpty(text) || playerNames.Length == 0) return text;
+
+            return PlayerRef.Replace(text, match =>
+            {
+                int seat = int.Parse(match.Groups[1].Value) - 1;
+                return seat >= 0 && seat < playerNames.Length && !string.IsNullOrWhiteSpace(playerNames[seat])
+                    ? playerNames[seat]
+                    : match.Value;
+            });
+        }
+
+        /// <summary>顶栏「行动座位」在单机热座下跟着实际操作者走（盖放／采集阶段引擎不轮转 ActiveSeat）。</summary>
+        private int HudOperatorSeat(GameState state)
+        {
+            if (lockToLocalSeat || state == null) return -1;
+            if (state.Phase == TurnPhase.CharacterPlacement) return ViewSeat(state);
+            if (state.Phase == TurnPhase.Harvest && state.HarvestPending && HarvestSeat >= 0) return HarvestSeat;
+            return ViewSeat(state);
         }
 
         private void RefreshAll()
         {
             if (renderer != null && renderer.IsReady) renderer.Refresh();
-            if (hud != null) hud.Refresh();
+            if (hud != null)
+            {
+                hud.SetOperatorSeat(HudOperatorSeat(engine != null ? engine.State : null));
+                hud.Refresh();
+            }
             RefreshFacilityViews();
 
             // 引导文字也跟着状态走：开局选点轮次、本局结束这些都不经过 SetMode，
@@ -2622,10 +2685,10 @@ namespace NomadCity.UI
             bool buildMode = mode == ActionMode.Build;
 
             // 2 人局（§12 变体 4）：盖放角色牌前每名玩家要先弃 1 张设施牌 —— 借设施供应区面板当弃牌窗。
-            // 第 1 回合的「开局入场」（§4.3 决定初始资源点）在回合结构之前，所以弃牌窗要等初始资源点
-            // 都定完再弹，否则遮罩会挡住开局选点的地图点击。进出这一步只在这里同步一次
+            // 第 1 回合的「开局入场」（§4.3 决定初始资源点 + 结算事件牌）在回合结构之前，所以弃牌窗要等
+            // 开局入场整个走完再弹，否则遮罩会挡住开局选点的地图点击。
             //（命令与阶段事件都会走到 RefreshAll），避免散落的开关时机。
-            bool setupDone = ChooseStartNodeCommand.NextChooser(state) < 0;
+            bool setupDone = ChooseStartNodeCommand.CurrentOperator(state) < 0;
             bool discard = state.Phase == TurnPhase.CharacterPlacement
                            && state.SupplyDiscardRemaining > 0 && setupDone
                            && pendingEventNodeId < 0 // 事件卡还开着时先让位，免得遮罩挡住卡面
@@ -2658,24 +2721,70 @@ namespace NomadCity.UI
             {
                 int handSeat = ViewSeat(state);
                 PlayerState handPlayer = handSeat >= 0 && handSeat < state.Players.Count ? state.Players[handSeat] : null;
-                handPanel.SetAvailable(handPlayer != null && handPlayer.HandCharacterCards.Count > 0);
-                handPanel.Refresh(state, handSeat, placementPhase);
+                // §10.1.1：手牌为空时先回收弃牌区再盖放 —— 盖放阶段弃牌区也算「还有牌可盖」。
+                bool hasCards = handPlayer != null
+                                && (handPlayer.HandCharacterCards.Count > 0
+                                    || (placementPhase && handPlayer.DiscardCharacterCards.Count > 0));
+                // 真正可点：盖放阶段、设施牌已经弃完、第 1 回合的开局入场已结束、且这个人还没盖放过。
+                // 第 1 回合的开局入场（选城市 + 结算事件牌）还没走完时不让盖放，保证「先选城市、再一起盖放」的顺序。
+                bool setupPending = state.TurnNumber == 1 && ChooseStartNodeCommand.CurrentOperator(state) >= 0;
+                bool canPlaceNow = placementPhase && !setupPending && state.SupplyDiscardRemaining == 0
+                                   && handPlayer != null && handPlayer.PlacedCharacterCard < 0;
+                handPanel.SetAvailable(hasCards && !setupPending);
+                handPanel.Refresh(state, handSeat, canPlaceNow);
             }
         }
 
         /// <summary>
-        /// 城市面板固定显示本机玩家的城市（建设模式也一样）：回合结束时座次会自动推进，
-        /// 但本机玩家的面板不该跟着变 —— 否则刚建好的设施会随着座次切走而「看不见」。
-        /// 座位越界时退回行动座位（再退回 0），保证永远有一个合法座位可显示。
+        /// 城市面板 / 角色牌手牌显示哪个座位：
+        /// - 联机：固定显示本机玩家的城市（回合结束座次推进，本机面板不该跟着变，否则刚建好的设施会「看不见」）；
+        /// - 单机热座：跟着当前该操作的人走 —— 一台机器轮着操作所有玩家，面板/手牌必须切到正在行动的那个人，
+        ///   否则轮到玩家 2 时界面还停在玩家 1，看不到自己的城市也没法建设。
+        /// 座位越界时退回 0，保证永远有一个合法座位可显示。
         /// </summary>
         private int ViewSeat(GameState state)
         {
             if (state == null) return 0;
 
-            int seat = localSeat;
-            if (seat < 0 || seat >= state.Players.Count) seat = state.ActiveSeat;
-            if (seat < 0 || seat >= state.Players.Count) seat = 0;
-            return seat;
+            if (lockToLocalSeat)
+            {
+                int seat = localSeat;
+                if (seat < 0 || seat >= state.Players.Count) seat = state.ActiveSeat;
+                if (seat < 0 || seat >= state.Players.Count) seat = 0;
+                return seat;
+            }
+
+            // 单机热座：盖放阶段没有座位轮转（ActiveSeat 一直停在起始玩家），
+            // 谁还没盖放就把界面切给谁，否则盖完 1 号以后 2–4 号永远轮不到。
+            if (state.Phase == TurnPhase.CharacterPlacement)
+            {
+                // 第 1 回合的「开局入场」：选初始资源点与结算事件牌都算同一个人的操作，
+                // 事件没结算完之前不要把界面切给下一位（否则玩家 1 还在选奖励，顶栏已经变成玩家 2）。
+                int chooser = ChooseStartNodeCommand.CurrentOperator(state);
+                if (chooser >= 0) return chooser;
+
+                // 2 人局变体：先弃设施牌，显示正在弃牌的那位。
+                if (state.SupplyDiscardRemaining > 0
+                    && state.SupplyDiscardSeat >= 0 && state.SupplyDiscardSeat < state.Players.Count)
+                    return state.SupplyDiscardSeat;
+
+                // 从起始玩家开始顺时针找第一个「还没盖放且手里/弃牌区有牌」的人。
+                int count = state.Players.Count;
+                int start = state.FirstPlayerSeat;
+                if (start < 0 || start >= count) start = 0;
+                for (int i = 0; i < count; i++)
+                {
+                    int s = (start + i) % count;
+                    PlayerState p = state.Players[s];
+                    if (p.PlacedCharacterCard < 0
+                        && (p.HandCharacterCards.Count > 0 || p.DiscardCharacterCards.Count > 0))
+                        return s;
+                }
+            }
+
+            int active = state.ActiveSeat;
+            if (active < 0 || active >= state.Players.Count) active = 0;
+            return active;
         }
 
         /// <summary>采集阶段结算的简报（全部玩家选点确认后由 GameEngine.ResolveHarvest 统一结算）。</summary>

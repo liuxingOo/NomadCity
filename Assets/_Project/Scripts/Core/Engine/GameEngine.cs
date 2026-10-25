@@ -93,6 +93,10 @@ namespace NomadCity.Core.Engine
 
             if (command.ConsumesAction) TurnFlow.CompletePlayerAction(State);
 
+            // 正式对局不靠「结束回合」按钮：盖放完成、采集结算完成这些阶段边界都在这里自动推进。
+            // 联机客户端重放的是同一条命令，会得到同样的推进，各端状态保持一致。
+            TurnFlow.TryAutoAdvance(State);
+
             // 采集结算也走命令通道；界面仍按原有事件接收结算简报（§7）。
             // 联机时由各玩家提交自己的选择，最后一条提交会当场结算并带回报告。
             if (command is ResolveHarvestCommand harvest && harvest.Report != null)

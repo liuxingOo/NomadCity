@@ -171,6 +171,35 @@ namespace NomadCity.Core.Engine
             }
             return -1;
         }
+
+        /// <summary>
+        /// 开局入场当前真正要操作的座位：**先把事件牌结算完，再轮到下一个人选城市**。
+        ///
+        /// <see cref="NextChooser"/> 在玩家把移动城市放下的那一刻就会前进到下一位，但此时翻出的事件牌
+        /// 还没结算（<see cref="MapNodeState.EventResolved"/> 为 false）——界面若直接按 NextChooser 显示，
+        /// 就会出现「玩家 1 还在选事件卡奖励，顶栏已经变成玩家 2」的情况。
+        /// 这里先按起始顺序找出「城市已放、事件还没结算」的人，都结算完了才返回下一位选城市的人；
+        /// 开局入场全部结束则返回 -1。纯显示/流程闸门用，不改变规则校验。
+        /// </summary>
+        public static int CurrentOperator(GameState state)
+        {
+            if (state == null || state.TurnNumber != 1 || state.Phase != TurnPhase.CharacterPlacement)
+                return -1;
+
+            int seat = state.FirstPlayerSeat;
+            for (int i = 0; i < state.Players.Count; i++)
+            {
+                PlayerState player = state.Player(seat);
+                if (player.MobileCityNodeId >= 0)
+                {
+                    MapNodeState node = state.Map.Node(player.MobileCityNodeId);
+                    if (node != null && node.EventCardId >= 0 && !node.EventResolved) return seat;
+                }
+                seat = state.NextSeat(seat);
+            }
+
+            return NextChooser(state);
+        }
     }
 
     /// <summary>

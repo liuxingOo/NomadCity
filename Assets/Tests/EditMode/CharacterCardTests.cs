@@ -139,6 +139,42 @@ namespace NomadCity.Tests
             Assert.IsFalse(result.Ok);
         }
 
+        [Test]
+        public void 盖放_所有人盖放完自动进入玩家行动_从起始玩家开始()
+        {
+            GameEngine engine = NewGameAtPlacement(4, 2);
+            GameState state = engine.State;
+            // 跳过第 1 回合的开局入场闸门（那条闸门由下面的用例单独验证）。
+            state.TurnNumber = 2;
+
+            for (int seat = 0; seat < state.Players.Count; seat++)
+            {
+                PlayerState player = state.Players[seat];
+                CommandResult result = engine.Dispatch(new PlaceCharacterCardCommand(seat, player.HandCharacterCards[0]));
+                Assert.IsTrue(result.Ok, result.Error);
+            }
+
+            Assert.AreEqual(TurnPhase.PlayerActions, state.Phase, "最后一名玩家盖放完，应自动进入玩家行动。");
+            Assert.AreEqual(1, state.ActionRound);
+            Assert.AreEqual(2, state.ActiveSeat, "玩家行动第 1 轮从起始玩家开始。");
+        }
+
+        [Test]
+        public void 盖放_第1回合开局入场没选完时不会自动进入玩家行动()
+        {
+            GameEngine engine = NewGameAtPlacement(4, 0);
+            GameState state = engine.State;
+
+            for (int seat = 0; seat < state.Players.Count; seat++)
+            {
+                PlayerState player = state.Players[seat];
+                engine.Dispatch(new PlaceCharacterCardCommand(seat, player.HandCharacterCards[0]));
+            }
+
+            Assert.AreEqual(TurnPhase.CharacterPlacement, state.Phase,
+                "第 1 回合还没人选初始资源点，不能跳过开局入场进入玩家行动。");
+        }
+
         // ————————————————————— 使用（§6.3a / §6.5a / §10.1.2） —————————————————————
 
         [Test]

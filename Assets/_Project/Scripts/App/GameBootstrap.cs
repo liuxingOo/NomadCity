@@ -369,8 +369,7 @@ namespace NomadCity.App
             bool canPick = drafter >= 0 && (!online || drafter == LocalSeat());
 
             entrepreneurPanel.SetOrder(OrderText());
-            entrepreneurPanel.Refresh(pickedColors,
-                session != null ? session.PlayerNicknames : null, canPick);
+            entrepreneurPanel.Refresh(pickedColors, online && session != null ? session.PlayerNicknames : null, canPick);
 
             if (!online)
             {
@@ -402,7 +401,8 @@ namespace NomadCity.App
 
         private string SeatLabel(int seat)
         {
-            string[] names = session != null ? session.PlayerNicknames : null;
+            // 昵称只属于联机局：单机热座即使 GameSession 里残留了上一局的名单，也一律显示「玩家 N」。
+            string[] names = role != OnlineRole.None && session != null ? session.PlayerNicknames : null;
             string name = names != null && seat >= 0 && seat < names.Length && !string.IsNullOrWhiteSpace(names[seat])
                 ? names[seat]
                 : $"玩家 {seat + 1}";
@@ -472,11 +472,15 @@ namespace NomadCity.App
         /// </summary>
         private void InitializePresentation(int seat)
         {
+            bool online = session != null && session.Role != OnlineRole.None;
+            // 昵称只在联机时用：单机热座一律显示「玩家 N」，免得上一局联机残留在 GameSession 里的名单串进来。
+            string[] names = online ? session.PlayerNicknames : null;
+
             // 顶栏显示的玩家名来自准备房间的名单；联机时在自己那一行后面标「（你）」。
             if (gameHud != null)
             {
-                gameHud.SetPlayerNames(session != null ? session.PlayerNicknames : null);
-                gameHud.SetLocalSeat(session != null && session.Role != OnlineRole.None ? seat : -1);
+                gameHud.SetPlayerNames(names);
+                gameHud.SetLocalSeat(online ? seat : -1);
             }
 
             // 先把引擎状态画出来，再把界面接上引擎 —— 顺序不能反，否则界面第一次刷新时地图还没有标记。
@@ -486,7 +490,7 @@ namespace NomadCity.App
             if (screenController != null)
                 screenController.Initialize(Engine, mapStateRenderer, mapPointerInput, gameHud, actionPanel,
                     eventCardPanel, choicePopup, facilitySupplyPanel, cityPanelView, cityPatternPanel, cardPreviewPopup,
-                    characterHandPanel, seat, session != null && session.Role != OnlineRole.None);
+                    characterHandPanel, seat, online, names);
             else
                 Debug.LogWarning("[开局] 未指定 GameScreenController，界面不会响应键鼠操作。", this);
 
@@ -533,8 +537,12 @@ namespace NomadCity.App
                                      "免得以后场景改名或复制时对不上。", this);
             }
 
+            // 行动记录里的「玩家 N」也要换成昵称，所以名单同样要在 Bind 之前给进去（Bind 会写「开局」那一行）。
             if (actionLogPanel != null)
+            {
+                actionLogPanel.SetPlayerNames(names);
                 actionLogPanel.Bind(Engine);
+            }
             else
                 Debug.LogWarning("[开局] 场景里找不到 ActionLogPanel，右上角的「行动记录」不会记录任何内容。", this);
         }
@@ -687,16 +695,13 @@ namespace NomadCity.App
 
             // 角色牌盖放也要跑完 —— 否则开发者模式一进游戏就没盖放牌，「使用角色牌」按钮点不动（§6.3a）。
             // 每人盖放自己手牌里的第一张，让任意座位都能直接测策略 / 计谋。
+            // 最后一张盖放落地后，引擎会自动进入玩家行动阶段（TurnFlow.TryAutoAdvance），这里不需要再手动推进。
             for (int i = 0; i < state.Players.Count; i++)
             {
                 PlayerState player = state.Players[i];
                 if (player.PlacedCharacterCard < 0 && player.HandCharacterCards.Count > 0)
                     Engine.Dispatch(new PlaceCharacterCardCommand(i, player.HandCharacterCards[0]));
             }
-
-            CommandResult advance = Engine.Dispatch(new AdvancePhaseCommand());
-            if (!advance.Ok)
-                Debug.LogWarning($"[开发者模式] 自动推进到玩家行动阶段失败：{advance.Error}", this);
         }
 
         /// <summary>

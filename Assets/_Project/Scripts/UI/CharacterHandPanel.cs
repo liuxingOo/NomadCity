@@ -162,6 +162,12 @@ namespace NomadCity.UI
                 : null;
             IReadOnlyList<int> hand = player != null ? player.HandCharacterCards : null;
 
+            // §10.1.1：手牌为空时先把自己弃牌区的角色牌全部回收再盖放，
+            // 所以盖放阶段（interactable）的候选池可以退回弃牌区。
+            IReadOnlyList<int> pool = hand != null && hand.Count > 0
+                ? hand
+                : (interactable && player != null ? player.DiscardCharacterCards : hand);
+
             for (int i = 0; i < cardButtons.Length; i++)
             {
                 Button button = cardButtons[i];
@@ -169,7 +175,7 @@ namespace NomadCity.UI
 
                 NeutralizeDisabledTint(button);
 
-                int cardId = hand != null && i < hand.Count ? hand[i] : -1;
+                int cardId = pool != null && i < pool.Count ? pool[i] : -1;
                 button.gameObject.SetActive(cardId >= 0);
                 button.interactable = interactable && cardId >= 0;
 

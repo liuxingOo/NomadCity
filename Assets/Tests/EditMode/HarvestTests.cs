@@ -279,7 +279,7 @@ namespace NomadCity.Tests
         // ————————————————————— 引擎侧流程（玩家自选点） —————————————————————
 
         [Test]
-        public void 采集阶段_未结算前不许推进到收尾_结算后才放行()
+        public void 采集阶段_未结算前不许推进_结算后自动收尾并进入下一回合()
         {
             GameState state = HarvestState();
             state.HarvestPending = true; // 模拟「两轮行动结束，进入采集、等玩家选点」
@@ -300,9 +300,10 @@ namespace NomadCity.Tests
             Assert.IsTrue(report.Ok, report.Error);
             Assert.IsFalse(engine.HarvestNeedsChoices, "结算后就不再等待选择。");
 
-            // 结算完成才允许推进到收尾。
-            engine.Dispatch(new AdvancePhaseCommand());
-            Assert.AreEqual(TurnPhase.Cleanup, state.Phase);
+            // 结算完成后引擎自动走完收尾，直接进入下一回合的角色牌盖放阶段（不再需要「结束回合」）。
+            Assert.IsFalse(state.IsGameOver);
+            Assert.AreEqual(TurnPhase.CharacterPlacement, state.Phase);
+            Assert.IsFalse(state.HarvestPending);
         }
     }
 }

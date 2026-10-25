@@ -86,8 +86,8 @@ namespace NomadCity.App
             !transport.IsMultiplayer || (Engine != null && Engine.State.ActiveSeat == transport.LocalSeat);
 
         /// <summary>
-        /// 采集（§7）与 2 人局弃设施牌（§12 变体 4）不是「轮到某人」的流程：
-        /// 每名玩家只提交自己那一份，座位由命令自带，所以不能拿 <see cref="CanAct"/> 一概拦住。
+        /// 采集（§7）、2 人局弃设施牌（§12 变体 4）、开局入场与角色牌盖放这些流程不是「轮到某人」：
+        /// 每名玩家只提交自己那一份（座位由命令自带），所以不能拿 <see cref="CanAct"/> 一概拦住。
         /// </summary>
         private bool IsSelfPacedFlow(ICommand command)
         {
@@ -101,6 +101,19 @@ namespace NomadCity.App
                 return state.Phase == TurnPhase.CharacterPlacement
                        && state.SupplyDiscardRemaining > 0
                        && state.SupplyDiscardSeat == transport.LocalSeat;
+
+            // 角色牌盖放（§4.2 阶段 1）：所有玩家同时盖放，谁都不等谁，盖完由引擎自动进入玩家行动。
+            if (command is PlaceCharacterCardCommand)
+                return state.Phase == TurnPhase.CharacterPlacement;
+
+            // 开局入场（§4.3）：按「起始玩家起顺时针」逐个选初始资源点，再由本人结算事件选项。
+            if (command is ChooseStartNodeCommand)
+                return state.TurnNumber == 1
+                       && state.Phase == TurnPhase.CharacterPlacement
+                       && command.ActorSeat == ChooseStartNodeCommand.NextChooser(state);
+
+            if (command is ResolveEventOptionCommand)
+                return state.TurnNumber == 1 && state.Phase == TurnPhase.CharacterPlacement;
 
             return false;
         }

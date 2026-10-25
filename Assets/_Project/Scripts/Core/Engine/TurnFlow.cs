@@ -141,5 +141,55 @@ namespace NomadCity.Core.Engine
             state.ActionRound = 1;
             BeginCharacterPlacement(state);
         }
+
+        /// <summary>
+        /// 不需要玩家点按钮的阶段边界（正式对局的唯一推进方式）：
+        /// - 角色牌盖放阶段：所有人都盖放好（且第 1 回合开局入场已结束、2 人局弃牌已完成）→ 玩家行动第 1 轮；
+        /// - 采集阶段：所有人的选择都结算完 → 收尾结算 → 下一回合（最后一回合则终局结算）。
+        ///
+        /// 只在 <see cref="GameEngine.Dispatch"/> 里、每条命令成功执行之后调用：
+        /// 联机时客户端重放的是同一条命令，因此这里必须是纯状态判断，保证主机与各客户端推进到同一状态。
+        /// </summary>
+        public static bool TryAutoAdvance(GameState state)
+        {
+            if (state == null || state.IsGameOver) return false;
+
+            if (state.Phase == TurnPhase.CharacterPlacement)
+            {
+                // 2 人局（§12 变体 4）：弃设施牌是盖放前的步骤，没弃完不进入玩家行动。
+                if (state.SupplyDiscardRemaining > 0) return false;
+
+                // 第 1 回合的「开局入场」（§4.3）也在盖放阶段里：要等每个人都选好初始资源点、并把翻出的事件牌结算完。
+                if (state.TurnNumber == 1 && ChooseStartNodeCommand.CurrentOperator(state) >= 0) return false;
+
+                if (!AllCharacterCardsPlaced(state)) return false;
+
+                BeginPlayerActions(state);
+                return true;
+            }
+
+            if (state.Phase == TurnPhase.Harvest && !state.HarvestPending)
+            {
+                AdvancePhase(state); // → 收尾阶段并执行收尾结算（§8）
+                AdvancePhase(state); // → 下一回合的角色牌盖放 / 终局结算
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>所有人要么已经盖放，要么手里和弃牌区都没有角色牌可盖了。</summary>
+        private static bool AllCharacterCardsPlaced(GameState state)
+        {
+            if (state.Players.Count == 0) return false;
+
+            foreach (PlayerState player in state.Players)
+            {
+                if (player.PlacedCharacterCard >= 0) continue;
+                if (player.HandCharacterCards.Count > 0 || player.DiscardCharacterCards.Count > 0) return false;
+            }
+
+            return true;
+        }
     }
 }
