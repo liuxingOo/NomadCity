@@ -9,7 +9,8 @@ namespace NomadCity.UI
 {
     /// <summary>
     /// 顶部信息栏：本回合进度 + 每名玩家的公开状态。
-    /// 右侧每名玩家一块状态栏：企业家圆形头像、昵称、得分、金券、四种资源与供应堆标记；
+    /// 右侧每名玩家一块状态栏：企业家圆形头像、压在头像底边的昵称，以及一排「图标 + 数字」形式的
+    /// 得分 / 金券 / 标记 / 四种资源（图标是场景里的静态图片，这里只往数字文本框里写值）；
     /// 手牌与盖放的角色牌属于私有信息，不在这里显示。
     /// </summary>
     public sealed class GameHud : MonoBehaviour
@@ -20,7 +21,7 @@ namespace NomadCity.UI
         [Tooltip("最近一次命令的结果或失败原因")]
         [SerializeField] private TMP_Text statusText;
 
-        [Tooltip("每个座位一行，数组顺序即座位号")]
+        [Tooltip("状态栏槽位：数组顺序即从上到下的显示顺序，运行时按本局行动顺序填写，不要在编辑器里把某一行绑给某个颜色")]
         [SerializeField] private GameHudRow[] rows = Array.Empty<GameHudRow>();
 
         [Tooltip("状态栏底板：按 PlayerColor 顺序（绿 / 黄 / 红 / 蓝）")]
@@ -86,18 +87,23 @@ namespace NomadCity.UI
                 turnText.text = $"回合 {state.TurnNumber}/{TurnFlow.TotalTurns} · {StageLabel(state)}{RoundSuffix(state)} · {OperatorLabel(state)}";
             }
 
+            // 行是从上到下的显示槽位，不是座位号：第 i 行显示本局行动顺序里的第 i 个人。
+            // 行动顺序每局随机排定（GameState.SeatOrder），所以谁出现在哪一行由引擎决定，
+            // 编辑器里四行保持完全一样即可，运行时再按玩家的颜色 / 企业家换底板与头像。
             for (int i = 0; i < rows.Length; i++)
             {
                 GameHudRow row = rows[i];
                 if (row == null) continue;
 
-                bool used = i < state.Players.Count;
-                if (row.Background != null) row.Background.gameObject.SetActive(used);
-                if (row.Avatar != null) row.Avatar.gameObject.SetActive(used);
-                if (row.Text != null) row.Text.gameObject.SetActive(used);
+                int seat = SeatAt(state, i);
+                bool used = seat >= 0;
+
+                // 空槽位整行关掉：图标是场景装饰，代码只认识数值文本，只关文本会把图标留在屏幕上。
+                if (row.Root != null) row.Root.SetActive(used);
+                else SetRowPartsActive(row, used);
                 if (!used) continue;
 
-                PlayerState player = state.Players[i];
+                PlayerState player = state.Players[seat];
 
                 // 底板与头像都按玩家颜色换图（绿 / 黄 / 红 / 蓝），美术里每个企业家一套。
                 if (row.Background != null)
@@ -113,8 +119,43 @@ namespace NomadCity.UI
                     if (face != null) row.Avatar.sprite = face;
                 }
 
-                if (row.Text != null) row.Text.text = Describe(state, player);
+                ApplyStats(state, row, player);
             }
+        }
+
+        /// <summary>没接整行根对象时的兜底：把代码认识的部件逐个开关（图标管不到）。</summary>
+        private static void SetRowPartsActive(GameHudRow row, bool active)
+        {
+            Activate(row.Background, active);
+            Activate(row.Avatar, active);
+            Activate(row.Name, active);
+
+            if (row.Values == null) return;
+            for (int i = 0; i < row.Values.Length; i++) Activate(row.Values[i], active);
+        }
+
+        private static void Activate(Component part, bool active)
+        {
+            if (part != null) part.gameObject.SetActive(active);
+        }
+
+        /// <summary>
+        /// 第 <paramref name="index"/> 行对应本局行动顺序里的哪个座位。
+        /// 行动顺序（<see cref="GameState.SeatOrder"/>）没设置或长度不对时退回自然顺序；
+        /// 超出玩家人数的行返回 -1，表示这一行不用。
+        /// </summary>
+        private static int SeatAt(GameState state, int index)
+        {
+            if (index < 0 || index >= state.Players.Count) return -1;
+
+            int[] order = state.SeatOrder;
+            if (order != null && order.Length == state.Players.Count)
+            {
+                int seat = order[index];
+                if (seat >= 0 && seat < state.Players.Count) return seat;
+            }
+
+            return index;
         }
 
         private static Sprite ColorSprite(Sprite[] sprites, PlayerColor color)
@@ -123,16 +164,36 @@ namespace NomadCity.UI
             return sprites != null && index >= 0 && index < sprites.Length ? sprites[index] : null;
         }
 
-        /// <summary>状态栏正文：昵称（带盖放状态）+ 得分 / 金券 / 标记 + 四种资源。</summary>
-        private string Describe(GameState state, PlayerState player)
+        /// <summary>
+        /// 填一行的数据：昵称压在头像圆框底边，其余数值按场景里图标的摆放顺序写进对应的数字文本框。
+        /// 图标本身是场景里的静态图片，代码只负责把数字写对，不引图标资源。
+        /// </summary>
+        private void ApplyStats(GameState state, GameHudRow row, PlayerState player)
         {
-            ResourcePool r = player.Resources;
-            string tag = PlacementTag(state, player);
+            if (row.Name != null)
+            {
+                // 盖放 / 待弃牌的提示接在昵称后面：昵称那行字号很小，再单起一行会挤到图标区。
+                row.Name.text = SeatName(state, player.SeatIndex) + PlacementTag(state, player);
+            }
 
-            return $"<b><size=17>{SeatName(state, player.SeatIndex)}</size></b>" +
-                   (tag.Length > 0 ? $"<size=13>{tag}</size>" : string.Empty) + "\n" +
-                   $"分 {player.Score} · 金券 {player.Vouchers} · 标记 {player.MarkersInSupply}\n" +
-                   $"<size=14>源岩 {r.Orirock} · 源石 {r.Originium} · 异铁 {r.Oriron} · 至纯源石 {r.OriginitePrime}</size>";
+            ResourcePool r = player.Resources;
+
+            // 下标必须与场景里图标的顺序一致，见 GameHudRow.Values 的 Tooltip。
+            WriteValue(row, 0, player.Score);            // 得分
+            WriteValue(row, 1, player.Vouchers);         // 金券
+            WriteValue(row, 2, player.MarkersInSupply);  // 玩家标记
+            WriteValue(row, 3, r.Orirock);               // 源岩
+            WriteValue(row, 4, r.Originium);             // 源石
+            WriteValue(row, 5, r.Oriron);                // 异铁
+            WriteValue(row, 6, r.OriginitePrime);        // 至纯源石
+        }
+
+        private static void WriteValue(GameHudRow row, int index, int value)
+        {
+            if (row.Values == null || index < 0 || index >= row.Values.Length) return;
+
+            TMP_Text text = row.Values[index];
+            if (text != null) text.text = value.ToString();
         }
 
         /// <summary>
@@ -245,17 +306,27 @@ namespace NomadCity.UI
         }
     }
 
-    /// <summary>HUD 里的一名玩家：状态栏底板 + 圆形头像 + 信息文本。</summary>
+    /// <summary>
+    /// HUD 里的一名玩家：状态栏底板 + 圆形头像 + 压在头像底边的昵称 + 一排「图标 + 数字」的数值。
+    /// 图标是场景里摆好的静态 Image（代码不引用，「得分 / 金券 / 标记 / 源岩 / 源石 / 异铁 / 至纯源石」按这个顺序排），
+    /// 这里只接数值文本框。
+    /// </summary>
     [Serializable]
     public sealed class GameHudRow
     {
+        [Tooltip("整行根对象（就是 Row 自己）：空槽位时整行关掉，免得图标留在屏幕上")]
+        public GameObject Root;
+
         [Tooltip("状态栏底板（按玩家颜色换图）")]
         public Image Background;
 
         [Tooltip("左侧圆形头像（按玩家企业家换图）")]
         public Image Avatar;
 
-        [Tooltip("昵称 / 得分 / 金券 / 资源 / 标记")]
-        public TMP_Text Text;
+        [Tooltip("昵称：压在头像圆框底边（上半截在圆内、下半截在状态栏左下角）")]
+        public TMP_Text Name;
+
+        [Tooltip("数值文本，顺序固定：0 得分 / 1 金券 / 2 玩家标记 / 3 源岩 / 4 源石 / 5 异铁 / 6 至纯源石")]
+        public TMP_Text[] Values = Array.Empty<TMP_Text>();
     }
 }

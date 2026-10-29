@@ -31,8 +31,9 @@ namespace NomadCity.UI
     ///
     /// 基础版 6 个主要行动 + 2 个快速行动已全部实现，没有「待实现」按钮。
     ///
-    /// 现在这块面板整体是一个**弹窗**：游戏主界面上只留一个「行动」按钮（<see cref="openButton"/>）用来展开；
-    /// 展开后这个按钮自己藏起来，收起只能靠弹窗里的「关闭」键（<see cref="closeButton"/>）。
+    /// 现在这块面板整体是一个**弹窗**：常驻操作区里那颗「行动」按钮（<see cref="openButton"/>）负责开合。
+    /// 入口按钮**常驻不动** —— 展开、收起都不会把它藏起来，它就一直摆在操作区里，玩家随时能再点。
+    /// 弹窗里另有「关闭」键（<see cref="closeButton"/>）也能收起。
     /// 点弹窗里的行动按钮**不会**自动收起 —— 面板停在屏幕边上不挡地图，提示文本与「确认 / 取消」全程可用。
     /// </summary>
     public sealed class ActionPanel : MonoBehaviour
@@ -41,10 +42,12 @@ namespace NomadCity.UI
         [Tooltip("弹窗的根节点：展开 / 收起时开关它。把下面全部行动按钮与提示文本都放进这个节点下面")]
         [SerializeField] private GameObject popupRoot;
 
-        [Tooltip("游戏主界面上唯一的「行动」按钮：点它展开弹窗，展开后它自己会隐藏")]
+        [Tooltip("常驻的「行动」按钮：点它开 / 收弹窗。这颗按钮永远摆在操作区里，不会被藏起来。" +
+                 "两种接法二选一：① 只把按钮拖进这个字段；② 这个字段留空，改用按钮 On Click 接 ToggleVisible。" +
+                 "两种都接会一次点击开关两次，看着像没反应。")]
         [SerializeField] private Button openButton;
 
-        [Tooltip("弹窗里的「关闭」按钮：展开后「行动」按钮会藏起来，这是唯一能收起弹窗、把按钮放回来的入口，必须接线")]
+        [Tooltip("弹窗里的「关闭」按钮：收起弹窗。入口按钮不会消失，所以这颗只当顺手关一下的快捷键")]
         [SerializeField] private Button closeButton;
 
         [Header("主要行动：引擎已实现")]
@@ -99,7 +102,10 @@ namespace NomadCity.UI
 
         private void Awake()
         {
-            On(openButton, Show);
+            // 入口按钮：只在这个字段接了、并且按钮的 On Click 里没手工接过 ToggleVisible 的时候才自动绑。
+            // 不然场景里接一次、代码里再绑一次，一次点击会开关两次 —— 表现就是「点了没反应」。
+            if (openButton != null && openButton.onClick.GetPersistentEventCount() == 0)
+                openButton.onClick.AddListener(ToggleVisible);
             On(closeButton, Hide);
 
             On(placeButton, () => ModeRequested?.Invoke(ActionMode.Place));
@@ -143,21 +149,29 @@ namespace NomadCity.UI
         /// <summary>弹窗是不是开着。</summary>
         public bool IsVisible => popupRoot != null && popupRoot.activeSelf;
 
-        /// <summary>展开弹窗，同时把主界面上那个「行动」按钮藏起来 —— 展开期间不再显示它。</summary>
+        /// <summary>展开弹窗。入口按钮常驻不动 —— 这里只开弹窗，不去碰它。</summary>
         public void Show()
         {
-            // 没接「弹窗根节点」时什么都不做：否则会把唯一的入口按钮也藏掉，玩家再也点不开面板。
+            // 没接「弹窗根节点」时什么都不做，免得误开一坨没归位的按钮。
             if (popupRoot == null) return;
 
             popupRoot.SetActive(true);
-            if (openButton != null) openButton.gameObject.SetActive(false);
         }
 
-        /// <summary>收起弹窗，把「行动」按钮放回原位。</summary>
+        /// <summary>收起弹窗。入口按钮从头到尾没被藏起来，所以这里也不用把它放回来。</summary>
         public void Hide()
         {
             if (popupRoot != null) popupRoot.SetActive(false);
-            if (openButton != null) openButton.gameObject.SetActive(true);
+        }
+
+        /// <summary>
+        /// 展开 / 收起切换。给常驻操作区里那颗「行动」按钮用：点一次展开、再点一次收起。
+        /// 按钮本身两种情况下都留在操作区里，不会消失。
+        /// </summary>
+        public void ToggleVisible()
+        {
+            if (IsVisible) Hide();
+            else Show();
         }
 
         /// <summary>

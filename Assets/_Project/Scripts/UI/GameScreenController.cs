@@ -2730,7 +2730,9 @@ namespace NomadCity.UI
                 bool setupPending = state.TurnNumber == 1 && ChooseStartNodeCommand.CurrentOperator(state) >= 0;
                 bool canPlaceNow = placementPhase && !setupPending && state.SupplyDiscardRemaining == 0
                                    && handPlayer != null && handPlayer.PlacedCharacterCard < 0;
-                handPanel.SetAvailable(hasCards && !setupPending);
+                // 「能不能看」只看手里有没有牌。开局入场（选城市 / 结算事件牌）期间也要能翻开对一下手牌，
+                // 只是牌位点不动 —— 那个限制在下一位的 canPlaceNow 里，不要拿它去关整块托盘。
+                handPanel.SetAvailable(hasCards);
                 handPanel.Refresh(state, handSeat, canPlaceNow);
             }
         }

@@ -44,13 +44,46 @@ namespace NomadCity.UI
         /// <summary>点了第几个牌位（0 起）。</summary>
         public event Action<int> CardClicked;
 
+        /// <summary>只读查看模式：面板开着，但六个牌位一律点不动（点卡片不会发出宣告意图）。</summary>
+        private bool viewOnly;
+
+        /// <summary>最近一次刷新用的状态与可交互标记：切到只读 / 退出只读时立刻重算牌位，不用等下一次刷新。</summary>
+        private GameState lastState;
+        private bool lastInteractable;
+
         /// <summary>
         /// 开关弹窗。宿主容器始终激活（避免 Awake 里的按钮绑定失效），只切 Root 的显隐。
+        /// 这是 GameScreenController 按行动模式调用的「可操作」打开方式，会把只读标记清掉。
         /// </summary>
         public void SetOpen(bool open)
         {
             if (root == null) return;
+
+            viewOnly = false;
             if (root.activeSelf != open) root.SetActive(open);
+        }
+
+        /// <summary>面板是不是开着。</summary>
+        public bool IsOpen => root != null && root.activeSelf;
+
+        /// <summary>
+        /// 只读查看开关，给常驻操作区的「城市样式」按钮用：
+        /// 打开后六张样式牌只是资料 —— 牌位全部置为不可点，点上去不会触发宣告，也不会发出 <see cref="CardClicked"/>；
+        /// 再点一次关闭。宣告 / 特殊行动阶段的「可操作」打开仍走 <see cref="SetOpen"/>，不受这里影响。
+        /// </summary>
+        public void ToggleView()
+        {
+            if (root == null) return;
+
+            if (root.activeSelf && viewOnly)
+            {
+                SetOpen(false);
+                return;
+            }
+
+            viewOnly = true;
+            if (!root.activeSelf) root.SetActive(true);
+            if (lastState != null) Refresh(lastState, lastInteractable);
         }
 
         private void Awake()
@@ -75,6 +108,9 @@ namespace NomadCity.UI
         /// </summary>
         public void Refresh(GameState state, bool interactable)
         {
+            lastState = state;
+            lastInteractable = interactable;
+
             for (int i = 0; i < cardButtons.Length; i++)
             {
                 Button button = cardButtons[i];
@@ -82,7 +118,8 @@ namespace NomadCity.UI
 
                 int cardId = state != null && i < state.CityPatternCards.Count ? state.CityPatternCards[i] : -1;
                 button.gameObject.SetActive(cardId >= 0);
-                button.interactable = interactable && cardId >= 0;
+                // 只读查看时一律不可点：否则宣告阶段点开「查看」还能顺手宣告。
+                button.interactable = interactable && !viewOnly && cardId >= 0;
 
                 if (i < cardLabels.Length && cardLabels[i] != null)
                     cardLabels[i].text = cardId >= 0 ? LabelOf(state, cardId) : string.Empty;
