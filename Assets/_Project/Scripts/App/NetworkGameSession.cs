@@ -3,6 +3,7 @@ using NomadCity.Core.Engine;
 using NomadCity.Core.Model;
 using NomadCity.Core.Net;
 using NomadCity.Core.Rules;
+using UnityEngine;
 
 namespace NomadCity.App
 {
@@ -172,12 +173,17 @@ namespace NomadCity.App
                 if (!CanAct && !IsSelfPacedFlow(command))
                     return CommandResult.Fail("还没轮到你行动。");
 
-                transport.Submit(CommandCodec.Encode(command));
+                CommandDto dto = CommandCodec.Encode(command);
+                Debug.Log($"[联机] 本机提交「{command.Name}」座位 {command.ActorSeat}：{Describe(dto)}");
+                transport.Submit(dto);
                 return CommandResult.Success;
             }
 
-            CommandResult result = Engine.Dispatch(command);
-            transport.Broadcast(CommandCodec.Encode(command), result.Ok, result.Error);
+            CommandDto hostDto = CommandCodec.Encode(command);
+            CommandResult result = DispatchCommand(command);
+            Debug.Log($"[联机] 主机执行本机「{command.Name}」座位 {command.ActorSeat}：" +
+                      $"{(result.Ok ? "已执行" : "被拒绝（" + result.Error + "）")}");
+            transport.Broadcast(hostDto, result.Ok, result.Error);
             return result;
         }
 
@@ -273,18 +279,62 @@ namespace NomadCity.App
                 return;
             }
 
-            CommandResult result = Engine.Dispatch(command);
+            CommandResult result = DispatchCommand(command);
 
             if (IsHost)
             {
+                Debug.Log($"[联机] 主机收到座位 {seat} 的「{command.Name}」：" +
+                          $"{(result.Ok ? "已执行" : "被拒绝（" + result.Error + "）")}");
+
+                // 拒绝原因不能只回给客户端：主机自己也必须看到，否则画面上只会表现为「对方点了没反应、
+                // 流程一直等他」。这里复用同一套错误通道，让它同时写进 Console、状态行与行动记录。
+                if (!result.Ok)
+                    OnTransportError($"拒绝了座位 {seat + 1} 的操作「{command.Name}」：{result.Error}");
+
                 // 主机是权威：执行结果（包括拒绝原因）必须回给所有客户端。
                 transport.Broadcast(dto, result.Ok, result.Error);
             }
-            else if (!result.Ok)
+            else
             {
-                // 客户端重放失败意味着两端状态已经分叉，必须立刻让玩家知道，而不是继续假装正常。
-                OnTransportError($"重放主机命令失败：{result.Error}");
+                Debug.Log($"[联机] 本机重放主机命令「{command.Name}」：" +
+                          $"{(result.Ok ? "已执行" : "失败（" + result.Error + "）")}");
+
+                if (!result.Ok)
+                    // 客户端重放失败意味着两端状态已经分叉，必须立刻让玩家知道，而不是继续假装正常。
+                    OnTransportError($"重放主机命令失败：「{command.Name}」{result.Error}");
             }
+        }
+
+        /// <summary>
+        /// 引擎执行一条命令，并把「<see cref="ICommand.Apply"/> 里抛异常」变成一条可显示的错误。
+        ///
+        /// 不接住的话后果很严重：异常会一路冒到 <c>RelayTransport</c> 的收包循环，被统一报成
+        /// 「收到无法解析的数据包」，主机也不会广播结果 —— 客户端只能干等，整局卡在那个操作上，
+        /// 玩家看到的现象就是「他点了，我这边什么都没发生」。
+        /// </summary>
+        private CommandResult DispatchCommand(ICommand command)
+        {
+            try
+            {
+                return Engine.Dispatch(command);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+                string reason = $"「{command?.Name}」执行时出错：{ex.Message}";
+                OnTransportError(reason);
+                return CommandResult.Fail(reason);
+            }
+        }
+
+        /// <summary>把 DTO 的槽位写成一行短文本，联机出问题时能直接从 Console 看出「传了什么」。</summary>
+        private static string Describe(CommandDto dto)
+        {
+            string items = dto.Items == null || dto.Items.Length == 0
+                ? "无"
+                : string.Join(",", dto.Items);
+            return $"Kind={dto.Kind} Seat={dto.Seat} P0={dto.P0} P1={dto.P1} P2={dto.P2} " +
+                   $"P3={dto.P3} Flags={dto.Flags} Items=[{items}]";
         }
 
         private void OnTransportError(string message) => ErrorArrived?.Invoke(message);

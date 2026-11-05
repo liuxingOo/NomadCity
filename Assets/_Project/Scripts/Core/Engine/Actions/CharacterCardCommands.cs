@@ -108,6 +108,9 @@ namespace NomadCity.Core.Engine
         public int ActorSeat { get; }
         public string Name => Effect == CharacterEffectKind.Tactics ? "使用角色牌（计谋）" : "使用角色牌（策略）";
 
+        /// <summary>效果答案来源（联机编码时要从这里取答案，见 <c>CommandCodec</c>）。</summary>
+        public IEffectChoices EffectChoices => choices;
+
         /// <summary>快速行动，不占主要行动名额（§6.3a）。</summary>
         public bool ConsumesAction => false;
 

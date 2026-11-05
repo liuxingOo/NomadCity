@@ -22,7 +22,7 @@ namespace NomadCity.UI
     ///         牌位 1 … 6        ← 每个都是一个 Button，逐个拖进 Card Buttons
     ///           牌名文本        ← 拖进 Card Labels（可选）
     /// </summary>
-    public sealed class FacilitySupplyPanel : MonoBehaviour
+    public sealed class FacilitySupplyPanel : MonoBehaviour, ICenteredPanel
     {
         [Tooltip("弹窗开关物体（宿主 → Root → Dim / 背景 / 牌位）。宿主自身必须保持激活，只切这一个。" +
                  "留空则面板一直显示（旧的常驻行为）。")]
@@ -65,6 +65,10 @@ namespace NomadCity.UI
         {
             if (root == null) return;
 
+            // 三块同位置面板互斥：打开自己之前先把行动记录 / 城市样式收起来，
+            // 否则两层遮罩叠着，后开的被先开的盖住，看着就像「点了按钮没反应」。
+            if (open) CenteredPanelGroup.BeforeOpen(this);
+
             viewOnly = false;
             if (root.activeSelf != open) root.SetActive(open);
         }
@@ -72,28 +76,44 @@ namespace NomadCity.UI
         /// <summary>面板是不是开着。</summary>
         public bool IsOpen => root != null && root.activeSelf;
 
+        /// <summary>当前是不是「只读查看」：是的话牌位可点，但点上去只弹放大卡面，不会发出建设意图。</summary>
+        public bool IsViewOnly => viewOnly;
+
+        /// <summary>互斥组用：无条件收起，连只读标记一起清掉。</summary>
+        public void ForceClose()
+        {
+            viewOnly = false;
+            if (root != null && root.activeSelf) root.SetActive(false);
+        }
+
         /// <summary>
         /// 只读查看开关，给常驻操作区的「设施」按钮用：
-        /// 打开后六张设施牌只是资料 —— 牌位全部置为不可点，点上去不会触发建设，也不会发出 <see cref="CardClicked"/>；
+        /// 打开后六张设施牌只是资料 —— 点牌位只会把卡面放大看一眼（<see cref="CardClicked"/> 照发，
+        /// 由 GameScreenController 按「是不是只读」分流），不会走建设、不会扣费；
         /// 再点一次关闭。建设阶段的「可操作」打开仍走 <see cref="SetOpen"/>，不受这里影响。
         /// </summary>
         public void ToggleView()
         {
             if (root == null) return;
 
-            if (root.activeSelf && viewOnly)
+            // 开着就关 —— 不管是只读打开的，还是建设流程打开的，同一个按钮再点一次预期就是收起。
+            if (root.activeSelf)
             {
-                SetOpen(false);
+                viewOnly = false;
+                root.SetActive(false);
                 return;
             }
 
+            // 关着就只读打开：先收起另外两块同位置面板，再亮自己。
+            CenteredPanelGroup.BeforeOpen(this);
             viewOnly = true;
-            if (!root.activeSelf) root.SetActive(true);
+            root.SetActive(true);
             if (lastState != null) Refresh(lastState, lastInteractable);
         }
 
         private void Awake()
         {
+            CenteredPanelGroup.Register(this);
             CachePlaceholders();
 
             if (root == null)
@@ -110,6 +130,11 @@ namespace NomadCity.UI
                 int index = i; // 闭包捕获：每个按钮绑定自己的下标
                 button.onClick.AddListener(() => CardClicked?.Invoke(index));
             }
+        }
+
+        private void OnDestroy()
+        {
+            CenteredPanelGroup.Unregister(this);
         }
 
         /// <summary>
@@ -160,8 +185,9 @@ namespace NomadCity.UI
 
                 int cardId = state != null && i < state.FacilitySupply.Count ? state.FacilitySupply[i] : -1;
                 button.gameObject.SetActive(cardId >= 0);
-                // 只读查看时一律不可点：否则建设中点开「查看」还能顺手建设。
-                button.interactable = interactable && !viewOnly && cardId >= 0;
+                // 只读查看时牌位照样能点，但点上去只会弹放大卡面（控制器按 IsViewOnly 分流），
+                // 不会走建设、不会扣费 —— 所以这里不能像以前那样直接把它锁死。
+                button.interactable = cardId >= 0 && (viewOnly || interactable);
 
                 int faceIndex = SpriteIndexOf(cardId);
                 Sprite face = faceIndex >= 0 && faceIndex < cardFaces.Length ? cardFaces[faceIndex] : null;

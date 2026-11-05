@@ -8,8 +8,9 @@ using UnityEngine.UI;
 namespace NomadCity.EditorTools
 {
     /// <summary>
-    /// 一键把卡面接线补齐：四个面板的 Card Faces 数组（卡面贴图库），以及
-    /// 设施供应区 / 城市面板 / 角色牌手牌的 Card Images（Slot Images）数组（直接复用牌位自身已有的 Image，不必新建子物体）。
+    /// 一键把卡面接线补齐：设施供应区 / 城市面板 / 城市样式牌 / 角色牌手牌 / 卡面放大弹窗的卡面库数组，
+    /// 以及设施供应区 / 城市面板 / 角色牌手牌的 Card Images（Slot Images）数组（直接复用牌位自身已有的 Image，不必新建子物体）。
+    /// 卡面放大弹窗有两份库：Card Faces（设施）与 Character Faces（角色）。
     ///
     /// 素材是拼版图（Multiple 切片），切片顺序和卡牌 id 顺序**不一致**，所以这里靠「切片名 → 卡 id」映射
     /// 来定位，而不是按拖拽顺序。切片名带语义（英文卡名 + 颜色 + 序号，角色牌只用英文角色名），改素材只要名字不变就不用动代码。
@@ -120,6 +121,13 @@ namespace NomadCity.EditorTools
             filled += FillPanel<CityPatternPanel>("城市样式牌", patternLibrary);
             if (characterLibrary != null)
                 filled += FillPanel<CharacterHandPanel>("角色牌手牌", characterLibrary);
+
+            // 卡面放大弹窗自己也要一份库：城市面板点设施、设施供应区只读点牌靠设施库，
+            // 手牌点角色牌靠角色库。以前这份是生成弹窗时顺手填的，这里一并补上，省得手动拖 48 + 5 个 Sprite。
+            filled += FillPanel<CardPreviewPopup>("卡面放大", facilityLibrary);
+            if (characterLibrary != null)
+                filled += FillPanel<CardPreviewPopup>("卡面放大", characterLibrary, "characterFaces");
+            filled += FillPanel<CardPreviewPopup>("卡面放大", patternLibrary, "patternFaces");
 
             int images = 0;
             images += FillImagesFromButtons<FacilitySupplyPanel>("设施供应区", "cardImages", "cardButtons");
@@ -272,7 +280,11 @@ namespace NomadCity.EditorTools
             return body.Substring(0, end);
         }
 
-        private static int FillPanel<T>(string label, Sprite[] library) where T : MonoBehaviour
+        /// <summary>
+        /// 把卡面库写进某个面板的 Sprite 数组字段（默认 Card Faces；卡面放大弹窗的角色库字段叫 characterFaces）。
+        /// </summary>
+        private static int FillPanel<T>(string label, Sprite[] library, string propertyName = "cardFaces")
+            where T : MonoBehaviour
         {
             T[] panels = Object.FindObjectsByType<T>(FindObjectsInactive.Include);
             if (panels.Length == 0)
@@ -285,10 +297,10 @@ namespace NomadCity.EditorTools
             foreach (T panel in panels)
             {
                 var so = new SerializedObject(panel);
-                SerializedProperty prop = so.FindProperty("cardFaces");
+                SerializedProperty prop = so.FindProperty(propertyName);
                 if (prop == null || !prop.isArray)
                 {
-                    Debug.LogWarning($"[卡面填充]「{panel.name}」上找不到 Card Faces 数组字段，已跳过。");
+                    Debug.LogWarning($"[卡面填充]「{panel.name}」上找不到 {propertyName} 数组字段，已跳过。");
                     continue;
                 }
 

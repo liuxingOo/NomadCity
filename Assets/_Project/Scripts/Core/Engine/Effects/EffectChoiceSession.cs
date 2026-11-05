@@ -117,6 +117,12 @@ namespace NomadCity.Core.Engine
             this.strict = strict;
         }
 
+        /// <summary>
+        /// 这串答案本身（按提问顺序的下标；-1 = 放弃）。联机时由 <c>CommandCodec</c> 把它装进命令 DTO，
+        /// 让主机回放用的也是玩家当场点的那些答案，而不是「第一个合法项」。
+        /// </summary>
+        public IReadOnlyList<int> Answers => answers;
+
         /// <summary>最近一次抛出的待问选择（供调试 / 断言）。</summary>
         public ChoiceRequest Pending { get; private set; }
 

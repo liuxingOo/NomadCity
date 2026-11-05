@@ -151,7 +151,8 @@ namespace NomadCity.UI
 
         /// <summary>
         /// 按当前手牌刷新牌位：写入牌名、按需显示。
-        /// <paramref name="interactable"/> 只有盖放阶段才为 true，其余时候牌位照样看得见但点不动。
+        /// <paramref name="interactable"/> 只有盖放阶段才为 true；但牌位**始终可点** ——
+        /// 不能盖放的时候点上去只是打开放大卡面看一眼，由 GameScreenController 按这个标记分流。
         /// </summary>
         public void Refresh(GameState state, int seat, bool interactable)
         {
@@ -177,7 +178,8 @@ namespace NomadCity.UI
 
                 int cardId = pool != null && i < pool.Count ? pool[i] : -1;
                 button.gameObject.SetActive(cardId >= 0);
-                button.interactable = interactable && cardId >= 0;
+                // 有牌就能点：盖放阶段点=盖放，其余时候点=放大看一眼（由控制器分流），不要在这里锁死。
+                button.interactable = cardId >= 0;
 
                 int faceIndex = SpriteIndexOf(cardId);
                 Sprite face = faceIndex >= 0 && faceIndex < cardFaces.Length ? cardFaces[faceIndex] : null;

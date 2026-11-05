@@ -53,6 +53,34 @@ namespace NomadCity.Game
 
         [SerializeField] private float labelOffsetY = -0.34f;
 
+        [Header("玩家标记（Art/Tokens 里的 token_*）")]
+        [Tooltip("玩家标记素材，下标 = PlayerColor（绿 0 / 黄 1 / 红 2 / 蓝 3）。" +
+                 "留空则退回色盘圆片占位。地图上的影响力、计分轨、城市样式牌都用同一套标记。")]
+        [SerializeField] private Sprite[] playerMarkerSprites = new Sprite[4];
+
+        [Header("计分轨（底图外圈 -2 ~ 50 的格子）")]
+        [Tooltip("是否在计分轨上画每名玩家的分数标记（§ 计分轨：每人一个标记停在当前分数格）。")]
+        [SerializeField] private bool showScoreMarkers = true;
+
+        [Tooltip("-2 那一格的格心（地图 Prefab 本地坐标：底图 50×50、原点在正中，所以左下角是 -25,-25）。" +
+                 "数值照 5000px 底图量出来的：px(505,4886) → (-19.95,-23.87)。")]
+        [SerializeField] private Vector2 scoreTrackBottomStart = new Vector2(-19.95f, -23.865f);
+
+        [Tooltip("底部一排（-2 → 23）每 +1 分的 x 步长（本地单位）。")]
+        [SerializeField, Min(0.01f)] private float scoreTrackBottomStep = 1.7548f;
+
+        [Tooltip("右列最下面一格（24 分）的格心（本地坐标）。")]
+        [SerializeField] private Vector2 scoreTrackRightStart = new Vector2(23.90f, -22.19f);
+
+        [Tooltip("右列（24 → 50）每 +1 分的 y 步长（向上，本地单位）。")]
+        [SerializeField, Min(0.01f)] private float scoreTrackRightStep = 1.7529f;
+
+        [Tooltip("计分轨上玩家标记的直径（**地图本地单位**：一格大约 1.75，所以 0.6 左右刚好塞进四分之一格）。")]
+        [SerializeField, Min(0.01f)] private float scoreMarkerSize = 0.60f;
+
+        [Tooltip("同一格里有多个标记时的排布半径（本地单位）：1 个居中、2 个左右、3 个品字、4 个四角。")]
+        [SerializeField, Min(0.01f)] private float scoreMarkerSpread = 0.45f;
+
         [Header("自选路线高亮（探索时点选航道）")]
         [Tooltip("玩家在探索时点选的航道会亮起来；这是高亮色。")]
         [SerializeField] private Color routeHighlightColor = new Color(1f, 0.82f, 0.20f, 0.55f);
@@ -73,6 +101,7 @@ namespace NomadCity.Game
         private const int SortTokenBack = 3;
         private const int SortToken = 4;
         private const int SortInfluence = 5;
+        private const int SortScore = 6;
         private const int SortCityBack = 9;
         private const int SortCity = 10;
         private const int SortLabel = 20;
@@ -84,12 +113,28 @@ namespace NomadCity.Game
 
         private const string MarkersName = "StateMarkers";
 
+        // 计分轨范围：底图外圈印的是 -2 … 50（底部一排 -2 → 23，右列 24 → 50 往上）。
+        private const int ScoreTrackMin = -2;
+        private const int ScoreTrackBottomLast = 23;
+        private const int ScoreTrackRightFirst = 24;
+        private const int ScoreTrackMax = 50;
+
         private GameState state;
         private Transform markersRoot;
+
+        /// <summary>地图实例根节点：计分轨的格子是按底图本地坐标量的，画的时候要靠它换算到世界坐标。</summary>
+        private Transform mapRoot;
+
         private IReadOnlyList<MapNodeView> nodeViews;
         private IReadOnlyList<MapRouteView> routeViews;
 
         private readonly List<HitTarget> targets = new List<HitTarget>();
+
+        /// <summary>每个分数格里的玩家标记「到达先后」（分数 → 座位列表），用来决定格子内谁排第一。</summary>
+        private readonly Dictionary<int, List<int>> scoreArrivals = new Dictionary<int, List<int>>();
+
+        /// <summary>上一次刷新时每名玩家的分数，用来发现「谁换了格子」以维护到达顺序。</summary>
+        private readonly Dictionary<int, int> lastScoreBySeat = new Dictionary<int, int>();
 
         /// <summary>当前高亮的航道 id（探索点选路线用）；空表示没有高亮。</summary>
         private readonly HashSet<int> highlightedRoutes = new HashSet<int>();
@@ -122,7 +167,13 @@ namespace NomadCity.Game
             state = gameState;
             nodeViews = nodes;
             routeViews = routes;
+            this.mapRoot = mapRoot;
             markersRoot = CreateMarkersRoot(mapRoot);
+
+            // 新的一局（或换了地图）到达顺序要重来，否则旧顺序会带到新局。
+            scoreArrivals.Clear();
+            lastScoreBySeat.Clear();
+
             Refresh();
         }
 
@@ -144,6 +195,8 @@ namespace NomadCity.Game
 
             int routeCount = Mathf.Min(routeViews.Count, state.Map.Routes.Count);
             for (int i = 0; i < routeCount; i++) DrawRoute(state.Map.Routes[i], routeViews[i]);
+
+            DrawScoreTrack();
         }
 
         /// <summary>
@@ -251,8 +304,8 @@ namespace NomadCity.Game
 
                 if (owner >= 0)
                 {
-                    Spawn(MapSpriteFactory.Disc(), world, influenceSize,
-                        MapPalette.Player(state.Player(owner).Color), SortInfluence, $"Influence_{node.Code}_{slot}");
+                    // 影响力 = 玩家标记：用 token 素材，没接素材才退回色盘圆片。
+                    SpawnPlayerMarker(owner, world, influenceSize, SortInfluence, $"Influence_{node.Code}_{slot}");
                     AddTarget(world, influenceSize * 0.6f, PriorityOccupiedSlot, MapHitKind.NodeSlot, slotRef, node.Id);
                 }
                 else
@@ -321,8 +374,7 @@ namespace NomadCity.Game
 
                 if (owner >= 0)
                 {
-                    Spawn(MapSpriteFactory.Disc(), world, influenceSize,
-                        MapPalette.Player(state.Player(owner).Color), SortInfluence, $"RouteInfluence_{route.Id}_{slot}");
+                    SpawnPlayerMarker(owner, world, influenceSize, SortInfluence, $"RouteInfluence_{route.Id}_{slot}");
                     AddTarget(world, influenceSize * 0.6f, PriorityOccupiedSlot, MapHitKind.RouteSlot, slotRef, -1);
                 }
                 else
@@ -347,6 +399,162 @@ namespace NomadCity.Game
 
         private static Sprite Pick(Sprite[] table, int index)
             => table != null && index >= 0 && index < table.Length ? table[index] : null;
+
+        // —— 玩家标记（Art/Tokens 的 token_*） ——
+
+        /// <summary>在世界坐标处画一枚玩家标记：优先用 token 素材，没接素材才退回玩家色圆片。</summary>
+        private void SpawnPlayerMarker(int seat, Vector3 world, float size, int sortingOrder, string name)
+        {
+            PlayerColor color = state.Player(seat).Color;
+            Sprite sprite = Pick(playerMarkerSprites, (int)color);
+
+            if (sprite != null) Spawn(sprite, world, size, Color.white, sortingOrder, name);
+            else Spawn(MapSpriteFactory.Disc(), world, size, MapPalette.Player(color), sortingOrder, name);
+        }
+
+        // —— 计分轨（底图外圈 -2 … 50） ——
+
+        /// <summary>
+        /// 每名玩家的标记停在当前分数格上。底图外圈印的刻度是 -2 … 50：
+        /// 底部一排从左到右 -2 → 23，右列自下而上 24 → 50（坐标照 5000px 底图量的本地坐标）。
+        ///
+        /// 同一格里有多个标记时的排布按「数量」来（1 个居中、2 个左右并排、3 个上 1 下 2、4 个四角），
+        /// 谁排第一个按「进入这一格的先后」算（初始按座位顺序）—— 见 <see cref="UpdateScoreArrivals"/>。
+        /// </summary>
+        private void DrawScoreTrack()
+        {
+            if (!showScoreMarkers || mapRoot == null || state == null) return;
+
+            UpdateScoreArrivals();
+
+            // 先把所有人按分数归类：一个字典项就是「一格」。
+            var byScore = new Dictionary<int, List<int>>();
+            foreach (PlayerState player in state.Players)
+            {
+                int score = Mathf.Clamp(player.Score, ScoreTrackMin, ScoreTrackMax);
+                if (!byScore.TryGetValue(score, out List<int> seats))
+                {
+                    seats = new List<int>();
+                    byScore[score] = seats;
+                }
+                seats.Add(player.SeatIndex);
+            }
+
+            // 标记尺寸按地图本地单位配，乘上地图实例的缩放才是世界尺寸（底图整体缩小到 0.2）。
+            float mapScale = Mathf.Abs(mapRoot.lossyScale.x);
+            if (mapScale <= 1e-4f) mapScale = 1f;
+            float worldSize = scoreMarkerSize * mapScale;
+
+            foreach (KeyValuePair<int, List<int>> entry in byScore)
+            {
+                int score = entry.Key;
+                List<int> seats = OrderByArrival(score, entry.Value);
+                Vector3 centerLocal = ScoreCellLocal(score);
+
+                for (int i = 0; i < seats.Count; i++)
+                {
+                    Vector2 offset = ScoreMarkerOffset(i, seats.Count);
+                    Vector3 world = mapRoot.TransformPoint(centerLocal + new Vector3(offset.x, offset.y, 0f));
+                    SpawnPlayerMarker(seats[i], world, worldSize, SortScore, $"Score_{score}_{seats[i]}");
+                }
+            }
+        }
+
+        /// <summary>分数 → 格心（地图 Prefab 本地坐标）。</summary>
+        private Vector3 ScoreCellLocal(int score)
+        {
+            if (score <= ScoreTrackBottomLast)
+            {
+                float x = scoreTrackBottomStart.x + (score - ScoreTrackMin) * scoreTrackBottomStep;
+                return new Vector3(x, scoreTrackBottomStart.y, 0f);
+            }
+
+            float y = scoreTrackRightStart.y + (score - ScoreTrackRightFirst) * scoreTrackRightStep;
+            return new Vector3(scoreTrackRightStart.x, y, 0f);
+        }
+
+        /// <summary>同一格内第 <paramref name="index"/> 个标记（共 <paramref name="count"/> 个）相对格心的偏移。</summary>
+        private Vector2 ScoreMarkerOffset(int index, int count)
+        {
+            float spread = scoreMarkerSpread;
+
+            switch (count)
+            {
+                case 1:
+                    return Vector2.zero;
+
+                case 2:
+                    return new Vector2(index == 0 ? -spread : spread, 0f);
+
+                case 3:
+                    // 上排 1 个居中，下排 2 个左右。
+                    return index == 0
+                        ? new Vector2(0f, spread)
+                        : new Vector2(index == 1 ? -spread : spread, -spread);
+
+                default:
+                    // 四角：左上 → 右上 → 左下 → 右下。
+                    return new Vector2(index % 2 == 0 ? -spread : spread, index < 2 ? spread : -spread);
+            }
+        }
+
+        /// <summary>
+        /// 维护「谁先进入哪个分数格」。分数一变就把该座位从旧格删掉、追加到新格队尾，
+        /// 这样同一格内的排布顺序就是真实的到达先后，而不是座位号。
+        /// 只在本地视图里记账，不影响规则状态（联机时各端按同样的命令顺序刷新，顺序一致）。
+        /// </summary>
+        private void UpdateScoreArrivals()
+        {
+            foreach (PlayerState player in state.Players)
+            {
+                int seat = player.SeatIndex;
+                int score = Mathf.Clamp(player.Score, ScoreTrackMin, ScoreTrackMax);
+
+                if (lastScoreBySeat.TryGetValue(seat, out int previous))
+                {
+                    if (previous == score) continue;
+                    RemoveArrival(previous, seat);
+                }
+
+                lastScoreBySeat[seat] = score;
+                List<int> list = Arrivals(score);
+                if (!list.Contains(seat)) list.Add(seat);
+            }
+        }
+
+        private List<int> Arrivals(int score)
+        {
+            if (!scoreArrivals.TryGetValue(score, out List<int> list))
+            {
+                list = new List<int>();
+                scoreArrivals[score] = list;
+            }
+            return list;
+        }
+
+        private void RemoveArrival(int score, int seat)
+        {
+            if (scoreArrivals.TryGetValue(score, out List<int> list)) list.Remove(seat);
+        }
+
+        /// <summary>按到达先后排好这一格里的座位；不在到达表里的（理论上不该有）按座位号补到队尾。</summary>
+        private List<int> OrderByArrival(int score, List<int> seats)
+        {
+            List<int> order = Arrivals(score);
+            var ordered = new List<int>(seats.Count);
+
+            foreach (int seat in order)
+            {
+                if (seats.Contains(seat) && !ordered.Contains(seat)) ordered.Add(seat);
+            }
+
+            foreach (int seat in seats)
+            {
+                if (!ordered.Contains(seat)) ordered.Add(seat);
+            }
+
+            return ordered;
+        }
 
         private void Spawn(Sprite sprite, Vector3 world, float size, Color color, int sortingOrder, string name)
         {

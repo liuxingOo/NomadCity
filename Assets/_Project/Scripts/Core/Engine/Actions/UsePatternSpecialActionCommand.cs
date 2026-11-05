@@ -43,6 +43,9 @@ namespace NomadCity.Core.Engine
         public int ActorSeat { get; }
         public string Name => "使用城市样式特殊行动";
 
+        /// <summary>效果答案来源（联机编码时要从这里取答案，见 <c>CommandCodec</c>）。</summary>
+        public IEffectChoices EffectChoices => choices;
+
         /// <summary>主要行动，占用本回合的主要行动名额（§6.3f）。</summary>
         public bool ConsumesAction => true;
 

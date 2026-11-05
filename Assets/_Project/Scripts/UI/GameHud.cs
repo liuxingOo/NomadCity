@@ -9,8 +9,9 @@ namespace NomadCity.UI
 {
     /// <summary>
     /// 顶部信息栏：本回合进度 + 每名玩家的公开状态。
-    /// 右侧每名玩家一块状态栏：企业家圆形头像、压在头像底边的昵称，以及一排「图标 + 数字」形式的
-    /// 得分 / 金券 / 标记 / 四种资源（图标是场景里的静态图片，这里只往数字文本框里写值）；
+    /// 右侧每名玩家一块状态栏：企业家圆形头像、压在头像底边的昵称，以及两排「图标 + 数字」：
+    /// 第一排 3 组（得分 / 金券 / 标记），第二排 4 组（源岩 / 源石 / 异铁 / 至纯源石）；
+    /// 图标是场景里的静态图片，这里只往数字文本框里写值。
     /// 手牌与盖放的角色牌属于私有信息，不在这里显示。
     /// </summary>
     public sealed class GameHud : MonoBehaviour
@@ -24,16 +25,48 @@ namespace NomadCity.UI
         [Tooltip("状态栏槽位：数组顺序即从上到下的显示顺序，运行时按本局行动顺序填写，不要在编辑器里把某一行绑给某个颜色")]
         [SerializeField] private GameHudRow[] rows = Array.Empty<GameHudRow>();
 
-        [Tooltip("状态栏底板：按 PlayerColor 顺序（绿 / 黄 / 红 / 蓝）")]
-        [SerializeField] private Sprite[] statusBarSprites = Array.Empty<Sprite>();
-
         [Tooltip("圆形头像：按 PlayerColor 顺序（绿 / 黄 / 红 / 蓝）")]
         [SerializeField] private Sprite[] avatarSprites = Array.Empty<Sprite>();
+
+        [Tooltip("玩家标记图标：按 PlayerColor 顺序（绿 / 黄 / 红 / 蓝），画在「玩家标记」那格图标上")]
+        [SerializeField] private Sprite[] playerMarkerSprites = new Sprite[4];
+
+        /// <summary>
+        /// 点了某一行左侧的「查看」小按钮：参数是这一行对应的座位号（不是行号）。
+        /// 由 GameScreenController 接住，弹该玩家的城市面板。
+        /// </summary>
+        public event Action<int> SeatInspectRequested;
 
         private GameEngine engine;
 
         /// <summary>各座位的玩家昵称（按座位号）；缺省时回退成「玩家 N」。</summary>
         private string[] playerNames = Array.Empty<string>();
+
+        /// <summary>
+        /// 每行左侧的小按钮各绑自己那一行。按钮只记「行号」，点击时才换算成座位号 ——
+        /// 行动顺序每局随机、四行的座位会变，缓存座位会点错人。
+        /// </summary>
+        private void Awake()
+        {
+            for (int i = 0; i < rows.Length; i++)
+            {
+                GameHudRow row = rows[i];
+                if (row == null || row.Inspect == null) continue;
+
+                int index = i;   // 闭包捕获：一个按钮绑一行
+                row.Inspect.onClick.AddListener(() => OnInspectClicked(index));
+            }
+        }
+
+        private void OnInspectClicked(int index)
+        {
+            if (engine == null) return;
+
+            int seat = SeatAt(engine.State, index);
+            if (seat < 0) return;
+
+            SeatInspectRequested?.Invoke(seat);
+        }
 
         /// <summary>本机座位（-1 = 单机热座，不标「你」）。</summary>
         private int localSeat = -1;
@@ -105,18 +138,23 @@ namespace NomadCity.UI
 
                 PlayerState player = state.Players[seat];
 
-                // 底板与头像都按玩家颜色换图（绿 / 黄 / 红 / 蓝），美术里每个企业家一套。
-                if (row.Background != null)
-                {
-                    Sprite bar = ColorSprite(statusBarSprites, player.Color);
-                    if (bar != null) row.Background.sprite = bar;
-                    row.Background.color = Color.white;
-                }
-
+                // 底板现在是场景里的占位色块（StatusBar 那套图已作废），这里不再换图、也不再改颜色，
+                // 免得分不清哪个是生成器摆好的占位。头像仍按企业家换图（绿 / 黄 / 红 / 蓝）。
                 if (row.Avatar != null)
                 {
                     Sprite face = ColorSprite(avatarSprites, player.Color);
                     if (face != null) row.Avatar.sprite = face;
+                }
+
+                // 「玩家标记」那格的图标跟着玩家颜色换 token 素材（绿 / 黄 / 红 / 蓝）。
+                if (row.MarkerIcon != null)
+                {
+                    Sprite marker = ColorSprite(playerMarkerSprites, player.Color);
+                    if (marker != null)
+                    {
+                        row.MarkerIcon.sprite = marker;
+                        row.MarkerIcon.color = Color.white;
+                    }
                 }
 
                 ApplyStats(state, row, player);
@@ -129,6 +167,7 @@ namespace NomadCity.UI
             Activate(row.Background, active);
             Activate(row.Avatar, active);
             Activate(row.Name, active);
+            Activate(row.Inspect, active);
 
             if (row.Values == null) return;
             for (int i = 0; i < row.Values.Length; i++) Activate(row.Values[i], active);
@@ -317,7 +356,7 @@ namespace NomadCity.UI
         [Tooltip("整行根对象（就是 Row 自己）：空槽位时整行关掉，免得图标留在屏幕上")]
         public GameObject Root;
 
-        [Tooltip("状态栏底板（按玩家颜色换图）")]
+        [Tooltip("状态栏底板（占位色块，运行时不换图；要换美术就替换它的 Source Image）")]
         public Image Background;
 
         [Tooltip("左侧圆形头像（按玩家企业家换图）")]
@@ -325,6 +364,12 @@ namespace NomadCity.UI
 
         [Tooltip("昵称：压在头像圆框底边（上半截在圆内、下半截在状态栏左下角）")]
         public TMP_Text Name;
+
+        [Tooltip("「玩家标记」那格的图标（按玩家颜色换 token 素材；由生成器接上 Stat2_Marker/Icon）")]
+        public Image MarkerIcon;
+
+        [Tooltip("行左侧的小「查看」按钮（眼睛图标）：点了弹这名玩家的城市面板（由生成器接上 Row/Inspect）")]
+        public Button Inspect;
 
         [Tooltip("数值文本，顺序固定：0 得分 / 1 金券 / 2 玩家标记 / 3 源岩 / 4 源石 / 5 异铁 / 6 至纯源石")]
         public TMP_Text[] Values = Array.Empty<TMP_Text>();

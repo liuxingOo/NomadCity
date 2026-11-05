@@ -69,23 +69,27 @@ namespace NomadCity.Tests
             CommandKind.ChooseStartNode =>
                 new CommandDto { Kind = kind, Seat = 2, P0 = 5 },
 
-            // Flags 两位都置 1，覆盖 AcceptCost / GrantRewards。
+            // Flags 两位都置 1，覆盖 AcceptCost / GrantRewards；P3 = 答案个数 2，Items = 答案（含「放弃」-1）。
             CommandKind.ResolveEventOption =>
-                new CommandDto { Kind = kind, Seat = 1, P0 = 3, P1 = 0, Flags = CommandCodec.AcceptCostBit | CommandCodec.GrantRewardsBit },
+                new CommandDto
+                {
+                    Kind = kind, Seat = 1, P0 = 3, P1 = 0, P3 = 2, Items = new[] { 1, -1 },
+                    Flags = CommandCodec.AcceptCostBit | CommandCodec.GrantRewardsBit,
+                },
 
             CommandKind.DiscardSupplyFacility =>
                 new CommandDto { Kind = kind, Seat = 0, P0 = 21 },
 
-            // P2 = (int)FacilityPayment.Vouchers。
+            // P2 = (int)FacilityPayment.Vouchers；P3 = 入场效果答案个数，Items = 答案。
             CommandKind.BuildFacility =>
-                new CommandDto { Kind = kind, Seat = 2, P0 = 12, P1 = 3, P2 = 2 },
+                new CommandDto { Kind = kind, Seat = 2, P0 = 12, P1 = 3, P2 = 2, P3 = 1, Items = new[] { 3 } },
 
             CommandKind.PlaceCharacterCard =>
                 new CommandDto { Kind = kind, Seat = 3, P0 = 17 },
 
-            // P0 = (int)CharacterEffectKind.Tactics。
+            // P0 = (int)CharacterEffectKind.Tactics；P3 = 效果答案个数，Items = 答案。
             CommandKind.UseCharacterCard =>
-                new CommandDto { Kind = kind, Seat = 1, P0 = 1 },
+                new CommandDto { Kind = kind, Seat = 1, P0 = 1, P3 = 2, Items = new[] { 0, 2 } },
 
             CommandKind.EndCharacterCardUse =>
                 new CommandDto { Kind = kind, Seat = 2 },
@@ -120,8 +124,9 @@ namespace NomadCity.Tests
                     Items = new[] { 0, 4, 1, 0, 6, 2, 1, 5, 0, 1, 7, 1 },
                 },
 
+            // P0 = PatternCardId；P3 = 效果答案个数，Items = 答案。
             CommandKind.UsePatternSpecialAction =>
-                new CommandDto { Kind = kind, Seat = 0, P0 = 8 },
+                new CommandDto { Kind = kind, Seat = 0, P0 = 8, P3 = 1, Items = new[] { 4 } },
 
             // P0 = 座位；P1 = 选点数；Items = 本座位选中的资源点 id。
             CommandKind.SubmitHarvestChoice =>

@@ -46,6 +46,9 @@ namespace NomadCity.Core.Engine
         public string Name => "建设";
         public bool ConsumesAction => true;
 
+        /// <summary>入场效果的答案来源（联机编码时要从这里取答案，见 <c>CommandCodec</c>）。</summary>
+        public IEffectChoices EffectChoices => choices;
+
         public CommandResult Validate(GameState state)
         {
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);

@@ -751,7 +751,13 @@ namespace NomadCity.Net
                 return;
             }
 
-            if (_driver.BeginSend(connection, out DataStreamWriter writer) != 0) return;
+            if (_driver.BeginSend(connection, out DataStreamWriter writer) != 0)
+            {
+                // 发送队列忙 / 连接刚断时 BeginSend 会失败。以前这里直接 return，
+                // 命令就静默消失了：客户端以为「已提交」，主机永远等不到这条操作。
+                Fail("这条操作没能发出去（发送队列暂时不可用），请再点一次。");
+                return;
+            }
 
             writer.WriteByte((byte)WireMessage.Command);
             WritePayload(ref writer, payload);
@@ -768,7 +774,11 @@ namespace NomadCity.Net
                 return;
             }
 
-            if (_driver.BeginSend(connection, out DataStreamWriter writer) != 0) return;
+            if (_driver.BeginSend(connection, out DataStreamWriter writer) != 0)
+            {
+                Fail("广播队列暂时不可用，这条命令结果没能发给其余玩家。");
+                return;
+            }
 
             writer.WriteByte((byte)WireMessage.Broadcast);
             writer.WriteByte((byte)(ok ? 1 : 0));

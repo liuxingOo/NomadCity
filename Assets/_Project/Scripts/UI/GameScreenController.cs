@@ -29,6 +29,9 @@ namespace NomadCity.UI
         private CardPreviewPopup cardPreview;
         private CharacterHandPanel handPanel;
 
+        /// <summary>状态栏左侧眼睛按钮弹出的「某位玩家城市面板」（只读）。没接线时点了只会提示。</summary>
+        private PlayerCityPopup playerCityPopup;
+
         /// <summary>本机玩家座位（0 起）：非建设模式下城市面板固定显示这名玩家，建设模式下改用行动玩家。</summary>
         private int localSeat;
 
@@ -45,6 +48,13 @@ namespace NomadCity.UI
         /// 避免主机顺手替客户端把行动做完（那样客户端会永远轮不到操作）。
         /// </summary>
         private bool lockToLocalSeat;
+
+        /// <summary>
+        /// 联机客户端：命令只提交给主机、本地不执行。于是「派发完立刻读 <c>engine.State</c>」的流程
+        /// （探索 / 城市移动 / 开局选点要弹的事件牌）此刻看到的是旧状态，必须等主机回放后再补，
+        /// 见 <see cref="SyncPendingEventCard"/>。
+        /// </summary>
+        private bool onlineClient;
 
         private ActionMode mode = ActionMode.None;
 
@@ -187,12 +197,28 @@ namespace NomadCity.UI
         /// <summary>事件选项效果的试跑会话（和建设 L4 同一套机制）：候选落点要玩家点地图或弹窗来答。</summary>
         private EffectChoiceSession eventSession;
 
+        /// <summary>
+        /// 联机客户端：事件选项已经交给主机、正等回放确认。此时事件卡先留着（最小化、锁住其它行动），
+        /// 确认后由 <see cref="ConfirmOnlineResolve"/> 收尾；主机拒绝则由 <see cref="ShowOnlineError"/>
+        /// 把卡面还原让玩家重选 —— 否则「已提交」这句假成功会让整局永久卡在这一步。
+        /// </summary>
+        private bool awaitingResolveConfirm;
+
+        /// <summary>等确认期间要补的后续步：这张牌是不是探索翻的。</summary>
+        private bool pendingResolveFromExplore;
+
+        /// <summary>等确认期间要补的后续步：这张牌是不是城市移动翻的。</summary>
+        private bool pendingResolveFromCityMove;
+
+        /// <summary>等确认期间要补的后续步：城市移动的出发点。</summary>
+        private int pendingResolveOriginNode = -1;
+
         public void Initialize(GameEngine engine, MapStateRenderer renderer, MapPointerInput pointerInput,
             GameHud hud, ActionPanel panel, EventCardPanel eventCardPanel = null, ChoicePopup choicePopup = null,
             FacilitySupplyPanel supplyPanel = null, CityPanelView cityPanel = null,
             CityPatternPanel patternPanel = null, CardPreviewPopup cardPreview = null,
             CharacterHandPanel handPanel = null, int localSeat = 0, bool lockToLocalSeat = false,
-            string[] playerNames = null)
+            string[] playerNames = null, PlayerCityPopup playerCityPopup = null, bool onlineClient = false)
         {
             this.engine = engine;
             this.renderer = renderer;
@@ -206,6 +232,8 @@ namespace NomadCity.UI
             this.patternPanel = patternPanel;
             this.cardPreview = cardPreview;
             this.handPanel = handPanel;
+            this.playerCityPopup = playerCityPopup;
+            this.onlineClient = onlineClient;
             this.localSeat = localSeat;
             this.lockToLocalSeat = lockToLocalSeat;
             this.playerNames = playerNames ?? new string[0];
@@ -236,6 +264,8 @@ namespace NomadCity.UI
             if (handPanel != null) handPanel.CardClicked += OnHandCardClicked;
 
             if (hud != null) hud.Bind(engine);
+            if (hud != null) hud.SeatInspectRequested += OnSeatInspectRequested;
+            if (playerCityPopup != null) playerCityPopup.SlotClicked += OnPlayerCitySlotClicked;
 
             SetMode(ActionMode.None);
             RefreshAll();
@@ -270,11 +300,44 @@ namespace NomadCity.UI
             if (cityPanel != null) cityPanel.SlotClicked -= OnCitySlotClicked;
             if (patternPanel != null) patternPanel.CardClicked -= OnPatternCardClicked;
             if (handPanel != null) handPanel.CardClicked -= OnHandCardClicked;
+            if (hud != null) hud.SeatInspectRequested -= OnSeatInspectRequested;
+            if (playerCityPopup != null) playerCityPopup.SlotClicked -= OnPlayerCitySlotClicked;
         }
 
         // —— 引擎事件 ——
 
-        private void OnCommandApplied(GameState state, ICommand command) => RefreshAll();
+        /// <summary>
+        /// 状态栏每行左侧的眼睛按钮：弹这名玩家的城市面板（只读）。
+        /// 座位号已经由 GameHud 按当行换算好，这里直接开；再点同一行则收起（弹窗内部处理）。
+        /// </summary>
+        private void OnSeatInspectRequested(int seat)
+        {
+            if (engine == null) return;
+
+            if (playerCityPopup == null)
+            {
+                SetStatus("没接「玩家城市」弹窗，暂时看不了这行玩家的城市面板。");
+                return;
+            }
+
+            playerCityPopup.Show(engine.State, seat, SeatLabel(seat));
+        }
+
+        private void OnCommandApplied(GameState state, ICommand command)
+        {
+            RefreshAll();
+
+            // 联机客户端：事件选项的回放确认到了，这才真正收尾（关事件卡、补探索 / 城市移动的后续步）。
+            // 这条分支必须在 SyncPendingEventCard 之前：两者都靠 pendingEvent* 判断「本地已经有一张牌」。
+            if (onlineClient && awaitingResolveConfirm && command is ResolveEventOptionCommand applied
+                && applied.ActorSeat == localSeat)
+            {
+                ConfirmOnlineResolve(applied);
+                return;
+            }
+
+            SyncPendingEventCard(state, command);
+        }
 
         // 阶段推进（含两轮行动自动进采集）发生在命令之后，这里补一次刷新，保证画面与状态一致。
         private void OnPhaseChanged(GameState state, TurnPhase from, TurnPhase to)
@@ -542,10 +605,13 @@ namespace NomadCity.UI
             }
 
             Dispatch(new ChooseStartNodeCommand(seat, hit.NodeId));
-            ShowEventCard(seat, hit.NodeId);
+
+            // 联机客户端：命令才刚交给主机，状态还没回放（事件牌有没有翻出来都不知道），
+            //   这里先不弹；回放后由 SyncPendingEventCard 补开。
+            if (!onlineClient) ShowEventCard(seat, hit.NodeId);
 
             // 最后一名玩家定完初始资源点后，2 人局（§12 变体 4）的弃设施牌窗本该弹出 —— 但事件卡
-            //  正开着，所以上面刻意先不弹；这里再刷一次，等事件结算完 <see cref="ResolveEventOption"/> 会把它放出来。
+            //   正开着时这里不会弹；等事件结算完 <see cref="ResolveEventOption"/> 会再刷一次把它放出来。
             RefreshFacilityViews();
         }
 
@@ -559,6 +625,10 @@ namespace NomadCity.UI
         private bool ShowEventCard(int seat, int nodeId)
         {
             if (eventCardPanel == null || engine == null) return false;
+
+            // 已经为同一个资源点弹着这张牌：直接算成功。联机客户端由 OnCommandApplied 补弹的这一手，
+            // 可能比原调用点晚不到一帧就先把牌弹出来了，别重复 Show 一次把玩家的选择重置掉。
+            if (eventCardPanel.IsVisible && pendingEventNodeId == nodeId) return true;
 
             MapNodeState node = engine.State.Map.Node(nodeId);
             if (!node.HasResourceToken || node.EventCardId < 0) return false;
@@ -577,6 +647,86 @@ namespace NomadCity.UI
         }
 
         /// <summary>
+        /// 联机客户端专用：状态回放后补开「刚翻出来的那张事件牌」。
+        ///
+        /// 客户端派发命令只是把命令交给主机（<c>NetworkGameSession.Submit</c> 不本地执行），而
+        /// <see cref="HandleChooseStartNode"/> / <see cref="ExecuteExplore"/> / <see cref="HandleMoveCity"/>
+        /// 都是「派发完立刻 <see cref="ShowEventCard"/>」—— 此刻状态还是旧的，牌根本弹不出来。
+        /// 后果不是难看而是卡死：开局选点翻出的牌没人结算，<c>ChooseStartNodeCommand.CurrentOperator</c>
+        /// 会一直停在那位玩家身上，整局出不了「角色牌盖放」阶段。
+        ///
+        /// 主机与单机不走这里（它们的命令在 <see cref="Dispatch"/> 里当场生效，原调用点自己就弹了）。
+        /// </summary>
+        private void SyncPendingEventCard(GameState state, ICommand command)
+        {
+            if (!onlineClient || state == null || command == null || eventCardPanel == null) return;
+            if (pendingEventNodeId >= 0 || eventCardPanel.IsVisible) return; // 本地已经有一张牌在结算
+
+            int seat;
+            int nodeId;
+            bool fromExplore = false;
+            bool fromCityMove = false;
+            int originNode = -1;
+            string lead;
+
+            switch (command)
+            {
+                case ChooseStartNodeCommand start:
+                    seat = start.ActorSeat;
+                    nodeId = start.NodeId;
+                    lead = $"{SeatLabel(seat)} 翻出了事件牌，请选择事件选项。";
+                    break;
+
+                case ExploreCommand explore:
+                    seat = explore.ActorSeat;
+                    nodeId = explore.NodeId;
+                    fromExplore = true;
+                    lead = "[探索] 目标资源点翻出了事件牌，请先选择事件选项。";
+                    break;
+
+                case MoveMobileCityCommand move:
+                    seat = move.ActorSeat;
+                    nodeId = move.TargetNodeId;
+                    fromCityMove = true;
+                    originNode = state.CityMoveOriginNodeId; // 状态已经回放，这里读到的才是真实出发点
+                    lead = "[城市移动] 目标资源点翻出了事件牌，请先选择事件选项。";
+                    break;
+
+                default:
+                    return;
+            }
+
+            // 别人翻出来的牌由他自己结算：别在旁观者的机器上也弹出来。
+            if (seat != localSeat) return;
+
+            if (!ShowEventCard(seat, nodeId))
+            {
+                // 没翻出牌（目标点本来就有指示物 / 这张牌已经结算过）：城市移动这里补上步 3，探索本来就不用补。
+                if (fromCityMove && originNode >= 0)
+                {
+                    FinishCityMove(seat, originNode, null);
+                    return;
+                }
+
+                // 牌翻出来了、却弹不出去（多半是 EventCardPanel 的 Card Faces 缺这张牌的卡面）：
+                // 这时既不能自己选，也没法让主机替他选 —— 只能说清楚「卡在哪」，别再静默地把人晾着。
+                MapNodeState node = state.Map.Node(nodeId);
+                if (node != null && node.HasResourceToken && node.EventCardId >= 0 && !node.EventResolved)
+                {
+                    SetStatus($"{SeatLabel(seat)} 翻出了事件牌 {node.EventCardId}，" +
+                              $"但事件卡弹窗里没有这张牌的卡面（EventCardPanel 的 Card Faces 缺少该素材），" +
+                              "暂时无法选择奖励。");
+                }
+                return;
+            }
+
+            pendingEventFromExplore = fromExplore;
+            pendingEventFromCityMove = fromCityMove;
+            if (fromCityMove) pendingEventOriginNode = originNode;
+            SetStatus(lead);
+        }
+
+        /// <summary>
         /// 玩家点了卡面上的某个选项。分两步问清楚再派发结算命令：
         /// 1) 选项含「→」条件段（§11.2）时，先问「执行条件段」还是「放弃效果」（放弃则整个效果结束）——两层都可返回；
         /// 2) 选项效果里若还有要玩家点选的地方（如「放置影响力」），与主要行动同源：直接点地图或弹窗作答。
@@ -586,8 +736,19 @@ namespace NomadCity.UI
         {
             if (engine == null || pendingEventNodeId < 0) return;
 
+            // 上一条结算还在等主机确认：别再提交第二条，否则主机那边会多出一条「已经结算过了」的拒绝。
+            if (awaitingResolveConfirm)
+            {
+                SetStatus("[联机] 上一条事件选项还在等主机确认，请稍等…");
+                return;
+            }
+
             EventOption option = EventOptionAt(engine.State, optionIndex);
-            if (option == null) return;
+            if (option == null)
+            {
+                SetStatus($"[事件] 选不出第 {optionIndex + 1} 个选项，请关掉事件卡重新点一次。");
+                return;
+            }
 
             pendingEventOption = optionIndex;
 
@@ -751,6 +912,24 @@ namespace NomadCity.UI
 
             if (!Dispatch(command)) return; // 结算失败时把面板留着，好让玩家换个选项重试
 
+            // 联机客户端：上面的 Dispatch 只是「交给主机」，本地状态一个字都没变。
+            // 这时候若照单机那样收尾（关掉事件卡、清掉 pendingEvent*），主机一旦拒绝，
+            // 玩家就再也没有重试的入口 —— 整局会永久停在「等他选事件奖励」这一步。
+            // 所以收尾推迟到回放确认（ConfirmOnlineResolve），拒绝则由 ShowOnlineError 还原卡面。
+            if (onlineClient)
+            {
+                awaitingResolveConfirm = true;
+                pendingResolveFromExplore = fromExplore;
+                pendingResolveFromCityMove = fromCityMove;
+                pendingResolveOriginNode = cityMoveOrigin;
+                eventSession = null;
+                if (choicePopup != null && choicePopup.IsVisible) choicePopup.Hide();
+                if (panel != null) panel.SetLocked(true);   // 只留「取消」当返回键
+                if (eventCardPanel != null) eventCardPanel.Collapse(); // 留着牌面，等确认再关
+                SetStatus("[联机] 已提交事件选项，等待主机确认…");
+                return;
+            }
+
             eventSession = null;
             if (panel != null) panel.SetLocked(false);
             if (eventCardPanel != null)
@@ -759,12 +938,7 @@ namespace NomadCity.UI
                 eventCardPanel.Hide();
             }
 
-            pendingEventSeat = -1;
-            pendingEventNodeId = -1;
-            pendingEventFromExplore = false;
-            pendingEventFromCityMove = false;
-            pendingEventOriginNode = -1;
-            pendingEventOption = -1;
+            ClearPendingEvent();
 
             // 事件卡关掉了，若正好轮到 2 人局弃设施牌（§12 变体 4），这一步把弃牌窗放出来。
             RefreshFacilityViews();
@@ -789,6 +963,69 @@ namespace NomadCity.UI
             SetStatus(result.Ok
                 ? $"{DescribeEventStep(command)}；[探索] 已在目标资源点放置 1 个影响力。"
                 : $"{DescribeEventStep(command)}；[探索] 放置影响力失败：{result.Error}");
+        }
+
+        /// <summary>
+        /// 联机客户端：主机回放了这次事件结算（<paramref name="applied"/> 的 <see cref="ResolveEventOptionCommand.Report"/>
+        /// 才是本局真实结果）。现在才关事件卡、清 pendingEvent*，并补探索 / 城市移动的后续步。
+        /// </summary>
+        private void ConfirmOnlineResolve(ResolveEventOptionCommand applied)
+        {
+            if (applied == null) return;
+
+            bool fromExplore = pendingResolveFromExplore;
+            bool fromCityMove = pendingResolveFromCityMove;
+            int cityMoveOrigin = pendingResolveOriginNode;
+
+            awaitingResolveConfirm = false;
+            pendingResolveFromExplore = false;
+            pendingResolveFromCityMove = false;
+            pendingResolveOriginNode = -1;
+
+            eventSession = null;
+            if (choicePopup != null && choicePopup.IsVisible) choicePopup.Hide();
+            if (panel != null) panel.SetLocked(false);
+            if (eventCardPanel != null)
+            {
+                eventCardPanel.Expand();
+                eventCardPanel.Hide();
+            }
+
+            ClearPendingEvent();
+
+            // 事件卡关掉了，若正好轮到 2 人局弃设施牌（§12 变体 4），这一步把弃牌窗放出来。
+            RefreshFacilityViews();
+
+            if (fromCityMove)
+            {
+                FinishCityMove(applied.ActorSeat, cityMoveOrigin, DescribeEventStep(applied));
+                return;
+            }
+
+            if (!fromExplore)
+            {
+                SetStatus(DescribeEventStep(applied));
+                return;
+            }
+
+            // 探索·步 3：目标资源点放 1 个影响力。客户端同样只是提交，结果等主机再回放。
+            CommandResult result = DispatchToEngine(new ExploreInfluenceCommand(applied.ActorSeat, applied.NodeId));
+            SetMode(ActionMode.None);
+            SetStatus(result.Ok
+                ? $"{DescribeEventStep(applied)}；[探索] 已提交在目标资源点放置 1 个影响力。"
+                : $"{DescribeEventStep(applied)}；[探索] 放置影响力失败：{result.Error}");
+        }
+
+        /// <summary>关事件卡时一并复位「正在结算哪张牌」的全部暂存字段。</summary>
+        private void ClearPendingEvent()
+        {
+            pendingEventSeat = -1;
+            pendingEventNodeId = -1;
+            pendingEventFromExplore = false;
+            pendingEventFromCityMove = false;
+            pendingEventOriginNode = -1;
+            pendingEventOption = -1;
+            pendingEventAcceptCost = true;
         }
 
         private static string DescribeEventStep(ResolveEventOptionCommand command) =>
@@ -984,6 +1221,14 @@ namespace NomadCity.UI
             }
 
             SetMode(ActionMode.None);
+
+            // 联机客户端：命令只提交给主机，此刻状态还没回放 —— 事件牌由 SyncPendingEventCard 回放后再弹。
+            if (onlineClient)
+            {
+                SetStatus("[探索] 已提交给主机，等待判定…");
+                return;
+            }
+
             pendingEventFromExplore = ShowEventCard(seat, nodeId);
 
             if (!pendingEventFromExplore)
@@ -1100,21 +1345,32 @@ namespace NomadCity.UI
 
             int seat = state.ActiveSeat;
 
+            // 出发点：派发前先记下来 —— 联机客户端在命令回放之前，state.CityMoveOriginNodeId 还是旧值。
+            int originNode = state.Player(seat).MobileCityNodeId;
+
             // 步 1–2（§6.4d）：付 3 源石、移动、清对手影响力，目标点没有指示物就翻牌补上。它不占行动名额。
             if (!Dispatch(new MoveMobileCityCommand(seat, hit.NodeId))) return;
 
             SetMode(ActionMode.None);
 
+            // 联机客户端：状态还没回放，牌有没有翻出来还不知道；「先弹牌还是补步 3」交给回放后的
+            //   SyncPendingEventCard 统一处理（否则会读着旧状态直接补步 3，与事件流程重复）。
+            if (onlineClient)
+            {
+                SetStatus("[城市移动] 已提交给主机，等待判定…");
+                return;
+            }
+
             // 步 2 翻出了事件牌：先让玩家结算选项，结算完在 ResolveEventOption 里补上步 3。
             if (ShowEventCard(seat, hit.NodeId))
             {
                 pendingEventFromCityMove = true;
-                pendingEventOriginNode = state.CityMoveOriginNodeId;
+                pendingEventOriginNode = originNode;
                 SetStatus("[城市移动] 目标资源点翻出了事件牌，请先选择事件选项。");
                 return;
             }
 
-            FinishCityMove(seat, state.CityMoveOriginNodeId, null);
+            FinishCityMove(seat, originNode, null);
         }
 
         /// <summary>
@@ -1150,9 +1406,19 @@ namespace NomadCity.UI
                 return;
             }
 
+            GameState state = engine.State;
+
+            // 只读查看（常驻操作区「设施」按钮打开的那种）：点牌只放大看卡面，绝不进建设、绝不扣费。
+            // 这段必须排在下面「不是建设就 return」之前 —— 查看时 mode 是 None，排后面就什么都不做了。
+            if (supplyPanel != null && supplyPanel.IsViewOnly)
+            {
+                int previewId = SupplyCardAt(state, index);
+                if (previewId >= 0) OpenFacilityPreview(state, previewId);
+                return;
+            }
+
             if (mode != ActionMode.Build || buildStep != BuildStep.PickCard) return;
 
-            GameState state = engine.State;
             int cardId = SupplyCardAt(state, index);
             if (cardId < 0) return;
 
@@ -1541,6 +1807,66 @@ namespace NomadCity.UI
             cardPreview.Show(state, cardId);
         }
 
+        /// <summary>
+        /// 点了「某位玩家城市面板」弹窗里的某一格：和常驻城市面板一样，弹该设施的放大卡面。
+        /// 座位用弹窗正在看的那个人（不是 ViewSeat），放大弹窗自己会跳到最上层，所以不用先收起弹窗。
+        /// </summary>
+        private void OnPlayerCitySlotClicked(int seat, int slot)
+        {
+            if (engine == null) return;
+
+            GameState state = engine.State;
+            PlayerState player = seat >= 0 && seat < state.Players.Count ? state.Players[seat] : null;
+            int cardId = player != null && slot >= 0 && slot < player.CityPanelSlots.Length
+                ? player.CityPanelSlots[slot]
+                : -1;
+            if (cardId < 0) return;
+
+            if (cardPreview == null)
+            {
+                SetStatus("卡面放大弹窗没接线，看不到放大图。");
+                return;
+            }
+
+            cardPreview.Show(state, cardId);
+        }
+
+        /// <summary>设施供应区只读查看时点牌：放大这张设施牌，什么都不结算。</summary>
+        private void OpenFacilityPreview(GameState state, int cardId)
+        {
+            if (cardPreview == null)
+            {
+                SetStatus("卡面放大弹窗没接线，看不到放大图。");
+                return;
+            }
+
+            cardPreview.Show(state, cardId);
+        }
+
+        /// <summary>手牌只读查看时点牌：放大这张角色牌，什么都不结算。</summary>
+        private void OpenCharacterPreview(GameState state, int cardId)
+        {
+            if (cardPreview == null)
+            {
+                SetStatus("卡面放大弹窗没接线，看不到放大图。");
+                return;
+            }
+
+            cardPreview.ShowCharacter(state, cardId);
+        }
+
+        /// <summary>城市面板（样式牌弹窗）只读查看时点牌：放大这张样式牌，什么都不结算。</summary>
+        private void OpenPatternPreview(GameState state, int cardId)
+        {
+            if (cardPreview == null)
+            {
+                SetStatus("卡面放大弹窗没接线，看不到放大图。");
+                return;
+            }
+
+            cardPreview.ShowCityPattern(state, cardId);
+        }
+
         /// <summary>设施供应区第 index 个牌位上的设施牌 id；没有则 -1。</summary>
         private static int SupplyCardAt(GameState state, int index) =>
             state != null && index >= 0 && index < state.FacilitySupply.Count ? state.FacilitySupply[index] : -1;
@@ -1581,6 +1907,16 @@ namespace NomadCity.UI
         private void OnPatternCardClicked(int index)
         {
             if (engine == null) return;
+
+            // 只读查看（常驻操作区「城市面板」按钮打开的那种）：点牌只放大看卡面，绝不宣告、绝不付费。
+            // 必须排在下面「不是特殊行动 / 不是宣告就 return」之前 —— 查看时 mode 是 None。
+            if (patternPanel != null && patternPanel.IsViewOnly)
+            {
+                GameState viewState = engine.State;
+                if (index < 0 || index >= viewState.CityPatternCards.Count) return;
+                OpenPatternPreview(viewState, viewState.CityPatternCards[index]);
+                return;
+            }
 
             // 特殊行动（§6.3f）：点样式牌 = 选要用哪张牌解锁的特殊行动，不用凑条件，直接进收费用 + 结算效果。
             if (mode == ActionMode.SpecialAction)
@@ -1816,34 +2152,30 @@ namespace NomadCity.UI
 
         // —— 盖放与使用角色牌（§4.2 阶段 1 / §6.3a / §10.1）——
 
+        /// <summary>
+        /// 这名玩家现在能不能盖放角色牌：盖放阶段 + 第 1 回合开局入场已走完 + 2 人局弃设施已完成 + 本人还没盖放。
+        /// 与 <see cref="CharacterHandPanel"/> 的刷新共用这一个判断，避免「看着能点、点了报错」。
+        /// </summary>
+        private static bool CanPlaceCharacter(GameState state, PlayerState player)
+        {
+            if (state == null || player == null) return false;
+            if (state.Phase != TurnPhase.CharacterPlacement) return false;
+            // 第 1 回合：开局入场（选初始资源点、结算事件牌）还没走完，先别盖放。
+            if (state.TurnNumber == 1 && ChooseStartNodeCommand.CurrentOperator(state) >= 0) return false;
+            // 2 人局变体：弃设施牌完成前不能盖放（§12 变体 4）。
+            if (state.SupplyDiscardRemaining > 0) return false;
+            return player.PlacedCharacterCard < 0;
+        }
+
         /// <summary>盖放阶段点手牌里的第 index 张：把它盖放到本机玩家面前（§10.1.1）。</summary>
         private void OnHandCardClicked(int index)
         {
             if (engine == null) return;
 
             GameState state = engine.State;
-            if (state.Phase != TurnPhase.CharacterPlacement)
-            {
-                SetStatus("盖放角色牌只能在回合的「角色牌盖放」阶段进行（§4.2 阶段 1）。");
-                return;
-            }
-
-            // 第 1 回合：开局入场（选初始资源点、结算事件牌）还没走完，先别盖放。
-            if (state.TurnNumber == 1 && ChooseStartNodeCommand.CurrentOperator(state) >= 0)
-            {
-                SetStatus("请先完成各自的初始资源点与事件牌结算，再一起盖放角色牌。");
-                return;
-            }
-
-            // 2 人局变体：弃设施牌完成前不能盖放（§12 变体 4）。
-            if (state.SupplyDiscardRemaining > 0)
-            {
-                SetStatus("2 人局要先从设施供应区弃 1 张设施牌，然后才能盖放角色牌。");
-                return;
-            }
-
             int seat = ViewSeat(state);
-            PlayerState player = state.Players[seat];
+            PlayerState player = seat >= 0 && seat < state.Players.Count ? state.Players[seat] : null;
+            if (player == null) return;
 
             // 与 CharacterHandPanel.Refresh 用同一套候选池：手牌为空时盖放要从弃牌区选（§10.1.1）。
             IReadOnlyList<int> pool = player.HandCharacterCards.Count > 0
@@ -1852,6 +2184,15 @@ namespace NomadCity.UI
             if (index < 0 || index >= pool.Count) return;
 
             int cardId = pool[index];
+
+            // 现在不能盖放（阶段不对 / 开局入场没走完 / 2 人局还没弃设施 / 本人已盖放过）：
+            // 这一下改成交给「放大看卡面」—— 看牌和盖放是两回事，不能因为不能盖放就连看都不给看。
+            if (!CanPlaceCharacter(state, player))
+            {
+                OpenCharacterPreview(state, cardId);
+                return;
+            }
+
             if (Dispatch(new PlaceCharacterCardCommand(seat, cardId)))
             {
                 // 最后一名玩家盖放完，引擎已经自动进入玩家行动；状态行给一句明确交代。
@@ -2153,7 +2494,19 @@ namespace NomadCity.UI
                 return CommandResult.Fail(waiting);
             }
 
-            return commandGateway != null ? commandGateway(command) : engine.Dispatch(command);
+            // 兜住「命令执行时抛异常」：异常在这里冒出去就没人接，玩家看到的现象只会是
+            // 「点了没反应 / 流程卡住」，Console 里也只是一条不容易对上号的堆栈。
+            try
+            {
+                return commandGateway != null ? commandGateway(command) : engine.Dispatch(command);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex, this);
+                string reason = $"「{command?.Name}」执行时出错：{ex.Message}";
+                SetStatus($"[联机] {reason}");
+                return CommandResult.Fail(reason);
+            }
         }
 
         /// <summary>
@@ -2624,6 +2977,32 @@ namespace NomadCity.UI
             if (hud != null) hud.SetStatus(LocalizePlayerRefs(text));
         }
 
+        /// <summary>
+        /// 联机层（主机拒绝、重放失败、断线）的错误：直接写进状态行，别只留在 Console。
+        /// 客户端提交命令本身只知道「已提交给主机」，真正被拒绝的原因全靠这条显示出来；
+        /// 联机测试时如果看不到它，很容易把「命令被拒」误判成「卡住了」。
+        /// </summary>
+        public void ShowOnlineError(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return;
+
+            // 刚才提交的事件选项没被主机接受：把事件卡还原，让玩家能重新选一项再提交。
+            // 不还原的话，卡面已经收起、pendingEvent* 也还留着，玩家看不出「该重试」，
+            // 主机那边则永远停在「等他选事件奖励」。
+            if (awaitingResolveConfirm && pendingEventNodeId >= 0)
+            {
+                awaitingResolveConfirm = false;
+                pendingResolveFromExplore = false;
+                pendingResolveFromCityMove = false;
+                pendingResolveOriginNode = -1;
+                BackToEventCard();
+                SetStatus($"[联机] {message}（可以重新选择这张事件卡的选项）");
+                return;
+            }
+
+            SetStatus($"[联机] {message}");
+        }
+
         /// <summary>座位显示名：优先用准备房间同步来的昵称，没有时回退成「玩家 N」。</summary>
         private string SeatLabel(int seat)
         {
@@ -2670,6 +3049,9 @@ namespace NomadCity.UI
                 hud.Refresh();
             }
             RefreshFacilityViews();
+
+            // 「看别人城市」的弹窗开着时跟着状态刷新（没开就什么都不做）。
+            if (playerCityPopup != null) playerCityPopup.Refresh(engine != null ? engine.State : null);
 
             // 引导文字也跟着状态走：开局选点轮次、本局结束这些都不经过 SetMode，
             // 只靠命令/阶段事件刷新，所以并在这里一起更新。
@@ -2725,13 +3107,11 @@ namespace NomadCity.UI
                 bool hasCards = handPlayer != null
                                 && (handPlayer.HandCharacterCards.Count > 0
                                     || (placementPhase && handPlayer.DiscardCharacterCards.Count > 0));
-                // 真正可点：盖放阶段、设施牌已经弃完、第 1 回合的开局入场已结束、且这个人还没盖放过。
-                // 第 1 回合的开局入场（选城市 + 结算事件牌）还没走完时不让盖放，保证「先选城市、再一起盖放」的顺序。
-                bool setupPending = state.TurnNumber == 1 && ChooseStartNodeCommand.CurrentOperator(state) >= 0;
-                bool canPlaceNow = placementPhase && !setupPending && state.SupplyDiscardRemaining == 0
-                                   && handPlayer != null && handPlayer.PlacedCharacterCard < 0;
+                // 真正可点：和上面 OnHandCardClicked 共用同一个判断（CanPlaceCharacter），
+                // 免得两处条件写歪成「看着能点、点了却只是放大」。
+                bool canPlaceNow = CanPlaceCharacter(state, handPlayer);
                 // 「能不能看」只看手里有没有牌。开局入场（选城市 / 结算事件牌）期间也要能翻开对一下手牌，
-                // 只是牌位点不动 —— 那个限制在下一位的 canPlaceNow 里，不要拿它去关整块托盘。
+                // 只是这一下点上去只放大 —— 那个限制在 canPlaceNow 里，不要拿它去关整块托盘。
                 handPanel.SetAvailable(hasCards);
                 handPanel.Refresh(state, handSeat, canPlaceNow);
             }

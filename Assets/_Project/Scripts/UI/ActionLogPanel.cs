@@ -27,7 +27,7 @@ namespace NomadCity.UI
     /// 正文既可以是一整块 TMP 文本（<see cref="bodyText"/> 挂在 Content 上），
     /// 也可以留空 —— 留空则本组件在 Content 下自己建一个。
     /// </summary>
-    public sealed class ActionLogPanel : MonoBehaviour
+    public sealed class ActionLogPanel : MonoBehaviour, ICenteredPanel
     {
         [Tooltip("右上角的开关按钮；点一下展开／收起记录面板。必须放在 Root 之外。")]
         [SerializeField] private Button toggleButton;
@@ -64,6 +64,8 @@ namespace NomadCity.UI
 
         private void Awake()
         {
+            CenteredPanelGroup.Register(this);
+
             if (toggleButton != null) toggleButton.onClick.AddListener(Toggle);
             if (closeButton != null) closeButton.onClick.AddListener(Hide);
             if (bodyText == null) bodyText = CreateBodyText();
@@ -89,6 +91,7 @@ namespace NomadCity.UI
 
         private void OnDestroy()
         {
+            CenteredPanelGroup.Unregister(this);
             if (engine != null) engine.Dispatcher.CommandApplied -= OnCommandApplied;
         }
 
@@ -129,8 +132,20 @@ namespace NomadCity.UI
 
         private void SetVisible(bool visible)
         {
+            // 三块同位置面板互斥：打开自己之前先把设施供应区 / 城市样式收起来。
+            if (visible) CenteredPanelGroup.BeforeOpen(this);
+
             if (root != null) root.SetActive(visible);
             if (visible) ScrollToBottom();
+        }
+
+        /// <summary>互斥组用：面板是不是开着（等同 <see cref="IsVisible"/>）。</summary>
+        bool ICenteredPanel.IsOpen => IsVisible;
+
+        /// <summary>互斥组用：无条件收起，不重算滚动位置。</summary>
+        void ICenteredPanel.ForceClose()
+        {
+            if (root != null) root.SetActive(false);
         }
 
         private void Rebuild()

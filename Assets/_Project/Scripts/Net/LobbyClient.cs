@@ -63,8 +63,13 @@ namespace NomadCity.Net
         /// <summary>等待房 TTL：创建后这么久还没开局，就自动关房（额度保险第 2 条）。</summary>
         private const float WaitingRoomTimeoutSeconds = 15f * 60f;
 
-        /// <summary>刷新房间信息（名单 / 设置 / 开局标记）的间隔。</summary>
-        private const float RefreshIntervalSeconds = 2f;
+        /// <summary>
+        /// 刷新房间信息（名单 / 设置 / 开局标记 / 准备状态的间隔）。
+        /// 准备房间是「轮询」拿别人的状态，所以这个间隔直接等于玩家感受到的延迟：
+        /// 2 秒 → 点「准备」后房主要等最多 2 秒才看到。改成 1 秒把这段等待减半；
+        /// 有 <see cref="requestInFlight"/> 守着，同一条请求没回来不会再发第二条，不会把限流打满。
+        /// </summary>
+        private const float RefreshIntervalSeconds = 1f;
 
         /// <summary>建房冷却：同一客户端 10 秒内不能重复建房（额度保险第 6 条）。</summary>
         private const float CreateCooldownSeconds = 10f;

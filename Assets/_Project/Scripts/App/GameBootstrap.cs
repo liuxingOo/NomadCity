@@ -55,6 +55,9 @@ namespace NomadCity.App
         [Tooltip("角色牌手牌托盘：盖放阶段点一张牌即盖放（§4.2 阶段 1）")]
         [SerializeField] private CharacterHandPanel characterHandPanel;
 
+        [Tooltip("「看某位玩家城市面板」弹窗：状态栏每行左侧的眼睛按钮点了弹它（只读，不参与建设）")]
+        [SerializeField] private PlayerCityPopup playerCityPopup;
+
         [Tooltip("行动记录：右上角按钮 + 聊天框式面板")]
         [SerializeField] private ActionLogPanel actionLogPanel;
 
@@ -69,6 +72,9 @@ namespace NomadCity.App
 
         [Header("联机（阶段 3）")]
         private NetworkGameSession onlineSession;
+
+        /// <summary>界面还没接好时收到的联机错误：先存一句，等 InitializePresentation 之后补到状态行上。</summary>
+        private string pendingOnlineError;
 
         [Tooltip("开局前的企业家挑选弹窗（单机与联机共用）；漏接时按座位自然顺序与默认颜色直接开局")]
         [SerializeField] private EntrepreneurChoicePanel entrepreneurPanel;
@@ -473,6 +479,10 @@ namespace NomadCity.App
         private void InitializePresentation(int seat)
         {
             bool online = session != null && session.Role != OnlineRole.None;
+
+            // 联机客户端：命令只提交给主机、本地不执行 —— 界面里「派发完立刻读状态」的流程
+            // （探索 / 城市移动 / 开局选点要弹的事件牌）必须等回放后再补，见 GameScreenController.SyncPendingEventCard。
+            bool onlineClient = online && onlineSession != null && !onlineSession.IsHost;
             // 昵称只在联机时用：单机热座一律显示「玩家 N」，免得上一局联机残留在 GameSession 里的名单串进来。
             string[] names = online ? session.PlayerNicknames : null;
 
@@ -490,7 +500,7 @@ namespace NomadCity.App
             if (screenController != null)
                 screenController.Initialize(Engine, mapStateRenderer, mapPointerInput, gameHud, actionPanel,
                     eventCardPanel, choicePopup, facilitySupplyPanel, cityPanelView, cityPatternPanel, cardPreviewPopup,
-                    characterHandPanel, seat, online, names);
+                    characterHandPanel, seat, online, names, playerCityPopup, onlineClient);
             else
                 Debug.LogWarning("[开局] 未指定 GameScreenController，界面不会响应键鼠操作。", this);
 
@@ -519,6 +529,11 @@ namespace NomadCity.App
                 Debug.LogWarning("[开局] 未指定 CharacterHandPanel：角色牌盖放阶段没有手牌托盘可点，" +
                                  "也就无法盖放角色牌（§4.2 阶段 1）。请把场景里的 CharacterHandPanel 拖进本字段。", this);
 
+            // 接线自检：「看某位玩家城市面板」弹窗靠这个字段，漏接的话状态栏左侧的眼睛按钮点了只会提示一句。
+            if (playerCityPopup == null)
+                Debug.LogWarning("[开局] 未指定 PlayerCityPopup：玩家状态栏左侧的眼睛按钮点了只会提示" +
+                                 "「没接弹窗」。请把场景里的 PlayerCityPopup 拖进本字段。", this);
+
             // 接线自检：探索的「付给谁」小选择窗靠这个字段，漏接的话界面上不会有任何提示，只会在探索时静默跳过。
             if (choicePopup == null)
                 Debug.LogWarning("[开局] 未指定 ChoicePopup：探索时「路费付给谁」的小选择窗不会弹出" +
@@ -545,6 +560,9 @@ namespace NomadCity.App
             }
             else
                 Debug.LogWarning("[开局] 场景里找不到 ActionLogPanel，右上角的「行动记录」不会记录任何内容。", this);
+
+            // 开局（挑企业家 / 等快照）期间就到的联机错误，这时才补到状态行上。
+            FlushPendingOnlineError();
         }
 
         // —— 联机 ——
@@ -650,10 +668,41 @@ namespace NomadCity.App
                       $"回合 {state.TurnNumber}，阶段 {state.Phase}，行动座位 {state.ActiveSeat + 1}。", this);
         }
 
-        /// <summary>联机错误：控制台报错；准备房间阶段的具体提示由 Lobby 场景负责显示。</summary>
+        /// <summary>
+        /// 联机错误（主机拒绝 / 客户端重放失败 / 断线）：除了 Console，还要写进状态行和行动记录里。
+        /// 客户端提交命令只会拿到「已提交给主机」，真正被拒绝的原因不显示出来的话，玩家只会以为界面卡住了。
+        /// 准备房间 / 挑企业家阶段界面还没接好时，先用 <see cref="pendingOnlineError"/> 存着。
+        /// </summary>
         private void OnOnlineError(string message)
         {
             Debug.LogError("[联机] " + message, this);
+
+            string text = string.IsNullOrWhiteSpace(message) ? "联机出错（原因未说明）" : message.Trim();
+
+            if (screenController == null)
+            {
+                pendingOnlineError = text;
+                return;
+            }
+
+            ShowOnlineErrorNow(text);
+        }
+
+        /// <summary>把一条联机错误同时写进行动记录与状态行。</summary>
+        private void ShowOnlineErrorNow(string text)
+        {
+            if (actionLogPanel != null) actionLogPanel.Append("[联机] " + text);
+            if (screenController != null) screenController.ShowOnlineError(text);
+        }
+
+        /// <summary>开局完成后补上开局期间收到的联机错误。</summary>
+        private void FlushPendingOnlineError()
+        {
+            if (pendingOnlineError == null) return;
+
+            string text = pendingOnlineError;
+            pendingOnlineError = null;
+            ShowOnlineErrorNow(text);
         }
 
         /// <summary>

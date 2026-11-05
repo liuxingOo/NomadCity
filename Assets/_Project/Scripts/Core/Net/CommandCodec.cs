@@ -11,8 +11,11 @@ namespace NomadCity.Core.Net
     /// 且各自 default 抛异常 —— 以后新增命令只改一处会立刻炸，避免协议悄悄长歪。
     ///
     /// 槽位约定（P0/P1/P2/P3、Flags、Items 的用法）见 <see cref="Encode"/> 内每个分支的注释。
-    /// 注意：<c>IEffectChoices</c> 这类回调参数不可序列化，编码时丢弃、解码时一律传 null，
-    /// 由上层（UI / AI）在本地重新提供（联机协定：客户端只提交「最终完整命令」，不发中间答案）。
+    /// <c>IEffectChoices</c> 本身是回调、不可序列化，但「玩家当场点过的答案」必须原样过网：
+    /// 带效果点选的命令（建设 / 使用角色牌 / 特殊行动 / 结算事件选项）统一用
+    /// <b>P3 = 答案个数、Items = 答案列表</b>（按提问顺序，-1 = 放弃），解码时重建为
+    /// <see cref="RecordedChoices"/>（strict = false，答案用尽就退回自动结算）。
+    /// 否则主机回放只能按「第一个合法项」执行，玩家点的落点会被静默换掉。
     /// </summary>
     public static class CommandCodec
     {
@@ -43,7 +46,8 @@ namespace NomadCity.Core.Net
                 case ChooseStartNodeCommand c:
                     return new CommandDto { Kind = CommandKind.ChooseStartNode, Seat = c.ActorSeat, P0 = c.NodeId };
 
-                // P0 = NodeId；P1 = OptionIndex；Flags: bit0 = AcceptCost, bit1 = GrantRewards。
+                // P0 = NodeId；P1 = OptionIndex；Flags: bit0 = AcceptCost, bit1 = GrantRewards；
+                // P3 = 选项效果里点过的答案个数，Items = 答案。
                 case ResolveEventOptionCommand c:
                     return new CommandDto
                     {
@@ -51,6 +55,8 @@ namespace NomadCity.Core.Net
                         Seat = c.ActorSeat,
                         P0 = c.NodeId,
                         P1 = c.OptionIndex,
+                        P3 = AnswerCount(c.Choices),
+                        Items = AnswerItems(c.Choices),
                         Flags = (c.AcceptCost ? AcceptCostBit : 0u) | (c.GrantRewards ? GrantRewardsBit : 0u),
                     };
 
@@ -58,7 +64,7 @@ namespace NomadCity.Core.Net
                 case DiscardSupplyFacilityCommand c:
                     return new CommandDto { Kind = CommandKind.DiscardSupplyFacility, Seat = c.ActorSeat, P0 = c.FacilityId };
 
-                // P0 = FacilityId；P1 = PanelSlot；P2 = (int)Payment。
+                // P0 = FacilityId；P1 = PanelSlot；P2 = (int)Payment；P3 = 入场效果答案个数，Items = 答案。
                 case BuildFacilityCommand c:
                     return new CommandDto
                     {
@@ -67,15 +73,24 @@ namespace NomadCity.Core.Net
                         P0 = c.FacilityId,
                         P1 = c.PanelSlot,
                         P2 = (int)c.Payment,
+                        P3 = AnswerCount(c.EffectChoices),
+                        Items = AnswerItems(c.EffectChoices),
                     };
 
                 // P0 = CardId。
                 case PlaceCharacterCardCommand c:
                     return new CommandDto { Kind = CommandKind.PlaceCharacterCard, Seat = c.ActorSeat, P0 = c.CardId };
 
-                // P0 = (int)Effect。
+                // P0 = (int)Effect；P3 = 效果答案个数，Items = 答案。
                 case UseCharacterCardCommand c:
-                    return new CommandDto { Kind = CommandKind.UseCharacterCard, Seat = c.ActorSeat, P0 = (int)c.Effect };
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.UseCharacterCard,
+                        Seat = c.ActorSeat,
+                        P0 = (int)c.Effect,
+                        P3 = AnswerCount(c.EffectChoices),
+                        Items = AnswerItems(c.EffectChoices),
+                    };
 
                 // 无参数。
                 case EndCharacterCardUseCommand c:
@@ -171,9 +186,16 @@ namespace NomadCity.Core.Net
                     return dto;
                 }
 
-                // P0 = PatternCardId。
+                // P0 = PatternCardId；P3 = 效果答案个数，Items = 答案。
                 case UsePatternSpecialActionCommand c:
-                    return new CommandDto { Kind = CommandKind.UsePatternSpecialAction, Seat = c.ActorSeat, P0 = c.PatternCardId };
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.UsePatternSpecialAction,
+                        Seat = c.ActorSeat,
+                        P0 = c.PatternCardId,
+                        P3 = AnswerCount(c.EffectChoices),
+                        Items = AnswerItems(c.EffectChoices),
+                    };
 
                 // P0 = 座位数；Items = [seat, 选点数, 选点 id..., ...]，按座位升序排列保证确定性。
                 case ResolveHarvestCommand c:
@@ -225,7 +247,7 @@ namespace NomadCity.Core.Net
 
         // —— 解码：DTO → 命令对象（与上面 Encode 的 switch 一一对应，紧挨着放） ——
 
-        /// <summary>按 <see cref="CommandDto.Kind"/> 重建命令对象；不可序列化的 <c>IEffectChoices</c> 一律传 null。</summary>
+        /// <summary>按 <see cref="CommandDto.Kind"/> 重建命令对象；效果点选答案由 <c>P3 + Items</c> 还原成 <see cref="RecordedChoices"/>。</summary>
         public static ICommand Decode(CommandDto dto)
         {
             switch (dto.Kind)
@@ -242,19 +264,21 @@ namespace NomadCity.Core.Net
                 case CommandKind.ResolveEventOption:
                     return new ResolveEventOptionCommand(dto.Seat, dto.P0, dto.P1,
                         acceptCost: (dto.Flags & AcceptCostBit) != 0,
-                        grantRewards: (dto.Flags & GrantRewardsBit) != 0);
+                        grantRewards: (dto.Flags & GrantRewardsBit) != 0,
+                        choices: DecodeAnswers(dto));
 
                 case CommandKind.DiscardSupplyFacility:
                     return new DiscardSupplyFacilityCommand(dto.Seat, dto.P0);
 
                 case CommandKind.BuildFacility:
-                    return new BuildFacilityCommand(dto.Seat, dto.P0, dto.P1, (FacilityPayment)dto.P2);
+                    return new BuildFacilityCommand(dto.Seat, dto.P0, dto.P1, (FacilityPayment)dto.P2,
+                        DecodeAnswers(dto));
 
                 case CommandKind.PlaceCharacterCard:
                     return new PlaceCharacterCardCommand(dto.Seat, dto.P0);
 
                 case CommandKind.UseCharacterCard:
-                    return new UseCharacterCardCommand(dto.Seat, (CharacterEffectKind)dto.P0);
+                    return new UseCharacterCardCommand(dto.Seat, (CharacterEffectKind)dto.P0, DecodeAnswers(dto));
 
                 case CommandKind.EndCharacterCardUse:
                     return new EndCharacterCardUseCommand(dto.Seat);
@@ -282,7 +306,7 @@ namespace NomadCity.Core.Net
                     return new RelocateInfluenceCommand(dto.Seat, DecodeMoves(dto));
 
                 case CommandKind.UsePatternSpecialAction:
-                    return new UsePatternSpecialActionCommand(dto.Seat, dto.P0);
+                    return new UsePatternSpecialActionCommand(dto.Seat, dto.P0, DecodeAnswers(dto));
 
                 case CommandKind.ResolveHarvest:
                     return new ResolveHarvestCommand(DecodeHarvestChoices(dto));
@@ -301,6 +325,36 @@ namespace NomadCity.Core.Net
                 default:
                     throw new ArgumentException($"无法解码未知的命令 Kind：{dto.Kind}。", nameof(dto));
             }
+        }
+
+        /// <summary>答案个数：只有 <see cref="RecordedChoices"/> 能过网（其它实现是本地回调，按 0 处理）。</summary>
+        private static int AnswerCount(IEffectChoices choices) =>
+            choices is RecordedChoices recorded ? recorded.Answers.Count : 0;
+
+        /// <summary>答案列表：按提问顺序；没有答案时返回 null（对应 DTO 的 Items = null）。</summary>
+        private static int[] AnswerItems(IEffectChoices choices)
+        {
+            if (!(choices is RecordedChoices recorded) || recorded.Answers.Count == 0) return null;
+
+            var items = new int[recorded.Answers.Count];
+            for (int i = 0; i < items.Length; i++) items[i] = recorded.Answers[i];
+            return items;
+        }
+
+        /// <summary>
+        /// 还原效果点选答案：P3 个答案按顺序读回。<c>strict = false</c> —— 正式回放时答案用尽是
+        /// 「退回自动结算」而不是抛异常（见 <see cref="RecordedChoices"/>）。
+        /// </summary>
+        private static IEffectChoices DecodeAnswers(CommandDto dto)
+        {
+            int count = dto.P3;
+            if (count <= 0) return null;
+            if (dto.Items == null || dto.Items.Length < count)
+                throw new ArgumentException("效果点选答案个数与 Items 长度不符。", nameof(dto));
+
+            var answers = new int[count];
+            Array.Copy(dto.Items, 0, answers, 0, count);
+            return new RecordedChoices(answers, strict: false);
         }
 
         /// <summary>还原 ExploreCommand 的自选航道：Items 头部 P1 个 int；P1 ≤ 0 表示未指定（null）。</summary>

@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 30c71abb29f32964d86e0e5044ecce10
+guid: 7d5b8f4d1511d524ab5162635ccea63d
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: -3835904649026484679
-    second: StatusBar_0
+      213: 5670732621190257608
+    second: Money_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -99,6 +99,19 @@ TextureImporter:
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
   - serializedVersion: 4
+    buildTarget: Android
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
     buildTarget: WebGL
     maxTextureSize: 2048
     resizeAlgorithm: 0
@@ -115,89 +128,23 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: StatusBar_red
+      name: Money_0
       rect:
         serializedVersion: 2
         x: 0
-        y: 283
-        width: 829
-        height: 282
+        y: 0
+        width: 1000
+        height: 428
       alignment: 0
-      pivot: {x: 0.5, y: 0.5}
+      pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
       customData: 
       outline: []
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 936c1829b0124cac0800000000000000
-      internalID: -3835904649026484679
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: StatusBar_yellow
-      rect:
-        serializedVersion: 2
-        x: 829
-        y: 283
-        width: 829
-        height: 282
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      customData: 
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: 811a6fd8d15ad234fbd77f73efddd031
-      internalID: 1110761656
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: StatusBar_blue
-      rect:
-        serializedVersion: 2
-        x: 0
-        y: 2
-        width: 829
-        height: 282
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      customData: 
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: aed59ecfb93d38446b9c6d7682c6acf8
-      internalID: -2004206753
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: StatusBar_green
-      rect:
-        serializedVersion: 2
-        x: 829
-        y: 1
-        width: 829
-        height: 282
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      customData: 
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: 8fa9edea765452545979111f92221f18
-      internalID: -1873464441
+      spriteID: 8cbd34e264d72be40800000000000000
+      internalID: 5670732621190257608
       vertices: []
       indices: 
       edges: []
@@ -206,7 +153,7 @@ TextureImporter:
     customData: 
     physicsShape: []
     bones: []
-    spriteID: ab9975553ef62fe46969a221c70f2c76
+    spriteID: 
     internalID: 0
     vertices: []
     indices: 
@@ -214,14 +161,9 @@ TextureImporter:
     weights: []
     secondaryTextures: []
     spriteCustomMetadata:
-      entries:
-      - key: SpriteEditor.SliceSettings
-        value: '{"sliceOnImport":false,"gridCellCount":{"x":2.0,"y":2.0},"gridSpriteSize":{"x":829.0,"y":282.0},"gridSpriteOffset":{"x":0.0,"y":0.0},"gridSpritePadding":{"x":0.0,"y":0.0},"pivot":{"x":0.5,"y":0.5},"pivotPixels":{"x":0.0,"y":0.0},"autoSlicingMethod":0,"spriteAlignment":0,"pivotUnitMode":0,"slicingType":2,"keepEmptyRects":false,"isAlternate":false}'
+      entries: []
     nameFileIdTable:
-      StatusBar_blue: -2004206753
-      StatusBar_green: -1873464441
-      StatusBar_red: -3835904649026484679
-      StatusBar_yellow: 1110761656
+      Money_0: 5670732621190257608
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 
