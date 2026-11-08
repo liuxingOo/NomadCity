@@ -52,6 +52,32 @@ namespace NomadCity.Net
         /// <summary>玩家选定的阵营颜色（Player.Data，PlayerColor 的整数值；空 = 未选）。</summary>
         public const string ColorKey = "Color";
 
+        /// <summary>
+        /// 玩家身份令牌（Player.Data）。与 Relay 重连用的是同一个本机令牌，重启游戏后不变；
+        /// 房主据此把「同一台机器重新进房」产生的重复席位并回一个，而不是越占越多。
+        /// </summary>
+        public const string IdentityKey = "Identity";
+
+        /// <summary>
+        /// 玩家自己的 Relay 座位号（Player.Data）。名单顺序与座位顺序不一定一致，
+        /// 所有人都靠它把「谁挑了什么颜色」对到座位上。
+        /// </summary>
+        public const string SeatKey = "Seat";
+
+        /// <summary>上一次进过的 6 位房间码（存本地）。重启游戏后主菜单预填，省得再手输。</summary>
+        private const string LastRoomCodeKey = "NomadCity.LastRoomCode";
+
+        /// <summary>上次进入的房间码；没有时为空串。</summary>
+        public static string LastRoomCode => PlayerPrefs.GetString(LastRoomCodeKey, string.Empty);
+
+        private static void RememberRoomCode(string code)
+        {
+            if (string.IsNullOrWhiteSpace(code)) return;
+
+            PlayerPrefs.SetString(LastRoomCodeKey, code.Trim());
+            PlayerPrefs.Save();
+        }
+
         /// <summary>房主开局前随机排出的行动顺序（Lobby.Data，"座位号,座位号,…"；空 = 按座位自然顺序）。</summary>
         public const string OrderKey = "Order";
 
@@ -65,11 +91,26 @@ namespace NomadCity.Net
 
         /// <summary>
         /// 刷新房间信息（名单 / 设置 / 开局标记 / 准备状态的间隔）。
-        /// 准备房间是「轮询」拿别人的状态，所以这个间隔直接等于玩家感受到的延迟：
-        /// 2 秒 → 点「准备」后房主要等最多 2 秒才看到。改成 1 秒把这段等待减半；
-        /// 有 <see cref="requestInFlight"/> 守着，同一条请求没回来不会再发第二条，不会把限流打满。
+        /// 1 秒是 UGS Lobby「Get Lobby」的官方限流上限（每玩家每秒 1 次）；
+        /// 之前压到 0.5 秒就是 Console 里成串 request_rate_limited 的来源，反而更慢。
+        /// 真被限流时还会按 <see cref="refreshBackoff"/> 自动退避。
         /// </summary>
         private const float RefreshIntervalSeconds = 1f;
+
+        /// <summary>被 UGS 限流后临时拉长的刷新间隔，成功一次就清零。</summary>
+        private float refreshBackoff;
+
+        /// <summary>牌局已经建好，房间信息不再需要刷新（见 <see cref="StopRefreshing"/>）。</summary>
+        private bool refreshStopped;
+
+        /// <summary>牌局已开打（房主侧）：刷新降频到 <see cref="SlowRefreshIntervalSeconds"/>。</summary>
+        private bool refreshSlow;
+
+        /// <summary>
+        /// 牌局开打后房主的刷新间隔。不能停死：掉线玩家重启后要重新进房，
+        /// 同身份的旧席位必须继续被清掉，否则房间满员会把他挡在 Lobby 层外面。
+        /// </summary>
+        private const float SlowRefreshIntervalSeconds = 5f;
 
         /// <summary>建房冷却：同一客户端 10 秒内不能重复建房（额度保险第 6 条）。</summary>
         private const float CreateCooldownSeconds = 10f;
@@ -95,6 +136,9 @@ namespace NomadCity.Net
         private bool playerUpdateInFlight;
         private bool settingsUpdateInFlight;
         private bool publishInFlight;
+
+        /// <summary>房主正在按身份回收重复席位（同一条名单刷新里不重复发请求）。</summary>
+        private bool duplicateCleanupInFlight;
 
         /// <summary>刷新失败只提示一次，避免每 2 秒刷一条警告。</summary>
         private bool refreshFailureLogged;
@@ -190,6 +234,12 @@ namespace NomadCity.Net
         /// <summary>房主：开局信息（中继码 / Started / 锁定）已成功写入 Lobby，可以切 Game 场景了。</summary>
         public event Action HostStartPublished;
 
+        /// <summary>
+        /// 房主：重试若干次后仍没把开局信息写进 Lobby（网络或 UGS 超时）。
+        /// 上层收到后应把「开始游戏」按钮放回可用状态，让房主再点一次。
+        /// </summary>
+        public event Action StartPublishFailed;
+
         /// <summary>客户端：自己已经不在名单里（被房主踢出）。</summary>
         public event Action Kicked;
 
@@ -245,15 +295,15 @@ namespace NomadCity.Net
         /// 开局前选阵营颜色（房主与客户端都可调用）：写进自己的 Player.Data，
         /// 其他人靠名单刷新看到「哪些颜色已被占」，房主据此决定何时可以开始建局。
         /// </summary>
-        public void SetColor(int color)
+        public void SetColor(int color, int seat = -1)
         {
             if (shutdown || lobby == null) return;
             if (color < 0 || color > 3) return;
 
-            SetColorAsync(color);
+            SetColorAsync(color, seat);
         }
 
-        /// <summary>按名单顺序（= 座位顺序）的已选颜色，未选为 -1。</summary>
+        /// <summary>按名单顺序的已选颜色，未选为 -1（按座位对齐请用 OnlineSessionHost.ColorsBySeat）。</summary>
         public int[] SeatColors
         {
             get
@@ -337,6 +387,18 @@ namespace NomadCity.Net
             else PollClient(deltaTime);
         }
 
+        /// <summary>
+        /// 牌局已经建好：停掉房间信息轮询（心跳照旧，房间继续留着给掉线玩家回来拿中继码）。
+        /// 企业家挑选阶段**不能**调用，那时还要靠名单刷新同步各自选的颜色。
+        /// </summary>
+        public void StopRefreshing() => refreshStopped = true;
+
+        /// <summary>
+        /// 牌局已经建好（房主侧）：刷新降频到 5 秒一次，而不是彻底停掉 ——
+        /// 掉线玩家重启后重新进房时，同身份的旧席位还要靠这条刷新清理，否则满员会把他挡在外面。
+        /// </summary>
+        public void SlowDownRefreshing() => refreshSlow = true;
+
         /// <summary>关房：房主删 Lobby，客户端退出成员。之后不再发任何请求。</summary>
         public void Shutdown()
         {
@@ -407,7 +469,12 @@ namespace NomadCity.Net
 
         private void PollHost(float deltaTime)
         {
-            // 已经点过开始就不再计等待房 TTL。
+            // 注意：开局「发布」之后**不能**停止轮询。企业家挑选是写进 Lobby 的 Player.Data 再靠
+            // 名单刷新同步的，房主要靠这一路轮询才知道别人挑了哪张；停掉就会永远卡在「等待 xxx 挑选」。
+            // 真正该停的时机是牌局已经建好（<see cref="StopRefreshing"/>）。
+            if (refreshStopped) return;
+
+            // 等待房 TTL：还没开局就一直计时（开局后还在等企业家挑选，不能再按等待房超时关房）。
             if (!startRequested)
             {
                 waitingTimer += deltaTime;
@@ -420,7 +487,8 @@ namespace NomadCity.Net
             }
 
             refreshTimer += deltaTime;
-            if (refreshTimer < RefreshIntervalSeconds) return;
+            float interval = (refreshSlow ? SlowRefreshIntervalSeconds : RefreshIntervalSeconds) + refreshBackoff;
+            if (refreshTimer < interval) return;
 
             refreshTimer = 0f;
             RefreshHostAsync();
@@ -436,6 +504,7 @@ namespace NomadCity.Net
                 Unity.Services.Lobbies.Models.Lobby fresh = await LobbyService.Instance.GetLobbyAsync(lobby.Id);
                 if (shutdown) return;
 
+                refreshBackoff = 0f;
                 refreshFailureLogged = false;
                 ApplyLobby(fresh);
                 RefreshCanStart();
@@ -447,6 +516,9 @@ namespace NomadCity.Net
                     refreshFailureLogged = true;
                     Debug.LogWarning("[Lobby] 刷新房间失败：" + ex.Message);
                 }
+
+                // 被 UGS 限流（request_rate_limited）时拉长间隔；真恢复了一次就清零。
+                if (!shutdown) refreshBackoff = Mathf.Min(refreshBackoff + 0.5f, 2f);
             }
             finally
             {
@@ -526,7 +598,8 @@ namespace NomadCity.Net
             {
                 var options = new UpdateLobbyOptions
                 {
-                    IsLocked = true,
+                    // 不锁房：锁了之后「关掉游戏重开」的玩家就再也进不来，也就拿不到中继码回原座位。
+                    // 房间是私有房（要 6 位房间码），且 Relay 只认本机身份令牌 —— 陌生玩家进来也占不到别人的座位。
                     Data = new Dictionary<string, DataObject>
                     {
                         [StartedKey] = MakeData("1"),
@@ -537,11 +610,42 @@ namespace NomadCity.Net
                     },
                 };
 
-                lobby = await LobbyService.Instance.UpdateLobbyAsync(lobby.Id, options);
+                // 写库这一步一旦失败，房主就卡在准备房间里（「开始游戏」已经锁死），
+                // 所以这里自己重试 3 次；全都失败才把按钮还给房主，让他手动重来。
+                const int maxAttempts = 3;
+                Exception lastError = null;
+                for (int attempt = 1; attempt <= maxAttempts; attempt++)
+                {
+                    if (shutdown) return;
+
+                    try
+                    {
+                        lobby = await LobbyService.Instance.UpdateLobbyAsync(lobby.Id, options);
+                        if (shutdown) return;
+
+                        StatusChanged?.Invoke("开局信息已发布，等待玩家接入…");
+                        HostStartPublished?.Invoke();
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        lastError = ex;
+                        Debug.LogWarning($"[Lobby] 发布开局信息失败（第 {attempt}/{maxAttempts} 次）：{ex.Message}");
+                        if (attempt < maxAttempts)
+                        {
+                            StatusChanged?.Invoke($"开局信息发布失败，2 秒后重试（{attempt}/{maxAttempts}）…");
+                            await Task.Delay(2000);
+                        }
+                    }
+                }
+
                 if (shutdown) return;
 
-                StatusChanged?.Invoke("房间已锁定，等待玩家接入…");
-                HostStartPublished?.Invoke();
+                // 中继已经开好了，重试时不需要重新申请：把「开始游戏」解禁即可。
+                startRequested = false;
+                RefreshCanStart();
+                StartPublishFailed?.Invoke();
+                Fail($"发布开局信息失败：{lastError?.Message}（请再点一次「开始游戏」重试）");
             }
             catch (Exception ex)
             {
@@ -555,7 +659,7 @@ namespace NomadCity.Net
 
         // —— 客户端 ——
 
-        private async void JoinRoomAsync(string lobbyCode, string nickname)
+        private async void JoinRoomAsync(string lobbyCode, string nickname, int attempt = 0)
         {
             try
             {
@@ -579,6 +683,7 @@ namespace NomadCity.Net
                 }
 
                 lobby = joined;
+                RememberRoomCode(joined.LobbyCode);
 
                 string protocol = ReadLobbyValue(joined, ProtocolKey);
                 if (!string.IsNullOrEmpty(protocol) && protocol != NetProtocol.Version.ToString())
@@ -588,20 +693,64 @@ namespace NomadCity.Net
                     return;
                 }
 
-                if (IsStarted(joined))
-                {
-                    Fail("该房间已经开局，无法再加入。");
-                    Shutdown();
-                    return;
-                }
+                // 已经开局的房间也允许加入：进对局后由 Relay 凭本机保存的身份令牌恢复原座位
+                // （重启游戏后回到原座位走的就是这条路）；不认识的玩家会拿到空闲座位或被告知人满。
+                bool started = IsStarted(joined);
 
                 ApplyLobby(joined);
-                StatusChanged?.Invoke($"已进入房间 {joined.LobbyCode}，等待房主开局…");
+                StatusChanged?.Invoke(started
+                    ? $"该房间已开局，正在凭本机身份恢复座位（{joined.LobbyCode}）…"
+                    : $"已进入房间 {joined.LobbyCode}，等待房主开局…");
+
+                // 重连场景（关掉游戏重开、再凭房间码进来）要**当场**接入：不能等下一次轮询 ——
+                // 轮询可能被限流拖慢，玩家就会一直停在准备房间里「等房主再点一次开始游戏」。
+                if (started && !startPublishedHandled)
+                {
+                    string relayCode = ReadLobbyValue(joined, RelayJoinCodeKey);
+                    if (!string.IsNullOrEmpty(relayCode))
+                    {
+                        startPublishedHandled = true;
+                        StartPublished?.Invoke(relayCode);
+                    }
+                    else
+                    {
+                        StatusChanged?.Invoke("房间已开局，但还没同步到中继信息，正在重试…");
+                    }
+                }
+            }
+            catch (LobbyServiceException ex) when (ex.Reason == LobbyExceptionReason.LobbyFull)
+            {
+                // 名额可能被「已经掉线、席位还没被 UGS 回收」的玩家占着（约半分钟后自动释放）。
+                // 重启游戏回来时最常见，这里自动重试，不用玩家自己反复点。
+                await RetryJoinWhenFullAsync(lobbyCode, nickname, attempt);
             }
             catch (Exception ex)
             {
                 if (!shutdown) Fail($"加入房间失败：{ex.Message}");
             }
+        }
+
+        /// <summary>房间满员时的自动重试：等 UGS 把掉线玩家的席位回收再进（最多约 36 秒）。</summary>
+        private async Task RetryJoinWhenFullAsync(string lobbyCode, string nickname, int attempt)
+        {
+            const int maxAttempts = 12;
+            const int waitSeconds = 3;
+
+            if (shutdown || lobby != null) return;
+
+            if (attempt >= maxAttempts)
+            {
+                Fail("房间已满：掉线玩家的席位迟迟没有释放，请稍后再试，或让房主把多余成员踢出。");
+                return;
+            }
+
+            StatusChanged?.Invoke(
+                $"房间暂时满员（可能有掉线玩家的席位还没释放），{waitSeconds} 秒后自动重试…");
+
+            await Task.Delay(waitSeconds * 1000);
+            if (shutdown || lobby != null) return;
+
+            JoinRoomAsync(lobbyCode, nickname, attempt + 1);
         }
 
         private async void SetReadyAsync(bool ready)
@@ -632,23 +781,51 @@ namespace NomadCity.Net
             }
         }
 
-        private async void SetColorAsync(int color)
+        private async void SetColorAsync(int color, int seat)
         {
             if (playerUpdateInFlight || lobby == null || shutdown) return;
 
             playerUpdateInFlight = true;
             try
             {
-                var options = new UpdatePlayerOptions
+                var data = new Dictionary<string, PlayerDataObject>
                 {
-                    Data = new Dictionary<string, PlayerDataObject>
-                    {
-                        [ColorKey] = new PlayerDataObject(
-                            PlayerDataObject.VisibilityOptions.Member, color.ToString()),
-                    },
+                    [ColorKey] = new PlayerDataObject(
+                        PlayerDataObject.VisibilityOptions.Member, color.ToString()),
                 };
 
-                await LobbyService.Instance.UpdatePlayerAsync(lobby.Id, SelfPlayerId, options);
+                // 顺带把座位号写进去：名单顺序 ≠ 座位顺序时，别人靠它把你的选择对到正确的座位上。
+                if (seat >= 0)
+                {
+                    data[SeatKey] = new PlayerDataObject(
+                        PlayerDataObject.VisibilityOptions.Member, seat.ToString());
+                }
+
+                var options = new UpdatePlayerOptions { Data = data };
+
+                // 颜色是「开局必备」：这一条写不进去，房主就会永远停在「等待 xxx 挑选」，
+                // 所以被限流 / 超时时自己重试几次，而不是直接放弃。
+                for (int attempt = 1; attempt <= 3; attempt++)
+                {
+                    if (shutdown) return;
+
+                    try
+                    {
+                        await LobbyService.Instance.UpdatePlayerAsync(lobby.Id, SelfPlayerId, options);
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (attempt >= 3)
+                        {
+                            if (!shutdown) Fail($"提交阵营颜色失败：{ex.Message}");
+                            return;
+                        }
+
+                        Debug.LogWarning($"[Lobby] 提交阵营颜色失败（第 {attempt}/3 次）：{ex.Message}");
+                        await Task.Delay(1500);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -662,8 +839,12 @@ namespace NomadCity.Net
 
         private void PollClient(float deltaTime)
         {
+            // 拿到中继码之后仍要继续刷新：企业家挑选阶段要靠名单同步「哪些颜色已被占」，
+            // 停早了会选到重复颜色、或者显示错误。牌局建好后由 <see cref="StopRefreshing"/> 停。
+            if (refreshStopped) return;
+
             refreshTimer += deltaTime;
-            if (refreshTimer < RefreshIntervalSeconds) return;
+            if (refreshTimer < RefreshIntervalSeconds + refreshBackoff) return;
 
             refreshTimer = 0f;
             RefreshClientAsync();
@@ -680,6 +861,7 @@ namespace NomadCity.Net
                 if (shutdown) return;
 
                 failedRefreshes = 0;
+                refreshBackoff = 0f;
                 refreshFailureLogged = false;
                 ApplyLobby(fresh);
 
@@ -732,6 +914,9 @@ namespace NomadCity.Net
                     refreshFailureLogged = true;
                     Debug.LogWarning("[Lobby] 刷新房间信息失败：" + ex.Message);
                 }
+
+                // 被 UGS 限流（request_rate_limited）时拉长间隔；真恢复了一次就清零。
+                refreshBackoff = Mathf.Min(refreshBackoff + 0.5f, 2f);
             }
             finally
             {
@@ -769,12 +954,16 @@ namespace NomadCity.Net
                         ReadPlayerValue(player, NicknameKey),
                         player.Id == lobby.HostId,
                         ReadPlayerValue(player, ReadyKey) == "1",
-                        ParseColor(ReadPlayerValue(player, ColorKey))));
+                        ParseColor(ReadPlayerValue(player, ColorKey)),
+                        ReadPlayerValue(player, IdentityKey),
+                        ParseSeat(ReadPlayerValue(player, SeatKey))));
                 }
             }
 
             members.Clear();
             members.AddRange(list);
+
+            if (isHost) RemoveDuplicateSeats();
 
             string signature = BuildRosterSignature();
             if (signature == lastRosterSignature) return;
@@ -804,6 +993,55 @@ namespace NomadCity.Net
 
             canStart = next;
             StartEligibilityChanged?.Invoke(next);
+        }
+
+        /// <summary>
+        /// 按身份复用 Lobby 席位：同一台机器重启游戏后重新进房，UGS 会给它一个新的 PlayerId，
+        /// 旧席位仍占着名额。房主按身份令牌把多余的旧席位清掉，一个玩家就不会占两份名额。
+        /// </summary>
+        private void RemoveDuplicateSeats()
+        {
+            if (!isHost || duplicateCleanupInFlight || lobby?.Players == null || lobby.Players.Count < 2) return;
+
+            var stale = lobby.Players
+                // 房主自己永远不参与：同一台机器上开两个客户端测试时两端令牌相同，
+                // 若把房主也并进去，房主会把正在测试的客户端误踢掉。
+                .Where(player => player.Id != lobby.HostId)
+                .Where(player => !string.IsNullOrEmpty(ReadPlayerValue(player, IdentityKey)))
+                .GroupBy(player => ReadPlayerValue(player, IdentityKey))
+                .Where(group => group.Count() > 1)
+                // 保留最近加入的那条（玩家当前真正在用的连接），清掉更早的重复席位。
+                .SelectMany(group => group.OrderByDescending(player => player.Joined).Skip(1))
+                .Select(player => player.Id)
+                .ToList();
+
+            if (stale.Count == 0) return;
+
+            duplicateCleanupInFlight = true;
+            RemoveSeatsAsync(lobby.Id, stale);
+        }
+
+        private async void RemoveSeatsAsync(string lobbyId, List<string> playerIds)
+        {
+            try
+            {
+                foreach (string playerId in playerIds)
+                {
+                    try
+                    {
+                        await LobbyService.Instance.RemovePlayerAsync(lobbyId, playerId);
+                        Debug.Log("[Lobby] 已按身份回收重复席位：" + playerId);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning("[Lobby] 回收重复席位失败：" + ex.Message);
+                    }
+                }
+            }
+            finally
+            {
+                duplicateCleanupInFlight = false;
+            }
         }
 
         private string BuildRosterSignature()
@@ -846,6 +1084,10 @@ namespace NomadCity.Net
         /// <summary>颜色值解析失败（没写过 / 空串）一律当作「未选」，即 -1。</summary>
         private static int ParseColor(string value) =>
             int.TryParse(value, out int color) ? color : -1;
+
+        /// <summary>座位号：没写过 / 写坏了都当「未知」（-1）。</summary>
+        private static int ParseSeat(string value) =>
+            int.TryParse(value, out int seat) && seat >= 0 && seat <= 3 ? seat : -1;
 
         /// <summary>随机排出行顺序：0..count-1 的一次洗牌。</summary>
         private static int[] ShuffledSeats(int count)
@@ -902,6 +1144,8 @@ namespace NomadCity.Net
                     PlayerDataObject.VisibilityOptions.Member, ready ? "1" : "0"),
                 [ColorKey] = new PlayerDataObject(
                     PlayerDataObject.VisibilityOptions.Member, color >= 0 ? color.ToString() : string.Empty),
+                [IdentityKey] = new PlayerDataObject(
+                    PlayerDataObject.VisibilityOptions.Member, RelayTransport.LocalIdentity),
             };
 
         private static DataObject MakeData(string value) =>

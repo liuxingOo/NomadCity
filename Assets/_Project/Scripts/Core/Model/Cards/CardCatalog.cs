@@ -513,11 +513,15 @@ namespace NomadCity.Core.Model
 
         // —— 事件牌数据（来源：Doc/EventCards.md；id 按素材拼版图从左到右、从上到下编号）——
 
-        private static readonly RewardOp Orirock1 = RewardOp.Gain(ResourceType.Orirock, 1);
-        private static readonly RewardOp Originium1 = RewardOp.Gain(ResourceType.Originium, 1);
-        private static readonly RewardOp Oriron1 = RewardOp.Gain(ResourceType.Oriron, 1);
-        private static readonly RewardOp OriginitePrime1 = RewardOp.Gain(ResourceType.OriginitePrime, 1);
-        private static readonly RewardOp Score1 = RewardOp.Score(1);
+        // 注意：这几个必须是**属性**而不是 static readonly 字段。
+        // 它们声明在 Events = BuildEvents() 之后，若写成字段，静态初始化按文本顺序执行，
+        // BuildEvents() 读到的会是 default(RewardOp)（= 获得源岩×0），
+        // 于是「获得 1 分 / 1 个资源」被静默吞掉（《大型源岩场》第二个选项就是这样出的问题）。
+        private static RewardOp Orirock1 => RewardOp.Gain(ResourceType.Orirock, 1);
+        private static RewardOp Originium1 => RewardOp.Gain(ResourceType.Originium, 1);
+        private static RewardOp Oriron1 => RewardOp.Gain(ResourceType.Oriron, 1);
+        private static RewardOp OriginitePrime1 => RewardOp.Gain(ResourceType.OriginitePrime, 1);
+        private static RewardOp Score1 => RewardOp.Score(1);
 
         private static EventCardDef[] BuildEvents()
         {

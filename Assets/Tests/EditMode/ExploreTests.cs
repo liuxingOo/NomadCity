@@ -168,7 +168,10 @@ namespace NomadCity.Tests
             Assert.AreEqual(0, state.Map.Node(2).Slots.OwnerOf(0), "目标点第一个空格归探索者。");
             Assert.AreEqual(markers - 1, state.Player(0).MarkersInSupply);
             Assert.IsFalse(state.Map.Node(2).ExplorePending, "三步走完应结清待办标记。");
-            Assert.AreEqual(1, state.ActiveSeat, "走完三步才轮到下一位玩家（§6.1）。");
+
+            // 主要行动做完不再自动推进：要主动结束回合才轮到下一位（§6.1）。
+            Assert.IsTrue(engine.Dispatch(new EndTurnCommand(state.ActiveSeat)).Ok);
+            Assert.AreEqual(1, state.ActiveSeat, "走完三步、结束回合后才轮到下一位玩家（§6.1）。");
         }
 
         [Test]

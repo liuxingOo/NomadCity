@@ -51,6 +51,9 @@ namespace NomadCity.Tests
             Assert.IsTrue(result.Ok, result.Error);
             Assert.AreEqual(0, state.Map.Route(0).Slots.OwnerOf(0));
             Assert.AreEqual(markers - 1, state.Players[0].MarkersInSupply);
+
+            // 主要行动做完不再自动推进：要主动结束回合才轮到下一位（§6.1）。
+            Assert.IsTrue(engine.Dispatch(new EndTurnCommand(state.ActiveSeat)).Ok);
             Assert.AreEqual(1, state.ActiveSeat);
         }
 
@@ -410,6 +413,10 @@ namespace NomadCity.Tests
             {
                 CommandResult result = engine.Dispatch(new PlaceInfluenceCommand(state.ActiveSeat, order[i]));
                 Assert.IsTrue(result.Ok, $"第 {i + 1} 次部署失败：{result.Error}");
+
+                // 主要行动做完由玩家主动结束回合，座位才会推到下一位（§6.1）。
+                CommandResult end = engine.Dispatch(new EndTurnCommand(state.ActiveSeat));
+                Assert.IsTrue(end.Ok, $"第 {i + 1} 次结束回合失败：{end.Error}");
 
                 if (i == 3)
                 {

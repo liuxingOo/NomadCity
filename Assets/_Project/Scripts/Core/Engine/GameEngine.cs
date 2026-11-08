@@ -78,8 +78,9 @@ namespace NomadCity.Core.Engine
 
         /// <summary>
         /// 唯一入口：校验 → 执行 → 广播。UI 与联机都走这里，不直接改 State。
-        /// 若命令是一次「主要行动」（ConsumesAction），执行成功后自动把行动顺序推进到下一位玩家
-        /// （走完两轮则由 <see cref="TurnFlow.CompletePlayerAction"/> 收进采集阶段）。
+        /// 主要行动（ConsumesAction）执行成功后**不再**自动把行动顺序推进到下一位：
+        /// 玩家做完主要行动后还能在回合内任意次执行快速行动，直到主动点「结束回合」（<see cref="EndTurnCommand"/>）。
+        /// 这里只记下「本轮已做过主要行动」，并拦住第二次主要行动（§6.1，额外主要行动余额见 TurnFlow）。
         /// </summary>
         public CommandResult Dispatch(ICommand command)
         {
@@ -91,9 +92,13 @@ namespace NomadCity.Core.Engine
             CommandResult result = Dispatcher.Dispatch(State, command);
             if (!result.Ok) return result;
 
-            if (command.ConsumesAction) TurnFlow.CompletePlayerAction(State);
+            // 主要行动做完只记名额，不推进座位。联机「挂机跳过」这类包装命令会在自己的 Apply 里
+            // 直接推进座位（座位已变），那种情况不能再把名额记到下一位玩家头上。
+            if (command.ConsumesAction && State.Phase == TurnPhase.PlayerActions && State.ActiveSeat == beforeSeat)
+                State.MainActionTakenThisRound = true;
 
-            // 正式对局不靠「结束回合」按钮：盖放完成、采集结算完成这些阶段边界都在这里自动推进。
+            // 阶段边界（盖放完成、采集结算完成）仍然自动推进；但「轮到下一位」不再由主要行动触发，
+            // 而是玩家点「结束回合」时由 EndTurnCommand 显式推进（§6.1）。
             // 联机客户端重放的是同一条命令，会得到同样的推进，各端状态保持一致。
             TurnFlow.TryAutoAdvance(State);
 

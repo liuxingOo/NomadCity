@@ -47,8 +47,29 @@ namespace NomadCity.UI
         [Tooltip("最多保留多少行，超出就丢掉最早的（防止长时间游玩把文本撑爆）")]
         [SerializeField] private int maxLines = 300;
 
-        private readonly List<string> lines = new List<string>();
+        /// <summary>一条记录：是谁的行动（-1 = 与具体玩家无关，如阶段推进、联机提示）。</summary>
+        private struct LogEntry
+        {
+            public int Seat;
+            public string Text;
+        }
+
+        private readonly List<LogEntry> entries = new List<LogEntry>();
         private GameEngine engine;
+
+        /// <summary>当前筛选的座位：-1 = 全部行动记录。</summary>
+        private int filterSeat = -1;
+
+        /// <summary>顶部那排筛选按钮（全部 + 每位玩家），运行时生成。</summary>
+        private RectTransform filterBar;
+        private readonly List<Button> filterButtons = new List<Button>();
+        private readonly List<TMP_Text> filterLabels = new List<TMP_Text>();
+        private readonly List<int> filterSeats = new List<int>();
+
+        // 与其它弹窗同一套配色。
+        private static readonly Color ButtonColor = new Color(0.45f, 0.36f, 0.28f, 1f);
+        private static readonly Color SelectedColor = new Color(0.72f, 0.56f, 0.36f, 1f);
+        private static readonly Color TextColor = new Color(0.95f, 0.92f, 0.86f, 1f);
 
         /// <summary>各座位昵称（联机来自准备房间名单）；为空时回退成「玩家 N」。</summary>
         private string[] playerNames = System.Array.Empty<string>();
@@ -57,7 +78,11 @@ namespace NomadCity.UI
             new System.Text.RegularExpressions.Regex(@"玩家\s*(\d+)");
 
         /// <summary>准备房间同步来的昵称，按座位号排列；在 Bind 之前调用，开局那一行也能用上。</summary>
-        public void SetPlayerNames(string[] names) => playerNames = names ?? System.Array.Empty<string>();
+        public void SetPlayerNames(string[] names)
+        {
+            playerNames = names ?? System.Array.Empty<string>();
+            if (engine != null) BuildFilters();
+        }
 
         /// <summary>记录面板是不是开着。</summary>
         public bool IsVisible => root != null && root.activeSelf;
@@ -70,6 +95,9 @@ namespace NomadCity.UI
             if (closeButton != null) closeButton.onClick.AddListener(Hide);
             if (bodyText == null) bodyText = CreateBodyText();
 
+            StretchBodyText();
+            BuildFilters();
+
             Hide();
         }
 
@@ -79,7 +107,9 @@ namespace NomadCity.UI
             this.engine = engine;
             if (engine != null) engine.Dispatcher.CommandApplied += OnCommandApplied;
 
-            lines.Clear();
+            entries.Clear();
+            filterSeat = -1;
+            BuildFilters();
             Rebuild();
             Append("—— 行动记录 ——");
 
@@ -96,7 +126,11 @@ namespace NomadCity.UI
         }
 
         private void OnCommandApplied(GameState state, ICommand command) =>
-            Append(LocalizePlayerRefs(Describe(state, command)));
+            Append(CommandSeat(command), LocalizePlayerRefs(Describe(state, command)));
+
+        /// <summary>这条命令算谁的：开局 / 推进阶段这类全局记录记成 -1，只在「全部」里出现。</summary>
+        private static int CommandSeat(ICommand command) =>
+            command is StartGameCommand || command is AdvancePhaseCommand ? -1 : command.ActorSeat;
 
         /// <summary>把引擎/界面拼出来的「玩家 N」换成昵称；没有昵称时原样返回。</summary>
         private string LocalizePlayerRefs(string text)
@@ -118,13 +152,16 @@ namespace NomadCity.UI
 
         public void Hide() => SetVisible(false);
 
-        /// <summary>追加一行；超出上限就丢掉最早的行。</summary>
-        public void Append(string line)
+        /// <summary>追加一行系统记录（不属于任何玩家）；超出上限就丢掉最早的行。</summary>
+        public void Append(string line) => Append(-1, line);
+
+        /// <summary>追加一行并记下是谁的行动，顶部筛选要靠它。</summary>
+        public void Append(int seat, string line)
         {
             if (string.IsNullOrEmpty(line)) return;
 
-            lines.Add(line);
-            while (lines.Count > maxLines) lines.RemoveAt(0);
+            entries.Add(new LogEntry { Seat = seat, Text = line });
+            while (entries.Count > maxLines) entries.RemoveAt(0);
 
             Rebuild();
             if (IsVisible) ScrollToBottom();
@@ -151,7 +188,177 @@ namespace NomadCity.UI
         private void Rebuild()
         {
             if (bodyText == null) return;
-            bodyText.text = string.Join("\n", lines);
+
+            var sb = new StringBuilder();
+            for (int i = 0; i < entries.Count; i++)
+            {
+                LogEntry entry = entries[i];
+                if (filterSeat >= 0 && entry.Seat != filterSeat) continue;
+                if (sb.Length > 0) sb.Append('\n');
+                sb.Append(entry.Text);
+            }
+
+            if (sb.Length == 0)
+                sb.Append(filterSeat >= 0 ? "（这位玩家还没有行动记录）" : "（还没有行动记录）");
+
+            bodyText.text = sb.ToString();
+        }
+
+        // —— 顶部筛选：全部 + 每位玩家 ——
+
+        /// <summary>玩家数：联机以引擎状态为准，没接引擎时退回昵称表的长度。</summary>
+        private int PlayerCount() =>
+            engine != null && engine.State != null
+                ? engine.State.Players.Count
+                : playerNames.Length;
+
+        /// <summary>切换到某个筛选：-1 = 全部，其余是座位号。</summary>
+        public void SetFilter(int seat)
+        {
+            filterSeat = seat;
+            RefreshFilterVisuals();
+            Rebuild();
+            if (IsVisible) ScrollToBottom();
+        }
+
+        /// <summary>
+        /// 建一次顶部的筛选条：「全部」+ 每位玩家各一颗，点谁就只看谁的行动记录。
+        /// 玩家数 / 昵称可能在 Bind 之后才确定，所以每次 Build 都把旧按钮拆掉重建。
+        /// </summary>
+        private void BuildFilters()
+        {
+            if (root == null) return;
+
+            EnsureFilterBar();
+
+            for (int i = filterButtons.Count - 1; i >= 0; i--)
+            {
+                if (filterButtons[i] == null) continue;
+                filterButtons[i].gameObject.SetActive(false); // Destroy 要到帧尾才生效，先藏掉免得和新按钮叠一帧
+                Destroy(filterButtons[i].gameObject);
+            }
+
+            filterButtons.Clear();
+            filterLabels.Clear();
+            filterSeats.Clear();
+
+            int players = PlayerCount();
+            if (filterSeat >= players) filterSeat = -1;
+
+            float x = 0f;
+            AddFilterButton("全部", -1, ref x);
+            for (int seat = 0; seat < players; seat++) AddFilterButton(SeatName(seat), seat, ref x);
+
+            RefreshFilterVisuals();
+        }
+
+        /// <summary>筛选条本体（只建一次）：贴面板顶边，右侧留出「关闭」键的位置。</summary>
+        private void EnsureFilterBar()
+        {
+            if (filterBar != null) return;
+
+            // 正文往上收一些，给筛选条腾一行。
+            if (scrollRect != null)
+            {
+                var view = (RectTransform)scrollRect.transform;
+                view.anchorMin = Vector2.zero;
+                view.anchorMax = Vector2.one;
+                view.offsetMin = new Vector2(10f, 10f);
+                view.offsetMax = new Vector2(-10f, -48f);
+            }
+
+            var go = new GameObject("Filters", typeof(RectTransform));
+            filterBar = (RectTransform)go.transform;
+            filterBar.SetParent(root.transform, false);
+            filterBar.anchorMin = new Vector2(0f, 1f);
+            filterBar.anchorMax = new Vector2(1f, 1f);
+            filterBar.pivot = new Vector2(0.5f, 1f);
+            filterBar.offsetMin = new Vector2(10f, -38f);   // 左、下
+            filterBar.offsetMax = new Vector2(-92f, -8f);   // 右、上（避开右上角「关闭」）
+        }
+
+        private void AddFilterButton(string label, int seat, ref float x)
+        {
+            Button button = CreateFilterButton(label, seat, x);
+            filterButtons.Add(button);
+            filterSeats.Add(seat);
+            filterLabels.Add(button.GetComponentInChildren<TMP_Text>(true));
+            x += ((RectTransform)button.transform).sizeDelta.x + 6f;
+        }
+
+        private Button CreateFilterButton(string label, int seat, float x)
+        {
+            var go = new GameObject("Filter_" + seat, typeof(RectTransform));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(filterBar, false);
+            rect.anchorMin = new Vector2(0f, 1f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0f, 0.5f);
+
+            float width = 36f + label.Length * 15f;
+            rect.sizeDelta = new Vector2(width, 26f);
+            rect.anchoredPosition = new Vector2(x, -15f);
+
+            var image = go.AddComponent<Image>();
+            image.color = ButtonColor;
+
+            var button = go.AddComponent<Button>();
+            button.targetGraphic = image;
+            button.onClick.AddListener(() => SetFilter(seat));
+
+            var textGo = new GameObject("Label", typeof(RectTransform));
+            var textRect = (RectTransform)textGo.transform;
+            textRect.SetParent(rect, false);
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = Vector2.zero;
+            textRect.offsetMax = Vector2.zero;
+
+            var text = textGo.AddComponent<TextMeshProUGUI>();
+            text.text = label;
+            text.fontSize = 15f;
+            text.alignment = TextAlignmentOptions.Center;
+            text.raycastTarget = false;
+            text.color = TextColor;
+            if (bodyText != null && bodyText.font != null) text.font = bodyText.font;
+
+            return button;
+        }
+
+        /// <summary>选中的那颗换亮色，其余保持沙褐。</summary>
+        private void RefreshFilterVisuals()
+        {
+            for (int i = 0; i < filterButtons.Count; i++)
+            {
+                bool selected = filterSeats[i] == filterSeat;
+
+                if (filterButtons[i] != null && filterButtons[i].targetGraphic is Image image)
+                    image.color = selected ? SelectedColor : ButtonColor;
+
+                if (filterLabels[i] != null) filterLabels[i].color = TextColor;
+            }
+        }
+
+        /// <summary>
+        /// 正文宽度修正：场景里的 BodyText 只有 183 宽，一段话被折成七八行。
+        /// 这里把它铺满滚动区，并让 Content 的纵向布局组接管宽度（childControlWidth）。
+        /// </summary>
+        private void StretchBodyText()
+        {
+            if (scrollRect != null && scrollRect.content != null
+                && scrollRect.content.TryGetComponent(out VerticalLayoutGroup layout))
+            {
+                layout.childControlWidth = true;
+            }
+
+            if (bodyText == null) return;
+
+            var rect = (RectTransform)bodyText.transform;
+            rect.anchorMin = new Vector2(0f, 1f);
+            rect.anchorMax = new Vector2(1f, 1f);
+            rect.pivot = new Vector2(0.5f, 1f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = Vector2.zero;
         }
 
         /// <summary>

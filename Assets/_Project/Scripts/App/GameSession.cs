@@ -13,6 +13,7 @@ namespace NomadCity.App
     {
         [SerializeField, Range(2, 4)] private int playerCount = 4;
         [SerializeField] private bool enterpriseExpansion;
+        [SerializeField] private bool infectedExpansion;
 
         [Tooltip("联机身份：主菜单写入；None = 单机热座")]
         [SerializeField] private OnlineRole onlineRole = OnlineRole.None;
@@ -36,6 +37,13 @@ namespace NomadCity.App
         {
             get => enterpriseExpansion;
             set => enterpriseExpansion = value;
+        }
+
+        /// <summary>本局是否启用感染者扩展（对应操作区的「决策」按钮）。</summary>
+        public bool InfectedExpansion
+        {
+            get => infectedExpansion;
+            set => infectedExpansion = value;
         }
 
         /// <summary>本局的联机身份。主菜单在加载 Game 场景前写入，GameBootstrap 读取。</summary>
@@ -73,7 +81,9 @@ namespace NomadCity.App
         /// <summary>把当前选择打包成 Core 的模式配置。</summary>
         public GameSetup ToGameSetup()
         {
-            var flags = enterpriseExpansion ? ExpansionFlags.Enterprise : ExpansionFlags.None;
+            ExpansionFlags flags = ExpansionFlags.None;
+            if (enterpriseExpansion) flags |= ExpansionFlags.Enterprise;
+            if (infectedExpansion) flags |= ExpansionFlags.Infected;
             return new GameSetup(playerCount, flags);
         }
     }

@@ -40,6 +40,40 @@ namespace NomadCity.Core.Engine
         }
 
         /// <summary>
+        /// 校验「本轮的主要行动名额还没用掉」（§6.1）：每轮 1 个主要行动，做完之后只能做快速行动，
+        /// 或点「结束回合」把行动权交给下一位。
+        ///
+        /// <paramref name="isContinuation"/> 给多步行动的**收尾步**用（探索 / 城市移动的「放置影响力」）：
+        /// 名额在第一步就已经算在这件事上了，收尾时不再查，否则中间插一次别的行动就会把这一步行封死。
+        ///
+        /// 必须由**主要行动**各自调用 —— 不能塞进 <see cref="ValidateActivePlayer"/>：
+        /// 宣告城市样式这类快速行动也用它，塞进去会把「主要行动后仍可任意次快速行动」一起堵死。
+        /// 「额外主要行动」余额（§6.3f）例外。
+        /// </summary>
+        public static CommandResult ValidateMainActionAvailable(GameState state, int seat, bool isContinuation = false)
+        {
+            if (state == null) return CommandResult.Fail("引擎没有游戏状态。");
+            if (state.DeveloperMode) return CommandResult.Success;
+            if (seat < 0 || seat >= state.Players.Count) return CommandResult.Success; // 座位问题交给 ValidateActiveSeat
+
+            if (isContinuation) return CommandResult.Success;
+
+            // 还有没走完的多步主要行动时不能另开一次，否则它的收尾步会变成这个玩家的第二次主要行动。
+            if (state.CityMoveOriginNodeId >= 0)
+                return CommandResult.Fail("城市移动还没走完（还要在出发点放置 1 个影响力），先完成它（§6.4d）。");
+            foreach (MapNodeState node in state.Map.Nodes)
+            {
+                if (node.ExplorePending)
+                    return CommandResult.Fail($"探索还没走完（还要在资源点 {node.Code} 放置 1 个影响力），先完成它（§6.4c）。");
+            }
+
+            if (!state.MainActionTakenThisRound) return CommandResult.Success;
+            if (state.Player(seat).ExtraMainActionsThisTurn > 0) return CommandResult.Success;
+
+            return CommandResult.Fail("本轮已经执行过主要行动：可以先做任意次快速行动，或点「结束回合」交给下一位（§6.1）。");
+        }
+
+        /// <summary>
         /// 校验「这名玩家在本轮能否使用角色牌」（§6.3f）：
         /// 「源石工业中枢」/「高效移动管理体系」特殊行动的「使用此行动的轮中不能使用角色牌」，
         /// 记为 <see cref="PlayerState.CharacterCardBanRound"/>，仅在该轮（= <see cref="GameState.ActionRound"/>）内生效。

@@ -68,6 +68,11 @@ namespace NomadCity.App
 
             Instance = this;
             DontDestroyOnLoad(gameObject);
+
+            // 联机时窗口失焦不能让游戏循环停掉：
+            // 主机一旦被切到后台（同一台机器双开测试、或玩家 alt-tab），Update 不再跑，
+            // 客户端的命令就要等到主机窗口重新获得焦点才被处理 —— 表现就是「延迟突然几百毫秒甚至几秒」。
+            Application.runInBackground = true;
         }
 
         /// <summary>房主：登记准备房间。此时不申请 Relay。</summary>
@@ -80,6 +85,7 @@ namespace NomadCity.App
 
             Lobby.StartRequested += OnHostStartRequested;
             Lobby.HostStartPublished += OnHostStartPublished;
+            Lobby.StartPublishFailed += OnStartPublishFailed;
             Lobby.HostRoom(playerCount, enterprise, nickname);
 
             Debug.Log($"[联机] 正在登记 {playerCount} 人房间；房间码出来后把它告诉好友。", this);
@@ -111,10 +117,72 @@ namespace NomadCity.App
         public void SetSettings(int playerCount, bool enterprise) => Lobby?.SetSettings(playerCount, enterprise);
 
         /// <summary>开局前选阵营颜色（房主与客户端都调用，写进 Lobby 的玩家数据同步给别人）。</summary>
-        public void SetColor(int color) => Lobby?.SetColor(color);
+        public void SetColor(int color) => Lobby?.SetColor(color, Session?.LocalSeat ?? -1);
 
         /// <summary>名单顺序（= 座位顺序）的已选颜色；未选为 -1。</summary>
         public int[] SeatColors => Lobby != null ? Lobby.SeatColors : System.Array.Empty<int>();
+
+        /// <summary>
+        /// 按**座位**给出各玩家已挑的颜色（未挑 = -1）。
+        /// 名单是「按加入时间排序」的，而 Relay 座位是「按连入顺序」分配的：两个客户端几乎同时
+        /// 收到开局信息时两者可能错位，直接按名单下标取会把颜色发给错的人。
+        /// 这里先用身份令牌把名单项对到座位上，对不上再退回名单顺序（2 人局恒等）。
+        /// </summary>
+        public int[] ColorsBySeat()
+        {
+            int[] byIndex = SeatColors;
+            if (byIndex.Length == 0 || Lobby == null || Session == null) return byIndex;
+
+            var members = Lobby.Members;
+            var bySeat = new int[byIndex.Length];
+
+            for (int seat = 0; seat < bySeat.Length; seat++)
+            {
+                int index = -1;
+                string token = Session.SeatToken(seat);
+
+                // 首选：玩家自己写进 Lobby 的座位号（最精确，客户端和房主都能用）。
+                for (int k = 0; k < members.Count; k++)
+                {
+                    if (members[k].Seat == seat)
+                    {
+                        index = k;
+                        break;
+                    }
+                }
+
+                // 其次：按身份令牌对齐（座位号还没写进 Lobby 时）。
+                if (index < 0 && !string.IsNullOrEmpty(token))
+                {
+                    for (int k = 0; k < members.Count; k++)
+                    {
+                        if (members[k].Identity == token)
+                        {
+                            index = k;
+                            break;
+                        }
+                    }
+                }
+
+                // 房主不参与握手（座位 0 就是自己），按「谁是房主」对齐。
+                if (index < 0 && seat == 0)
+                {
+                    for (int k = 0; k < members.Count; k++)
+                    {
+                        if (members[k].IsHost)
+                        {
+                            index = k;
+                            break;
+                        }
+                    }
+                }
+
+                if (index < 0) index = seat; // 对不上就按名单顺序
+                bySeat[seat] = index < byIndex.Length ? byIndex[index] : -1;
+            }
+
+            return bySeat;
+        }
 
         /// <summary>本局行动顺序（座位号，下标 0 = 起始玩家）；房主开局时随机排出，所有玩家共享。</summary>
         public int[] SeatOrder => Lobby != null ? Lobby.SeatOrder : System.Array.Empty<int>();
@@ -145,6 +213,22 @@ namespace NomadCity.App
             gameReadyRaised = false;
             waitingForRelayCode = false;
             publishRequested = false;
+        }
+
+        /// <summary>
+        /// 玩家手动点「重连」：客户端立刻重新连一次主机（不等自动退避）。
+        /// 主机侧没有可重连的对象，调用会被忽略。
+        /// </summary>
+        public void ReconnectNow()
+        {
+            if (Session == null)
+            {
+                Fail("还没有可重连的对局，请回到大厅重新加入。");
+                return;
+            }
+
+            Session.ReconnectNow();
+            StatusChanged?.Invoke("正在重新连接主机…");
         }
 
         private bool Prepare()
@@ -213,7 +297,21 @@ namespace NomadCity.App
             if (Session == null) return;
 
             waitingForRelayCode = true;
-            Session.Host(session.ToGameSetup(), session.PlayerCount);
+            publishRequested = false;
+
+            // 上一次已经开好中继、只是开局信息没写进 Lobby：直接复用现有中继码，省一次 Relay 分配。
+            if (string.IsNullOrEmpty(Session.JoinCode))
+                Session.Host(session.ToGameSetup(), session.PlayerCount);
+        }
+
+        /// <summary>
+        /// 开局信息发布失败（网络 / UGS 超时，已自动重试过）：把发布闸门放回去，
+        /// 让房主能再点一次「开始游戏」；中继已开好，重试不会再申请一次中继。
+        /// </summary>
+        private void OnStartPublishFailed()
+        {
+            waitingForRelayCode = false;
+            publishRequested = false;
         }
 
         private void OnHostStartPublished()

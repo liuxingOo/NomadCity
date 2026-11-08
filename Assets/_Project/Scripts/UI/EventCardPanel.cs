@@ -303,6 +303,9 @@ namespace NomadCity.UI
             if (statusText != null) statusText.text = text ?? string.Empty;
         }
 
+        /// <summary>按事件牌 id 顺序排列的卡面（图鉴的事件卡页复用）。</summary>
+        public Sprite[] CardFaces => cardFaces;
+
         /// <summary>
         /// 事件牌 id → <see cref="cardFaces"/> 下标。
         /// 基础牌 400–421 → 0–21（按素材拼版图从左到右、从上到下编号）；

@@ -54,6 +54,9 @@ namespace NomadCity.Core.Engine
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
 
+            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat);
+            if (!quota.Ok) return quota;
+
             // 先查「在不在场上」再取定义：目录对越界 id 会抛异常，不能直接拿来判空。
             CityPatternState patternState = state.PatternStateOf(PatternCardId);
             if (patternState == null)

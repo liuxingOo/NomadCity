@@ -6,7 +6,7 @@ using UnityEngine.UI;
 namespace NomadCity.Game
 {
     /// <summary>
-    /// 地图窗口操作：滚轮以光标位置为中心缩放（有放大上限），鼠标右键按住拖动平移。
+    /// 地图窗口操作：滚轮以光标位置为中心缩放（有放大上限，且不能缩得比开局更小），鼠标右键按住拖动平移。
     ///
     /// 核心是一个「窗口」：按**未放大时的尺寸**紧贴地图四周圈出来的矩形（和很多游戏的大地图一样）。
     /// 相机的渲染区域被裁到这个窗口上，所以放大之后地图只会出现在窗口里，不会铺到整屏。
@@ -34,9 +34,6 @@ namespace NomadCity.Game
         [Header("缩放")]
         [Tooltip("放大上限（相对未放大时的倍数）。5 = 最多放大到五倍。")]
         [SerializeField, Min(1f)] private float maxZoomIn = 5f;
-
-        [Tooltip("允许比「未放大」再缩小多少：1 = 不能再缩小；1.25 = 最多还能缩到 80%，方便看清整体。")]
-        [SerializeField, Range(1f, 3f)] private float minZoomOut = 1.25f;
 
         [Tooltip("每一格滚轮的缩放比例：0.8 = 每格放大 25%。数字越小缩放越快。")]
         [SerializeField, Range(0.5f, 0.99f)] private float zoomPerNotch = 0.8f;
@@ -86,6 +83,9 @@ namespace NomadCity.Game
 
         /// <summary>未放大时的正交尺寸：地图正好铺满窗口。</summary>
         private float fitSize = 1f;
+
+        /// <summary>地图窗口高度 ÷ 屏幕高度（首次初始化后有效）。图鉴用它把窗口对齐地图高度。</summary>
+        public float WindowHeightFraction => screenHeight > 0 ? windowPixels.height / screenHeight : 0f;
 
         /// <summary>正交尺寸上限（缩得最小）。</summary>
         private float zoomOutLimit = 1f;
@@ -174,7 +174,7 @@ namespace NomadCity.Game
 
             // ③ 缩放上下限。窗口宽高比 = 地图宽高比，所以「地图正好铺满窗口」的正交尺寸就是两者取大。
             fitSize = Mathf.Max(mapHeight * 0.5f, mapWidth * 0.5f / Mathf.Max(windowAspect, 1e-3f));
-            zoomOutLimit = fitSize * Mathf.Max(minZoomOut, 1f);
+            zoomOutLimit = fitSize; // 开局取景就是最大视野：只能放大，不能再往外缩
             zoomInLimit = fitSize / Mathf.Max(maxZoomIn, 1f);
 
             camera.orthographicSize = fitSize; // 未放大 = 地图正好铺满窗口，和加功能之前一样

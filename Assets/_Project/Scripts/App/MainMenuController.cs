@@ -1,3 +1,4 @@
+using NomadCity.Net;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -38,6 +39,9 @@ namespace NomadCity.App
 
         [Tooltip("开局设置弹窗里的「企业扩展包」勾选框。打开弹窗时按上次记下的选择回填，避免弹窗显示与实际开局不一致")]
         [SerializeField] private Toggle enterpriseToggle;
+
+        [Tooltip("开局设置弹窗里的「感染者扩展」勾选框。同上，打开弹窗时按上次记下的选择回填")]
+        [SerializeField] private Toggle infectedToggle;
 
         [Tooltip("点「进入游戏」后加载的场景名")]
         [SerializeField] private string gameSceneName = "Game";
@@ -100,6 +104,11 @@ namespace NomadCity.App
             else
                 enterpriseToggle.onValueChanged.AddListener(SetEnterprise);
 
+            if (infectedToggle == null)
+                Debug.LogWarning("[主菜单] 未指定感染者扩展勾选框（Infected Toggle），勾选框不会生效。");
+            else
+                infectedToggle.onValueChanged.AddListener(SetInfected);
+
             if (menuButtons == null || menuButtons.Length == 0)
                 Debug.LogWarning("[主菜单] 未指定主页按钮（Menu Buttons），打开弹窗时按钮不会隐藏。");
         }
@@ -128,6 +137,7 @@ namespace NomadCity.App
             // 两个控件都回填成上次记下的选择，免得弹窗显示跟实际开局对不上。
             SyncPlayerCountSlider();
             SyncEnterpriseToggle();
+            SyncInfectedToggle();
             RefreshConfirmButtons(hostMode);
             SetMenuButtonsActive(false); // 弹窗盖住了主菜单，先把主页按钮收起来
             startPanel.SetActive(true);
@@ -160,6 +170,13 @@ namespace NomadCity.App
             {
                 Debug.LogError("[主菜单] 未指定加入游戏弹窗（Join Panel），请在 Inspector 里拖入。");
                 return;
+            }
+
+            // 上次进过的房间码存在本地（关掉游戏重开也还在）：直接填好，重连回原座位不用再手输。
+            string lastCode = LobbyClient.LastRoomCode;
+            if (joinCodeInput != null && !string.IsNullOrEmpty(lastCode) && string.IsNullOrWhiteSpace(joinCodeInput.text))
+            {
+                joinCodeInput.text = lastCode;
             }
 
             SetMenuButtonsActive(false);
@@ -204,6 +221,18 @@ namespace NomadCity.App
             session.EnterpriseExpansion = enabled;
         }
 
+        /// <summary>绑到感染者扩展勾选框的 OnValueChanged。</summary>
+        public void SetInfected(bool enabled)
+        {
+            if (session == null)
+            {
+                Debug.LogError("[主菜单] 未指定 GameSession 资产。");
+                return;
+            }
+
+            session.InfectedExpansion = enabled;
+        }
+
         private void SetPlayerCount(int count)
         {
             if (session == null)
@@ -229,6 +258,13 @@ namespace NomadCity.App
         {
             if (enterpriseToggle == null || session == null) return;
             enterpriseToggle.SetIsOnWithoutNotify(session.EnterpriseExpansion);
+        }
+
+        /// <summary>把感染者扩展勾选框回填成上次记下的选择（不触发 OnValueChanged）。</summary>
+        private void SyncInfectedToggle()
+        {
+            if (infectedToggle == null || session == null) return;
+            infectedToggle.SetIsOnWithoutNotify(session.InfectedExpansion);
         }
 
         private void RefreshPlayerCountLabel()

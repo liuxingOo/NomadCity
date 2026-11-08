@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Text;
 using NomadCity.Core.Engine;
 using NomadCity.Core.Model;
 using TMPro;
@@ -12,6 +14,7 @@ namespace NomadCity.UI
     /// 右侧每名玩家一块状态栏：企业家圆形头像、压在头像底边的昵称，以及两排「图标 + 数字」：
     /// 第一排 3 组（得分 / 金券 / 标记），第二排 4 组（源岩 / 源石 / 异铁 / 至纯源石）；
     /// 图标是场景里的静态图片，这里只往数字文本框里写值。
+    /// 另外在左上角维护一块「我的资源」小面板，只显示本机玩家的六项资源（不是得分）。
     /// 手牌与盖放的角色牌属于私有信息，不在这里显示。
     /// </summary>
     public sealed class GameHud : MonoBehaviour
@@ -30,6 +33,32 @@ namespace NomadCity.UI
 
         [Tooltip("玩家标记图标：按 PlayerColor 顺序（绿 / 黄 / 红 / 蓝），画在「玩家标记」那格图标上")]
         [SerializeField] private Sprite[] playerMarkerSprites = new Sprite[4];
+
+        [Tooltip("左上角「我的资源」栏：金券图标")]
+        [SerializeField] private Sprite voucherIcon;
+
+        [Tooltip("左上角「我的资源」栏：源岩 / 源石 / 异铁 / 至纯源石（顺序同 ResourceType）")]
+        [SerializeField] private Sprite[] resourceIcons = new Sprite[4];
+
+        // 左上角「我的资源」栏：运行时搭在 Canvas 上，只改数字（六个资源，不含得分）。
+        private static readonly Color LocalPanelColor = new Color(0.247f, 0.208f, 0.153f, 0.78f);
+        private static readonly Color LocalTextColor = new Color(0.95f, 0.92f, 0.86f, 1f);
+
+        private GameObject localResourcePanel;
+        private Image localMarkerIcon;
+        private readonly TMP_Text[] localResourceValues = new TMP_Text[6];
+
+        // —— 挂机跳过投票 ——
+        // 联机时由 GameBootstrap 打开；过一段时间没人操作，就给「不轮自己」的每个待办座位出一个投票按钮。
+        private bool skipVoteEnabled;
+        private Func<int, bool> seatConnected;
+        private float lastProgressTime;
+        private float nextVoteCheck;
+        private GameObject skipVoteBar;
+        private string skipVoteSignature;
+        private readonly Dictionary<int, int> skipVoteMasks = new Dictionary<int, int>();
+        private readonly Dictionary<int, int> skipVoteRequired = new Dictionary<int, int>();
+        private readonly HashSet<int> skipVotedTargets = new HashSet<int>();
 
         /// <summary>
         /// 点了某一行左侧的「查看」小按钮：参数是这一行对应的座位号（不是行号）。
@@ -56,6 +85,8 @@ namespace NomadCity.UI
                 int index = i;   // 闭包捕获：一个按钮绑一行
                 row.Inspect.onClick.AddListener(() => OnInspectClicked(index));
             }
+
+            BuildLocalResourceBar();
         }
 
         private void OnInspectClicked(int index)
@@ -104,14 +135,128 @@ namespace NomadCity.UI
             operatorSeat = seat;
         }
 
+        /// <summary>联机才打开挂机投票；<paramref name="isSeatConnected"/> 用来给掉线玩家更短的等待门槛。</summary>
+        public void EnableSkipVote(bool enabled, Func<int, bool> isSeatConnected)
+        {
+            skipVoteEnabled = enabled;
+            seatConnected = isSeatConnected;
+
+            if (!enabled) HideSkipVoteBar();
+        }
+
+        /// <summary>主机广播来的投票进度（目标 -1 = 清空）。</summary>
+        public void ShowSkipVote(int targetSeat, int voterMask, int required)
+        {
+            if (targetSeat < 0)
+            {
+                skipVoteMasks.Clear();
+                skipVoteRequired.Clear();
+            }
+            else
+            {
+                skipVoteMasks[targetSeat] = voterMask;
+                skipVoteRequired[targetSeat] = required;
+            }
+
+            skipVoteSignature = null; // 下一帧重画
+        }
+
+        /// <summary>点了「投票跳过」：参数是被跳过的座位，由 GameBootstrap 转给联机会话。</summary>
+        public event Action<int> SkipVoteRequested;
+
+        private void VoteSkip(int targetSeat)
+        {
+            if (skipVotedTargets.Add(targetSeat)) skipVoteSignature = null;
+
+            SkipVoteRequested?.Invoke(targetSeat);
+        }
+
         /// <summary>写状态行。命令失败时把引擎给的原因原样透出。</summary>
         public void SetStatus(string text)
         {
             if (statusText != null) statusText.text = text ?? string.Empty;
         }
 
+        // —— 联机自救按钮 ——
+
+        /// <summary>联机按钮条的容器；单机局永远是 null。</summary>
+        private GameObject onlineControls;
+
+        private const float OnlineButtonWidth = 96f;
+        private const float OnlineButtonHeight = 34f;
+        private const float OnlineButtonGap = 8f;
+
+        /// <summary>
+        /// 联机局左下角的「重连 / 退出对局」自救按钮：卡在等开局数据、掉线或界面不响应时，
+        /// 玩家至少有一条出路。<paramref name="reconnect"/> 为 null（主机）时只显示「退出对局」。
+        /// 重复调用不会叠加按钮。
+        /// </summary>
+        public void ShowOnlineControls(Action reconnect, Action exit)
+        {
+            if (onlineControls != null) return;
+
+            Canvas canvas = GetComponentInParent<Canvas>();
+            if (canvas == null) return;
+
+            var barGo = new GameObject("OnlineControls", typeof(RectTransform));
+            var barRect = (RectTransform)barGo.transform;
+            barRect.SetParent(canvas.transform, false);
+
+            // 放在左下角空地：不挡地图、不压右侧玩家状态栏与行动键，也避开底部的挂机投票条。
+            barRect.anchorMin = new Vector2(0f, 0f);
+            barRect.anchorMax = new Vector2(0f, 0f);
+            barRect.pivot = new Vector2(0f, 0f);
+            barRect.anchoredPosition = new Vector2(16f, 16f);
+            barRect.sizeDelta = new Vector2(400f, OnlineButtonHeight);
+
+            onlineControls = barGo;
+
+            // 从左往右摆：重连在左，退出对局在右，两个都留足点击面积。
+            float x = 0f;
+            if (reconnect != null)
+            {
+                AddOnlineButton(barRect, "重连", x, reconnect);
+                x += OnlineButtonWidth + OnlineButtonGap;
+            }
+
+            AddOnlineButton(barRect, "退出对局", x, exit);
+        }
+
+        private void AddOnlineButton(RectTransform parent, string text, float x, Action onClick)
+        {
+            var go = new GameObject("Online" + text, typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(Image), typeof(Button));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+            rect.anchorMin = new Vector2(0f, 0.5f);
+            rect.anchorMax = new Vector2(0f, 0.5f);
+            rect.pivot = new Vector2(0f, 0.5f);
+            rect.anchoredPosition = new Vector2(x, 0f);
+            rect.sizeDelta = new Vector2(OnlineButtonWidth, OnlineButtonHeight);
+
+            var image = go.GetComponent<Image>();
+            image.color = new Color(0.45f, 0.36f, 0.28f, 1f);
+
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = image;
+            UiButtonTint.Ensure(button);
+            if (onClick != null) button.onClick.AddListener(() => onClick());
+
+            TMP_FontAsset font = turnText != null ? turnText.font : null;
+            TMP_Text label = CreateLabel(rect, "Label", text, font, 15f);
+            label.alignment = TextAlignmentOptions.Center;
+            label.rectTransform.anchorMin = Vector2.zero;
+            label.rectTransform.anchorMax = Vector2.one;
+            label.rectTransform.offsetMin = new Vector2(4f, 0f);
+            label.rectTransform.offsetMax = new Vector2(-4f, 0f);
+        }
+
         public void Refresh()
         {
+            // 每次状态变化都算「牌桌有进展」，挂机投票的等待时间从这里重新计时。
+            lastProgressTime = Time.unscaledTime;
+            skipVotedTargets.Clear();
+
             if (engine == null) return;
             GameState state = engine.State;
 
@@ -159,6 +304,305 @@ namespace NomadCity.UI
 
                 ApplyStats(state, row, player);
             }
+
+            RefreshLocalResources(state);
+        }
+
+        /// <summary>
+        /// 在左上角搭一块「我的资源」面板：标题 + 2 列 × 3 行的「图标 + 数字」。
+        /// 六项资源：金券 / 玩家标记 / 源岩 / 源石 / 异铁 / 至纯源石（得分不在这里显示）。
+        /// </summary>
+        private void BuildLocalResourceBar()
+        {
+            Canvas canvas = GetComponentInParent<Canvas>();
+            if (canvas == null) return;
+
+            var panelGo = new GameObject("LocalResources", typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(Image));
+            var panelRect = (RectTransform)panelGo.transform;
+            panelRect.SetParent(canvas.transform, false);
+            panelRect.anchorMin = new Vector2(0f, 1f);
+            panelRect.anchorMax = new Vector2(0f, 1f);
+            panelRect.pivot = new Vector2(0f, 1f);
+            panelRect.anchoredPosition = new Vector2(24f, -24f);
+            panelRect.sizeDelta = new Vector2(254f, 214f);
+
+            var background = panelGo.GetComponent<Image>();
+            background.color = LocalPanelColor;
+            background.raycastTarget = false; // 只是信息展示，别挡住地图的点击
+
+            TMP_FontAsset font = turnText != null ? turnText.font : null;
+            if (font == null && statusText != null) font = statusText.font;
+
+            TMP_Text title = CreateLabel(panelRect, "Title", "我的资源", font, 16f);
+            SetRect(title.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(12f, -12f), new Vector2(230f, 22f));
+
+            for (int i = 0; i < localResourceValues.Length; i++)
+            {
+                int col = i % 2;
+                int row = i / 2;
+
+                var cellGo = new GameObject("Res" + i, typeof(RectTransform));
+                var cellRect = (RectTransform)cellGo.transform;
+                cellRect.SetParent(panelRect, false);
+                SetRect(cellRect, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(12f + col * 120f, -(42f + row * 56f)), new Vector2(110f, 48f));
+
+                var iconGo = new GameObject("Icon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                var iconRect = (RectTransform)iconGo.transform;
+                iconRect.SetParent(cellRect, false);
+                SetRect(iconRect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                    new Vector2(0f, 0f), new Vector2(30f, 30f));
+
+                var icon = iconGo.GetComponent<Image>();
+                icon.preserveAspect = true;
+                icon.raycastTarget = false;
+                icon.sprite = IconFor(i);
+                if (i == 1) localMarkerIcon = icon; // 玩家标记的图标跟着本机玩家颜色换
+
+                TMP_Text value = CreateLabel(cellRect, "Value", "0", font, 22f);
+                value.rectTransform.anchorMin = Vector2.zero;
+                value.rectTransform.anchorMax = Vector2.one;
+                value.rectTransform.offsetMin = new Vector2(38f, 0f);
+                value.rectTransform.offsetMax = Vector2.zero;
+
+                localResourceValues[i] = value;
+            }
+
+            localResourcePanel = panelGo;
+            localResourcePanel.SetActive(false);
+        }
+
+        private Sprite IconFor(int index) => index switch
+        {
+            0 => voucherIcon,
+            1 => null, // 玩家标记：Refresh 时按玩家颜色选 token 素材
+            _ => resourceIcons != null && index - 2 < resourceIcons.Length ? resourceIcons[index - 2] : null,
+        };
+
+        /// <summary>本机玩家的六项资源。联机看本机座位；单机热座看当前实际操作者，都没有就跟随引擎的行动座位。</summary>
+        private void RefreshLocalResources(GameState state)
+        {
+            if (localResourcePanel == null) return;
+
+            int seat = localSeat;
+            if (seat < 0 && operatorSeat >= 0 && operatorSeat < state.Players.Count) seat = operatorSeat;
+            if (seat < 0) seat = state.ActiveSeat;
+
+            if (seat < 0 || seat >= state.Players.Count)
+            {
+                localResourcePanel.SetActive(false);
+                return;
+            }
+
+            PlayerState player = state.Players[seat];
+            localResourcePanel.SetActive(true);
+
+            if (localMarkerIcon != null)
+            {
+                Sprite marker = ColorSprite(playerMarkerSprites, player.Color);
+                if (marker != null) localMarkerIcon.sprite = marker;
+            }
+
+            ResourcePool r = player.Resources;
+            WriteLocal(0, player.Vouchers);
+            WriteLocal(1, player.MarkersInSupply);
+            WriteLocal(2, r.Orirock);
+            WriteLocal(3, r.Originium);
+            WriteLocal(4, r.Oriron);
+            WriteLocal(5, r.OriginitePrime);
+        }
+
+        private void WriteLocal(int index, int value)
+        {
+            TMP_Text text = localResourceValues[index];
+            if (text != null) text.text = value.ToString();
+        }
+
+        private static TMP_Text CreateLabel(RectTransform parent, string name, string text,
+            TMP_FontAsset font, float fontSize)
+        {
+            var go = new GameObject(name, typeof(RectTransform));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+
+            var label = go.AddComponent<TextMeshProUGUI>();
+            label.text = text;
+            label.fontSize = fontSize;
+            label.alignment = TextAlignmentOptions.Left;
+            label.color = LocalTextColor;
+            label.raycastTarget = false;
+            if (font != null) label.font = font;
+
+            return label;
+        }
+
+        private static void SetRect(RectTransform rect, Vector2 anchor, Vector2 pivot, Vector2 position,
+            Vector2 size)
+        {
+            rect.anchorMin = anchor;
+            rect.anchorMax = anchor;
+            rect.pivot = pivot;
+            rect.anchoredPosition = position;
+            rect.sizeDelta = size;
+        }
+
+        // —— 挂机跳过投票条 ——
+
+        private void Update()
+        {
+            if (!skipVoteEnabled || engine == null) return;
+            if (Time.unscaledTime < nextVoteCheck) return;
+
+            nextVoteCheck = Time.unscaledTime + 0.25f;
+            RebuildSkipVoteBar();
+        }
+
+        private void RebuildSkipVoteBar()
+        {
+            GameState state = engine != null ? engine.State : null;
+            if (state == null || state.IsGameOver)
+            {
+                HideSkipVoteBar();
+                return;
+            }
+
+            float idle = Time.unscaledTime - lastProgressTime;
+            var eligible = new List<int>();
+            foreach (int seat in SkipPendingActionCommand.PendingSeats(state))
+            {
+                // 自己那一格：轮到自己时不该出现「把自己跳过」的按钮。
+                if (seat == localSeat && localSeat >= 0) continue;
+
+                float delay = seatConnected != null && !seatConnected(seat)
+                    ? SkipPendingActionCommand.VoteDelayDisconnectedSeconds
+                    : SkipPendingActionCommand.VoteDelaySeconds;
+
+                // 主机已经为这个座位开票时，本机不必再等满自己的门槛：
+                // 否则掉线玩家只有主机能立刻看到，客户端要干等到 180 秒才能投上这一票。
+                if (skipVoteMasks.ContainsKey(seat) || idle >= delay) eligible.Add(seat);
+            }
+
+            if (eligible.Count == 0)
+            {
+                HideSkipVoteBar();
+                return;
+            }
+
+            var signature = new StringBuilder();
+            foreach (int seat in eligible)
+            {
+                skipVoteMasks.TryGetValue(seat, out int mask);
+                skipVoteRequired.TryGetValue(seat, out int required);
+                signature.Append(seat).Append(':').Append(mask).Append('/').Append(required)
+                    .Append(skipVotedTargets.Contains(seat) ? '*' : '-');
+            }
+
+            string wanted = signature.ToString();
+            if (skipVoteBar != null && skipVoteSignature == wanted) return;
+
+            skipVoteSignature = wanted;
+            BuildSkipVoteBar(eligible);
+        }
+
+        private void BuildSkipVoteBar(List<int> targets)
+        {
+            Canvas canvas = GetComponentInParent<Canvas>();
+            if (canvas == null) return;
+
+            if (skipVoteBar == null)
+            {
+                skipVoteBar = new GameObject("SkipVoteBar", typeof(RectTransform));
+                var barRect = (RectTransform)skipVoteBar.transform;
+                barRect.SetParent(canvas.transform, false);
+                barRect.anchorMin = new Vector2(0.5f, 0f);
+                barRect.anchorMax = new Vector2(0.5f, 0f);
+                barRect.pivot = new Vector2(0.5f, 0f);
+                barRect.anchoredPosition = new Vector2(0f, 96f);
+            }
+
+            skipVoteBar.SetActive(true);
+
+            // 先藏旧按钮再销毁：Destroy 是延迟到帧末的，不藏会在这一帧叠出两份。
+            foreach (Transform child in skipVoteBar.transform)
+            {
+                child.gameObject.SetActive(false);
+                Destroy(child.gameObject);
+            }
+
+            const float width = 210f;
+            const float gap = 8f;
+            const float height = 40f;
+
+            var bar = (RectTransform)skipVoteBar.transform;
+            bar.sizeDelta = new Vector2(targets.Count * width + (targets.Count - 1) * gap, height);
+
+            TMP_FontAsset font = turnText != null ? turnText.font : null;
+
+            for (int i = 0; i < targets.Count; i++)
+            {
+                int seat = targets[i];
+                skipVoteMasks.TryGetValue(seat, out int mask);
+                skipVoteRequired.TryGetValue(seat, out int required);
+                bool voted = skipVotedTargets.Contains(seat);
+
+                var go = new GameObject("SkipVote" + seat, typeof(RectTransform), typeof(CanvasRenderer),
+                    typeof(Image), typeof(Button));
+                var rect = (RectTransform)go.transform;
+                rect.SetParent(bar, false);
+                rect.anchorMin = new Vector2(0f, 0.5f);
+                rect.anchorMax = new Vector2(0f, 0.5f);
+                rect.pivot = new Vector2(0f, 0.5f);
+                rect.anchoredPosition = new Vector2(i * (width + gap), 0f);
+                rect.sizeDelta = new Vector2(width, height);
+
+                var image = go.GetComponent<Image>();
+                image.color = voted ? new Color(0.30f, 0.25f, 0.20f, 1f) : new Color(0.45f, 0.36f, 0.28f, 1f);
+
+                var button = go.GetComponent<Button>();
+                button.targetGraphic = image;
+                button.interactable = !voted;
+                UiButtonTint.Ensure(button);
+                button.onClick.AddListener(() => VoteSkip(seat));
+
+                string text = required > 0
+                    ? $"投票跳过 {SkipVoteName(seat)}（{CountVotes(mask)}/{required}）"
+                    : $"投票跳过 {SkipVoteName(seat)}";
+
+                TMP_Text label = CreateLabel(rect, "Label", text, font, 16f);
+                label.alignment = TextAlignmentOptions.Center;
+                label.rectTransform.anchorMin = Vector2.zero;
+                label.rectTransform.anchorMax = Vector2.one;
+                label.rectTransform.offsetMin = new Vector2(6f, 0f);
+                label.rectTransform.offsetMax = new Vector2(-6f, 0f);
+            }
+        }
+
+        private void HideSkipVoteBar()
+        {
+            skipVoteSignature = null;
+            if (skipVoteBar != null && skipVoteBar.activeSelf) skipVoteBar.SetActive(false);
+        }
+
+        /// <summary>投票按钮上的名字：有昵称用昵称，没有回退成「玩家 N」。</summary>
+        private string SkipVoteName(int seat)
+        {
+            return seat >= 0 && seat < playerNames.Length && !string.IsNullOrWhiteSpace(playerNames[seat])
+                ? playerNames[seat]
+                : $"玩家 {seat + 1}";
+        }
+
+        private static int CountVotes(int mask)
+        {
+            int count = 0;
+            while (mask != 0)
+            {
+                count += mask & 1;
+                mask >>= 1;
+            }
+
+            return count;
         }
 
         /// <summary>没接整行根对象时的兜底：把代码认识的部件逐个开关（图标管不到）。</summary>

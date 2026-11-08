@@ -247,7 +247,9 @@ namespace NomadCity.Tests
 
             engine.Dispatch(new UsePatternSpecialActionCommand(0, SupplyRelay));
 
-            Assert.AreEqual(1, state.ActiveSeat, "主要行动完成后轮到下一位（§6.1）。");
+            // 主要行动做完不再自动推进：要主动结束回合才轮到下一位（§6.1）。
+            Assert.IsTrue(engine.Dispatch(new EndTurnCommand(state.ActiveSeat)).Ok);
+            Assert.AreEqual(1, state.ActiveSeat, "主要行动完成后结束回合，轮到下一位（§6.1）。");
             Assert.AreEqual(0, player.ExtraMainActionsThisTurn);
         }
 

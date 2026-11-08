@@ -85,12 +85,16 @@ namespace NomadCity.Core.Engine
         {
             state.ActionRound = 1;
             state.ActiveSeat = state.FirstPlayerSeat;
+            state.MainActionTakenThisRound = false;
             state.Phase = TurnPhase.PlayerActions;
         }
 
         /// <summary>
-        /// 一名玩家完成一个「主要行动」后调用：轮到顺时针下一位；
+        /// 一名玩家结束本回合后调用（<see cref="EndTurnCommand"/>，以及联机「挂机跳过」）：轮到顺时针下一位；
         /// 一轮走完则轮次 +1；第 2 轮也走完就自动进入采集阶段（规则规格 6.1）。
+        ///
+        /// 注意：主要行动本身**不再**调用它 —— 做完主要行动后玩家还能在回合内任意次执行快速行动，
+        /// 只有主动点「结束回合」才会走到这里。
         ///
         /// 「源石工业中枢」特殊行动给当前玩家追加的「额外主要行动」先在这里消费：
         /// 还有余额就递减并**保持当前座位**，让该玩家在本轮内紧接着继续行动（§6.3f）。
@@ -103,10 +107,12 @@ namespace NomadCity.Core.Engine
             if (actor.ExtraMainActionsThisTurn > 0)
             {
                 actor.ExtraMainActionsThisTurn--;
+                state.MainActionTakenThisRound = false; // 同一玩家继续做那一次额外主要行动
                 return; // 该玩家本轮还能继续行动，不推进座位
             }
 
             state.ActiveSeat = state.NextSeat(state.ActiveSeat);
+            state.MainActionTakenThisRound = false; // 换人 → 下一家的主要行动名额复位
             if (state.ActiveSeat != state.FirstPlayerSeat) return; // 这一轮还没走完
 
             state.ActionRound++;

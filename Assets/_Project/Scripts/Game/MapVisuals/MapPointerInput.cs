@@ -24,6 +24,12 @@ namespace NomadCity.Game
         /// <summary>一次有效的地图点击（已经过滤掉点在 UI 上的情况）。</summary>
         public event Action<MapHit> Clicked;
 
+        /// <summary>
+        /// 点在地图上、但没命中任何可点元素（点在资源点左上角的指示物框、空白海面等）。
+        /// 交给上层决定要不要提示 —— 沉默的点击最容易被误判成「界面卡住了」。
+        /// </summary>
+        public event Action<Vector2> Missed;
+
         private void Reset()
         {
             worldCamera = Camera.main;
@@ -53,6 +59,7 @@ namespace NomadCity.Game
             Vector3 world = MapCameraController.ScreenToWorldPoint(camera, screen);
 
             if (stateRenderer.TryPick(world, out MapHit hit)) Clicked?.Invoke(hit);
+            else Missed?.Invoke(world);
         }
     }
 }

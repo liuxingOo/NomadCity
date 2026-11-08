@@ -219,6 +219,18 @@ namespace NomadCity.Core.Net
                     return dto;
                 }
 
+                // 挂机跳过：Seat = 被跳过的座位。
+                case SkipPendingActionCommand c:
+                    return new CommandDto { Kind = CommandKind.SkipPendingAction, Seat = c.ActorSeat };
+
+                // 放弃主要行动：Seat = 行动者座位。
+                case PassActionCommand c:
+                    return new CommandDto { Kind = CommandKind.PassAction, Seat = c.ActorSeat };
+
+                // 结束回合：Seat = 行动者座位。
+                case EndTurnCommand c:
+                    return new CommandDto { Kind = CommandKind.EndTurn, Seat = c.ActorSeat };
+
                 // P0 = 座位号；P1 = 选点数；Items = 本座位的选点 id（只传自己的）。
                 case SubmitHarvestChoiceCommand c:
                 {
@@ -321,6 +333,15 @@ namespace NomadCity.Core.Net
                     if (count > 0) Array.Copy(dto.Items, 0, nodes, 0, count);
                     return new SubmitHarvestChoiceCommand(dto.Seat >= 0 ? dto.Seat : dto.P0, nodes);
                 }
+
+                case CommandKind.SkipPendingAction:
+                    return new SkipPendingActionCommand(dto.Seat >= 0 ? dto.Seat : dto.P0);
+
+                case CommandKind.PassAction:
+                    return new PassActionCommand(dto.Seat >= 0 ? dto.Seat : dto.P0);
+
+                case CommandKind.EndTurn:
+                    return new EndTurnCommand(dto.Seat >= 0 ? dto.Seat : dto.P0);
 
                 default:
                     throw new ArgumentException($"无法解码未知的命令 Kind：{dto.Kind}。", nameof(dto));

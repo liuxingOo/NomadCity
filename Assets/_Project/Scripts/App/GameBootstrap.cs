@@ -61,6 +61,9 @@ namespace NomadCity.App
         [Tooltip("行动记录：右上角按钮 + 聊天框式面板")]
         [SerializeField] private ActionLogPanel actionLogPanel;
 
+        [Tooltip("操作区「聊天」按钮的弹窗：和房间里的人打字聊天")]
+        [SerializeField] private ChatPanel chatPanel;
+
         [Tooltip("把点击/按钮与引擎连起来的状态机")]
         [SerializeField] private GameScreenController screenController;
 
@@ -75,6 +78,10 @@ namespace NomadCity.App
 
         /// <summary>界面还没接好时收到的联机错误：先存一句，等 InitializePresentation 之后补到状态行上。</summary>
         private string pendingOnlineError;
+
+        /// <summary>聊天窗显示昵称用的名单与本机座位（单机为 null / 热座座位）。</summary>
+        private string[] chatNames;
+        private int chatLocalSeat;
 
         [Tooltip("开局前的企业家挑选弹窗（单机与联机共用）；漏接时按座位自然顺序与默认颜色直接开局")]
         [SerializeField] private EntrepreneurChoicePanel entrepreneurPanel;
@@ -99,6 +106,10 @@ namespace NomadCity.App
 
         private void Awake()
         {
+            // 所有按钮先去掉「被选中就一直发亮」的默认行为：亮 / 暗只由游戏状态决定
+            // （弹窗入口、行动模式键由各自面板显式点亮），点过之后不会留下假的高亮。
+            UiButtonTint.EnsureAll();
+
             if (session == null || mapView == null)
             {
                 Debug.LogError("[开局] GameBootstrap 的 session / mapView 未指定。", this);
@@ -140,8 +151,15 @@ namespace NomadCity.App
 
                 onlineSession = host.Session;
                 onlineSession.ErrorArrived += OnOnlineError;
+                onlineSession.CommandRejected += OnOnlineCommandRejected;
+                onlineSession.PeerLeft += OnPeerLeft;
+                onlineSession.PeerReturned += OnPeerReturned;
+                onlineSession.Reconnecting += OnReconnecting;
+                onlineSession.Reconnected += OnReconnected;
+                onlineSession.SkipVoteChanged += OnSkipVoteChanged;
                 localSeat = 0;
                 host.RosterChanged += OnHostRosterChanged;
+                SetupOnlineControls();
             }
 
             // 开发者模式：跳过企业家挑选直接按座位默认颜色开局，免得每次调试都要先挑企业家。
@@ -332,14 +350,22 @@ namespace NomadCity.App
             if (host == null || host.Lobby == null || draftDone) return;
 
             int playerCount = session.PlayerCount;
-            int[] colors = host.SeatColors;
+            int[] colors = host.ColorsBySeat();
             if (colors.Length != playerCount) return;
 
+            int mySeat = LocalSeat();
             var seatColors = new PlayerColor[playerCount];
             for (int i = 0; i < playerCount; i++)
             {
-                if (colors[i] < 0 || colors[i] >= 4) return; // 还有人没挑
-                seatColors[i] = (PlayerColor)colors[i];
+                int color = colors[i];
+
+                // 房主自己的颜色可能还没写回 Lobby（异步 / 被限流，最多重试 3 次）。
+                // 这里必须和 SyncPickedFromLobby 一样保留本机已选，否则所有人其实都挑完了，
+                // 界面却永远停在「所有人已挑选，等待开局…」。
+                if (color < 0 && i == mySeat && localColor >= 0) color = localColor;
+
+                if (color < 0 || color >= 4) return; // 还有人没挑
+                seatColors[i] = (PlayerColor)color;
 
                 for (int j = 0; j < i; j++)
                     if (seatColors[j] == seatColors[i]) return; // 撞色（正常流程不会发生）
@@ -355,7 +381,7 @@ namespace NomadCity.App
         private void SyncPickedFromLobby()
         {
             var host = OnlineSessionHost.Instance;
-            int[] colors = host != null ? host.SeatColors : System.Array.Empty<int>();
+            int[] colors = host != null ? host.ColorsBySeat() : System.Array.Empty<int>();
 
             for (int i = 0; i < pickedColors.Length; i++)
                 pickedColors[i] = i < colors.Length ? colors[i] : -1;
@@ -435,6 +461,10 @@ namespace NomadCity.App
             Engine.State.DeveloperMode = role == OnlineRole.None && developerMode;
             ApplyDistrictScores(Engine.State, mapData);
 
+            // 企业家已经全部挑定、牌局正式建好：房主的名单刷新降频到 5 秒一次
+            //（还要靠它清理掉线玩家的重复席位），而不是彻底停掉。
+            OnlineSessionHost.Instance?.Lobby?.SlowDownRefreshing();
+
             if (role == OnlineRole.Host && onlineSession != null) onlineSession.BindEngine(Engine);
 
             InitializePresentation(localSeat);
@@ -467,9 +497,34 @@ namespace NomadCity.App
         {
             if (entrepreneurPanel != null) entrepreneurPanel.Chosen -= OnEntrepreneurChosen;
 
+            if (onlineSession != null)
+            {
+                onlineSession.ErrorArrived -= OnOnlineError;
+                onlineSession.CommandRejected -= OnOnlineCommandRejected;
+                onlineSession.PeerLeft -= OnPeerLeft;
+                onlineSession.PeerReturned -= OnPeerReturned;
+                onlineSession.Reconnecting -= OnReconnecting;
+                onlineSession.Reconnected -= OnReconnected;
+                onlineSession.SkipVoteChanged -= OnSkipVoteChanged;
+            }
+
+            if (gameHud != null) gameHud.SkipVoteRequested -= OnSkipVoteRequested;
+
             var host = OnlineSessionHost.Instance;
             if (host != null) host.RosterChanged -= OnHostRosterChanged;
             if (host != null) host.RosterChanged -= OnClientRosterChanged;
+
+            // 离开对局（回到主菜单 / 关掉游戏场景）时必须把联机整个收掉：
+            // 否则 OnlineSessionHost 会跟着 DontDestroyOnLoad 活下来，继续每秒刷新一次 Lobby、
+            // 后台一直报限流失败，Relay 连接也一直占着不放。
+            if (onlineSession != null)
+            {
+                onlineSession.Shutdown();
+                onlineSession = null;
+            }
+
+            // 同时退出 / 关闭 Lobby：LobbyClient 的轮询是它自己在跑的，不断开就一直每秒请求一次。
+            OnlineSessionHost.Instance?.Leave();
         }
 
         /// <summary>
@@ -478,7 +533,11 @@ namespace NomadCity.App
         /// </summary>
         private void InitializePresentation(int seat)
         {
-            bool online = session != null && session.Role != OnlineRole.None;
+            // 「是不是联机局」不能只看 GameSession.Role（准备房间之后再读可能已经对不上），
+            // 只要这次会话真的是多人联机，就一律按联机处理 —— 联机绝不能退回单机热座，
+            // 否则主机能替其他座位操作，别人永远轮不到行动。
+            bool online = (session != null && session.Role != OnlineRole.None)
+                          || (onlineSession != null && onlineSession.IsMultiplayer);
 
             // 联机客户端：命令只提交给主机、本地不执行 —— 界面里「派发完立刻读状态」的流程
             // （探索 / 城市移动 / 开局选点要弹的事件牌）必须等回放后再补，见 GameScreenController.SyncPendingEventCard。
@@ -491,6 +550,12 @@ namespace NomadCity.App
             {
                 gameHud.SetPlayerNames(names);
                 gameHud.SetLocalSeat(online ? seat : -1);
+
+                // 挂机跳过投票只在联机时有意义：掉线玩家等 20 秒、在线玩家等 180 秒才开放投票。
+                gameHud.EnableSkipVote(online && onlineSession != null && onlineSession.IsMultiplayer,
+                    onlineSession != null ? onlineSession.IsSeatConnected : null);
+                gameHud.SkipVoteRequested -= OnSkipVoteRequested;
+                gameHud.SkipVoteRequested += OnSkipVoteRequested;
             }
 
             // 先把引擎状态画出来，再把界面接上引擎 —— 顺序不能反，否则界面第一次刷新时地图还没有标记。
@@ -563,6 +628,56 @@ namespace NomadCity.App
 
             // 开局（挑企业家 / 等快照）期间就到的联机错误，这时才补到状态行上。
             FlushPendingOnlineError();
+
+            BindChat(names, seat);
+        }
+
+        /// <summary>
+        /// 聊天窗接线：输入框内容交给联机会话（单机直接回显）；收到的消息按座位换算成昵称显示。
+        /// 客户端等快照到达后会再次走 InitializePresentation，所以先退订再订阅，避免重复追加。
+        /// </summary>
+        private void BindChat(string[] names, int seat)
+        {
+            if (chatPanel == null) chatPanel = FindAnyObjectByType<ChatPanel>();
+            if (chatPanel == null)
+            {
+                Debug.LogWarning("[开局] 未指定 ChatPanel：操作区的「聊天」按钮不会弹出聊天窗。" +
+                                 "请把场景里的 ChatPanel 拖进本字段。", this);
+                return;
+            }
+
+            chatNames = names;
+            chatLocalSeat = seat;
+
+            chatPanel.MessageSubmitted -= OnChatSubmitted;
+            chatPanel.MessageSubmitted += OnChatSubmitted;
+
+            if (onlineSession == null) return;
+            onlineSession.ChatReceived -= OnChatReceived;
+            onlineSession.ChatReceived += OnChatReceived;
+        }
+
+        private void OnChatSubmitted(string text)
+        {
+            if (onlineSession != null && onlineSession.IsMultiplayer)
+            {
+                onlineSession.SendChat(text);
+                return;
+            }
+
+            // 单机没有别人可发：原样回显，确认输入与发送链路是通的。
+            if (chatPanel != null) chatPanel.AppendMessage("我", text);
+        }
+
+        private void OnChatReceived(int seat, string text)
+        {
+            if (chatPanel == null) return;
+
+            string from = null;
+            if (chatNames != null && seat >= 0 && seat < chatNames.Length) from = chatNames[seat];
+            if (string.IsNullOrWhiteSpace(from)) from = seat == chatLocalSeat ? "我" : $"玩家 {seat + 1}";
+
+            chatPanel.AppendMessage(from, text);
         }
 
         // —— 联机 ——
@@ -582,6 +697,16 @@ namespace NomadCity.App
 
             onlineSession = host.Session;
             onlineSession.ErrorArrived += OnOnlineError;
+            onlineSession.CommandRejected += OnOnlineCommandRejected;
+            onlineSession.PeerLeft += OnPeerLeft;
+            onlineSession.PeerReturned += OnPeerReturned;
+            onlineSession.Reconnecting += OnReconnecting;
+            onlineSession.Reconnected += OnReconnected;
+            onlineSession.SkipVoteChanged += OnSkipVoteChanged;
+
+            // 自救按钮要在挑企业家之前就出现：客户端可能一直等不到开局快照，
+            // 那时代码根本走不到 InitializePresentation，没有按钮就只能干等。
+            SetupOnlineControls();
 
             pickedColors = Filled(session.PlayerCount, -1);
 
@@ -653,6 +778,9 @@ namespace NomadCity.App
             var host = OnlineSessionHost.Instance;
             if (host != null) host.RosterChanged -= OnClientRosterChanged;
 
+            // 牌局已经建立：名单 / 颜色同步结束，停掉房间信息轮询。
+            host?.Lobby?.StopRefreshing();
+
             Engine = onlineSession.Engine;
             Engine.State.DeveloperMode = false; // 联机强制关闭开发者模式
 
@@ -682,10 +810,24 @@ namespace NomadCity.App
             if (screenController == null)
             {
                 pendingOnlineError = text;
+
+                // 界面还没接好（典型情况：客户端一直在等开局快照，永远走不到 InitializePresentation）：
+                // 至少要写进状态行，否则玩家看到的只是「卡死」，不知道是快照解析失败还是根本没收到。
+                if (gameHud != null) gameHud.SetStatus("[联机] " + text);
                 return;
             }
 
             ShowOnlineErrorNow(text);
+        }
+
+        /// <summary>
+        /// 本机座位的一条命令被主机拒绝：除了错误行，还要让界面判断「被拒的是不是它正在等的那一步」。
+        /// 例如事件卡提交被拒要还原卡面重选，而期间到达的其它拒绝（重复点击、流程推进）不能动它。
+        /// </summary>
+        private void OnOnlineCommandRejected(ICommand command, string message)
+        {
+            if (screenController == null) return; // 界面还没接好时，OnOnlineError 已经把原因写进状态行
+            screenController.ShowCommandRejected(command, message);
         }
 
         /// <summary>把一条联机错误同时写进行动记录与状态行。</summary>
@@ -703,6 +845,110 @@ namespace NomadCity.App
             string text = pendingOnlineError;
             pendingOnlineError = null;
             ShowOnlineErrorNow(text);
+        }
+
+        /// <summary>
+        /// 有人掉线：主机端第一时间知道是哪个座位走的。写进行动记录 + 状态行，
+        /// 免得其他人对着「等某人操作」的界面干等，不知道是掉线还是只是在想。
+        /// </summary>
+        private void OnPeerLeft(int seat)
+        {
+            string text = $"{SeatName(seat)} 已掉线：该座位可由本人重新进房接回；" +
+                          "若迟迟不回，其他人可以投票跳过他的行动。";
+
+            if (actionLogPanel != null) actionLogPanel.Append("[联机] " + text);
+            if (gameHud != null) gameHud.SetStatus("[联机] " + text);
+            Debug.LogWarning("[联机] " + text, this);
+        }
+
+        /// <summary>主机广播来的投票进度：交给顶栏画「投票跳过 玩家N（x/y）」。</summary>
+        private void OnSkipVoteChanged(int targetSeat, int voterMask, int required)
+        {
+            if (gameHud != null) gameHud.ShowSkipVote(targetSeat, voterMask, required);
+        }
+
+        /// <summary>掉线的玩家回到了原座位：写进记录与状态行，并作废针对他的那轮跳过投票。</summary>
+        private void OnPeerReturned(int seat)
+        {
+            string text = $"{SeatName(seat)} 已重新连接，回到原座位。";
+            if (actionLogPanel != null) actionLogPanel.Append("[联机] " + text);
+            if (gameHud != null) gameHud.SetStatus("[联机] " + text);
+            Debug.Log("[联机] " + text, this);
+        }
+
+        /// <summary>本机断线了，正在按退避间隔自动重连。</summary>
+        private void OnReconnecting(int attempt, float delay)
+        {
+            string text = $"连接中断，{delay:0} 秒后自动重连（第 {attempt} 次）…";
+            if (actionLogPanel != null) actionLogPanel.Append("[联机] " + text);
+            if (gameHud != null) gameHud.SetStatus("[联机] " + text);
+        }
+
+        /// <summary>本机重连成功、座位已恢复；随后会收到一份新快照把界面补齐。</summary>
+        private void OnReconnected()
+        {
+            const string text = "已重新连接，座位与牌局状态已恢复。";
+            if (actionLogPanel != null) actionLogPanel.Append("[联机] " + text);
+            if (gameHud != null) gameHud.SetStatus("[联机] " + text);
+        }
+
+        /// <summary>本机点了「投票跳过」：票数由主机统计，这里只把票投出去。</summary>
+        private void OnSkipVoteRequested(int targetSeat)
+        {
+            if (onlineSession != null) onlineSession.RequestSkipVote(targetSeat);
+        }
+
+        // —— 联机自救：重连 / 退出 ——
+
+        /// <summary>
+        /// 联机局显示「重连 / 退出对局」。主机是权威端、没有可重连的对象，只给「退出对局」。
+        /// </summary>
+        private void SetupOnlineControls()
+        {
+            if (gameHud == null || onlineSession == null || !onlineSession.IsMultiplayer) return;
+
+            gameHud.ShowOnlineControls(role == OnlineRole.Client ? OnReconnectRequested : null, OnExitOnlineGame);
+        }
+
+        /// <summary>玩家点「重连」：立刻重新连一次主机，不等自动重连的退避计时。</summary>
+        private void OnReconnectRequested()
+        {
+            if (gameHud != null) gameHud.SetStatus("[联机] 正在重新连接主机…");
+
+            if (onlineSession != null) onlineSession.ReconnectNow();
+            else OnlineSessionHost.Instance?.ReconnectNow();
+        }
+
+        /// <summary>玩家点「退出对局」：卡死时的逃生口，二次确认后断开联机并回主菜单。</summary>
+        private void OnExitOnlineGame()
+        {
+            if (choicePopup != null)
+            {
+                choicePopup.Show("退出这局联机并回到主菜单？", new[] { "退出对局" }, _ => LeaveOnlineGame());
+                return;
+            }
+
+            LeaveOnlineGame();
+        }
+
+        private void LeaveOnlineGame()
+        {
+            var host = OnlineSessionHost.Instance;
+            if (host != null) host.Leave();
+
+            UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
+        }
+
+        /// <summary>座位显示名：优先用准备房间同步来的昵称，没有时回退成「玩家 N」。</summary>
+        private string SeatName(int seat)
+        {
+            if (seat < 0) return "—";
+
+            string[] names = session != null ? session.PlayerNicknames : null;
+            if (names != null && seat < names.Length && !string.IsNullOrWhiteSpace(names[seat]))
+                return names[seat];
+
+            return $"玩家 {seat + 1}";
         }
 
         /// <summary>

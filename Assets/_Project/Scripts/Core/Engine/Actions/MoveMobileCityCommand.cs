@@ -38,6 +38,9 @@ namespace NomadCity.Core.Engine
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
 
+            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat);
+            if (!quota.Ok) return quota;
+
             PlayerState player = state.Player(ActorSeat);
             int origin = player.MobileCityNodeId;
             if (origin < 0) return CommandResult.Fail("你的移动城市还没有停靠在任何资源点上。");
@@ -130,6 +133,10 @@ namespace NomadCity.Core.Engine
         {
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
+
+            // 这是三步里的收尾步：名额在步 1 就已经算在这次城市移动上了，这里不再查（见 ValidateMainActionAvailable）。
+            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat, isContinuation: true);
+            if (!quota.Ok) return quota;
 
             if (state.CityMoveOriginNodeId < 0)
                 return CommandResult.Fail("你还没有执行城市移动（§6.4d 步 1–2）。");

@@ -82,7 +82,10 @@ namespace NomadCity.Tests
             CollectionAssert.Contains(state.Players[0].BuiltFacilities, card);
             CollectionAssert.DoesNotContain(state.FacilitySupply, card);
             Assert.AreEqual(BoardSetup.FacilitySupplySize, state.FacilitySupply.Count);
-            Assert.AreEqual(1, state.ActiveSeat); // 主要行动会推进顺位
+
+            // 主要行动做完不再自动推进：要主动结束回合才轮到下一位（§6.1）。
+            Assert.IsTrue(engine.Dispatch(new EndTurnCommand(state.ActiveSeat)).Ok);
+            Assert.AreEqual(1, state.ActiveSeat); // 结束回合后推进顺位
         }
 
         [Test]

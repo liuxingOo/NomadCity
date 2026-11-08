@@ -8,7 +8,8 @@
         "Unity.Services.Core",
         "Unity.Services.Authentication",
         "Unity.Services.Relay",
-        "Unity.Services.Lobbies"
+        "Unity.Services.Lobbies",
+        "Unity.Services.QoS"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

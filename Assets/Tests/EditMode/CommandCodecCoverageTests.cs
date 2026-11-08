@@ -132,6 +132,18 @@ namespace NomadCity.Tests
             CommandKind.SubmitHarvestChoice =>
                 new CommandDto { Kind = kind, Seat = 1, P0 = 1, P1 = 2, Items = new[] { 5, 7 } },
 
+            // 挂机跳过：Seat 记的是「被跳过」的那个座位（编码只写 Seat，P0 保持默认 0；
+            // 解码那边兼容 Seat<0 的旧写法，回退到 P0）。
+            CommandKind.SkipPendingAction =>
+                new CommandDto { Kind = kind, Seat = 2 },
+
+            CommandKind.PassAction =>
+                new CommandDto { Kind = kind, Seat = 3 },
+
+            // 结束回合：编码只写 Seat（行动者座位），与 PassAction 同一套线格式。
+            CommandKind.EndTurn =>
+                new CommandDto { Kind = kind, Seat = 3 },
+
             // P0 = 座位数 2；Items = [座位, 选点数, 资源点 id..., 座位, 选点数, 资源点 id...]，按座位升序。
             CommandKind.ResolveHarvest =>
                 new CommandDto

@@ -28,5 +28,8 @@ namespace NomadCity.Core.Net
         UsePatternSpecialAction = 17,
         ResolveHarvest = 18,
         SubmitHarvestChoice = 19,
+        SkipPendingAction = 20,
+        PassAction = 21,
+        EndTurn = 22,
     }
 }

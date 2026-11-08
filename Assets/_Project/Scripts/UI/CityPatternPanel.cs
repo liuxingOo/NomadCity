@@ -25,9 +25,18 @@ namespace NomadCity.UI
     /// </summary>
     public sealed class CityPatternPanel : MonoBehaviour, ICenteredPanel
     {
+        // 与图鉴 / 聊天 / 行动记录同一套配色。
+        private static readonly Color DimColor = new Color(0f, 0f, 0f, 0.55f);
+        private static readonly Color ContentColor = new Color(0.12f, 0.10f, 0.08f, 0.85f);
+        private static readonly Color TextColor = new Color(0.95f, 0.92f, 0.86f, 1f);
+        private static readonly Color ButtonColor = new Color(0.45f, 0.36f, 0.28f, 1f);
+
         [Tooltip("弹窗开关物体（宿主 → Root → Dim / 背景 / 牌位）。宿主自身必须保持激活，只切这一个。" +
                  "留空则面板一直显示（旧的常驻行为）。")]
         [SerializeField] private GameObject root;
+
+        [Tooltip("操作区里常驻的「城市样式」按钮：面板开着时点亮它。留空则这颗按钮不跟着亮暗（不会出错）。")]
+        [SerializeField] private Button toggleButton;
 
         [Tooltip("6 个牌位按钮，顺序与场上样式牌列表（CityPatternCards）一致（下标 0 是最左边那张牌）")]
         [SerializeField] private Button[] cardButtons = Array.Empty<Button>();
@@ -41,6 +50,9 @@ namespace NomadCity.UI
 
         [Tooltip("按样式牌 id 顺序排列的卡面 sprite：基础牌 500–505 → 0–5，企业扩展牌 550–555 → 6–11")]
         [SerializeField] private Sprite[] cardFaces = Array.Empty<Sprite>();
+
+        /// <summary>城市样式卡面库（只读）。图鉴的样式页直接复用这一份。</summary>
+        public Sprite[] CardFaces => cardFaces;
 
         [Header("玩家标记（宣告后落在牌面轨道上）")]
         [Tooltip("玩家标记素材，下标 = PlayerColor（绿 0 / 黄 1 / 红 2 / 蓝 3）。留空则用玩家色方块占位。")]
@@ -87,6 +99,7 @@ namespace NomadCity.UI
 
             viewOnly = false;
             if (root.activeSelf != open) root.SetActive(open);
+            UiButtonTint.SetLit(toggleButton, IsOpen);
         }
 
         /// <summary>面板是不是开着。</summary>
@@ -100,6 +113,7 @@ namespace NomadCity.UI
         {
             viewOnly = false;
             if (root != null && root.activeSelf) root.SetActive(false);
+            UiButtonTint.SetLit(toggleButton, IsOpen);
         }
 
         /// <summary>
@@ -116,6 +130,7 @@ namespace NomadCity.UI
             {
                 viewOnly = false;
                 root.SetActive(false);
+                UiButtonTint.SetLit(toggleButton, IsOpen);
                 return;
             }
 
@@ -124,11 +139,14 @@ namespace NomadCity.UI
             viewOnly = true;
             root.SetActive(true);
             if (lastState != null) Refresh(lastState, lastInteractable);
+            UiButtonTint.SetLit(toggleButton, IsOpen);
         }
 
         private void Awake()
         {
             CenteredPanelGroup.Register(this);
+
+            UiButtonTint.Ensure(toggleButton);
 
             if (root == null)
                 Debug.LogWarning("[城市样式牌] 没有接「Root」——面板会一直显示。要走「点按钮才弹出」的话，" +
@@ -142,6 +160,103 @@ namespace NomadCity.UI
                 int index = i; // 闭包捕获：每个按钮绑定自己的下标
                 button.onClick.AddListener(() => CardClicked?.Invoke(index));
             }
+
+            ApplyPopupStyle();
+        }
+
+        /// <summary>
+        /// 把城市样式弹窗的配色统一成图鉴 / 聊天 / 行动记录那一套：
+        /// 遮罩更深、内容区加一层深色底、牌名用米白，并在右上角补一颗关闭按钮。
+        /// </summary>
+        private void ApplyPopupStyle()
+        {
+            if (root == null) return;
+
+            Transform dim = root.transform.Find("Dim");
+            if (dim != null && dim.TryGetComponent(out Image dimImage)) dimImage.color = DimColor;
+
+            for (int i = 0; i < cardLabels.Length; i++)
+            {
+                if (cardLabels[i] != null) cardLabels[i].color = TextColor;
+            }
+
+            // 牌位底色（卡面没加载时露出来的那一层）：从白色改成深色，和弹窗内部一致。
+            for (int i = 0; i < cardButtons.Length; i++)
+            {
+                if (cardButtons[i] != null && cardButtons[i].targetGraphic is Image slot) slot.color = ContentColor;
+            }
+
+            Transform panel = root.transform.Find("Panel");
+            if (panel == null) return;
+
+            if (panel.Find("ContentBg") == null)
+            {
+                var backdrop = new GameObject("ContentBg", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                var backdropRect = (RectTransform)backdrop.transform;
+                backdropRect.SetParent(panel, false);
+                backdropRect.anchorMin = Vector2.zero;
+                backdropRect.anchorMax = Vector2.one;
+                backdropRect.offsetMin = new Vector2(12f, 12f);
+                backdropRect.offsetMax = new Vector2(-12f, -12f);
+                backdropRect.SetAsFirstSibling();
+
+                var backdropImage = backdrop.GetComponent<Image>();
+                backdropImage.color = ContentColor;
+                backdropImage.raycastTarget = false;
+            }
+
+            AddCloseButton(panel);
+        }
+
+        /// <summary>右上角「关闭」按钮：点一下收起弹窗（等价于再点一次「城市样式」按钮）。</summary>
+        private void AddCloseButton(Transform panel)
+        {
+            if (panel.Find("Close") != null) return;
+
+            var go = new GameObject("Close", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image),
+                typeof(Button));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(panel, false);
+            rect.anchorMin = new Vector2(1f, 1f);
+            rect.anchorMax = new Vector2(1f, 1f);
+            rect.pivot = new Vector2(1f, 1f);
+            rect.anchoredPosition = new Vector2(-14f, -14f);
+            rect.sizeDelta = new Vector2(72f, 32f);
+
+            var image = go.GetComponent<Image>();
+            image.color = ButtonColor;
+
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = image;
+            UiButtonTint.Ensure(button);
+            button.onClick.AddListener(() => SetOpen(false));
+
+            var labelGo = new GameObject("Label", typeof(RectTransform));
+            var labelRect = (RectTransform)labelGo.transform;
+            labelRect.SetParent(rect, false);
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.offsetMin = Vector2.zero;
+            labelRect.offsetMax = Vector2.zero;
+
+            var label = labelGo.AddComponent<TextMeshProUGUI>();
+            label.text = "关闭";
+            label.fontSize = 18f;
+            label.alignment = TextAlignmentOptions.Center;
+            label.color = TextColor;
+            label.raycastTarget = false;
+
+            TMP_FontAsset font = null;
+            foreach (TMP_Text cardLabel in cardLabels)
+            {
+                if (cardLabel != null && cardLabel.font != null)
+                {
+                    font = cardLabel.font;
+                    break;
+                }
+            }
+
+            if (font != null) label.font = font;
         }
 
         private void OnDestroy()

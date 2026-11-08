@@ -21,13 +21,28 @@ namespace NomadCity.Core.Net
         /// <summary>选定的阵营颜色（转成 <c>PlayerColor</c> 的整数值）；-1 表示还没选。</summary>
         public readonly int Color;
 
-        public LobbyMemberInfo(string playerId, string nickname, bool isHost, bool ready, int color = -1)
+        /// <summary>
+        /// 玩家身份令牌（与 Relay 重连用的是同一个本机令牌）。用来把名单里的选择对到 Relay 座位上：
+        /// 两个客户端几乎同时连入时，连接顺序不一定等于名单顺序。
+        /// </summary>
+        public readonly string Identity;
+
+        /// <summary>
+        /// 这名玩家的 Relay 座位号（由玩家自己写进 Lobby，-1 = 还不知道）。
+        /// 名单是按加入时间排的、座位是按连入顺序分的，两者可能不一致，靠它精确对齐。
+        /// </summary>
+        public readonly int Seat;
+
+        public LobbyMemberInfo(string playerId, string nickname, bool isHost, bool ready, int color = -1,
+            string identity = null, int seat = -1)
         {
             PlayerId = playerId ?? string.Empty;
             Nickname = string.IsNullOrWhiteSpace(nickname) ? "玩家" : nickname;
             IsHost = isHost;
             Ready = ready;
             Color = color;
+            Identity = identity ?? string.Empty;
+            Seat = seat;
         }
     }
 

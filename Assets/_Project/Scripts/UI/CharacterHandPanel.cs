@@ -8,8 +8,9 @@ using NomadCity.Core.Model;
 namespace NomadCity.UI
 {
     /// <summary>
-    /// 本机玩家的角色牌手牌（§4.2 阶段 1 / §10.1.1）：点小标签展开后，盖放阶段点一张牌即把它背面朝上盖放，
-    /// 其余时候只显示、不可点。只负责显示与发出意图 —— 点第几个牌位就把下标交回 GameScreenController，
+    /// 本机玩家的角色牌手牌（§4.2 阶段 1 / §10.1.1）：点小标签展开后，点一张牌放大查看；
+    /// 盖放阶段点牌也是先放大，再在放大弹窗里点「确定盖放」才真的盖下去（可取消退回）。
+    /// 只负责显示与发出意图 —— 点第几个牌位就把下标交回 GameScreenController，
     /// 合法性与费用一概不问（可点与否由控制器按当前阶段决定）。
     ///
     /// 与 <see cref="FacilitySupplyPanel"/> 不同，这一块**不铺遮罩**：盖放阶段与开局入场（§4.3 决定初始资源点）
@@ -49,6 +50,9 @@ namespace NomadCity.UI
                  "（0 雷蛇 Liskarm / 1 极境 Elysium / 2 德克萨斯 Texas / 3 锡人 Tin Man / 4 坎诺特 Canot）。" +
                  "映射见 SpriteIndexOf。用菜单 NomadCity / 卡面：填充卡面库（Card Faces）会自动按切片名填好，无需手动拖。")]
         [SerializeField] private Sprite[] cardFaces = Array.Empty<Sprite>();
+
+        /// <summary>角色卡面库（只读）。图鉴的角色页直接复用这一份。</summary>
+        public Sprite[] CardFaces => cardFaces;
 
         [Tooltip("相邻两张手牌的水平位移（像素）。小于卡面宽度就会叠放：卡宽约 150 时填 70，就是叠掉一半。")]
         [SerializeField] private float cardStep = 70f;
@@ -94,6 +98,9 @@ namespace NomadCity.UI
                 root.SetActive(available && expanded);
             if (toggleLabel != null)
                 toggleLabel.text = expanded ? "收起手牌" : "手牌";
+
+            // 小标签的亮 / 暗只跟「手牌展没展开」走，不看 Unity 的选中态。
+            UiButtonTint.SetLit(toggleButton, available && expanded);
         }
 
         private void Awake()
@@ -103,6 +110,7 @@ namespace NomadCity.UI
             if (toggleButton != null)
             {
                 NeutralizeDisabledTint(toggleButton);
+                UiButtonTint.Ensure(toggleButton);
                 toggleButton.onClick.AddListener(ToggleExpanded);
             }
             else
@@ -152,7 +160,8 @@ namespace NomadCity.UI
         /// <summary>
         /// 按当前手牌刷新牌位：写入牌名、按需显示。
         /// <paramref name="interactable"/> 只有盖放阶段才为 true；但牌位**始终可点** ——
-        /// 不能盖放的时候点上去只是打开放大卡面看一眼，由 GameScreenController 按这个标记分流。
+        /// 不能盖放的时候点上去只是打开放大卡面看一眼，能盖放时也是先放大、再在放大弹窗里确认，
+        /// 具体分流由 GameScreenController 负责。
         /// </summary>
         public void Refresh(GameState state, int seat, bool interactable)
         {
@@ -178,7 +187,7 @@ namespace NomadCity.UI
 
                 int cardId = pool != null && i < pool.Count ? pool[i] : -1;
                 button.gameObject.SetActive(cardId >= 0);
-                // 有牌就能点：盖放阶段点=盖放，其余时候点=放大看一眼（由控制器分流），不要在这里锁死。
+                // 有牌就能点：不能盖放时点=放大看一眼，能盖放时点=放大 + 确认弹窗（由控制器分流），不要在这里锁死。
                 button.interactable = cardId >= 0;
 
                 int faceIndex = SpriteIndexOf(cardId);

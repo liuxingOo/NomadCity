@@ -18,6 +18,9 @@ namespace NomadCity.UI
     ///       放大卡面 Image     ← 拖进 Card Face Image（保持宽高比，否则卡面会被拉伸）
     ///       卡名文本           ← 拖进 Card Name Label（可选）
     ///       关闭按钮           ← 拖进 Close Button
+    ///
+    /// 同一个弹窗被三类操作复用，靠不同的 Show 重载切换按钮含义：
+    /// 查看（关闭）/ 建设选费用（两个付费按钮 + 取消建设）/ 盖放角色牌（确定盖放 + 取消）。
     /// </summary>
     public sealed class CardPreviewPopup : MonoBehaviour
     {
@@ -37,13 +40,13 @@ namespace NomadCity.UI
         [Tooltip("关闭 / 取消按钮上的文案（可选）：查看卡面时写「关闭」，建设选费用时写「取消建设」。")]
         [SerializeField] private TMP_Text closeLabel;
 
-        [Tooltip("建设（§6.4e 步 1）：「选项一 · 用资源费用建造」的按钮。只在建设选费用时出现，平时隐藏。")]
+        [Tooltip("主操作按钮：建设时是「选项一 · 用资源费用建造」，盖放角色牌时是「确定盖放」。平时隐藏。")]
         [SerializeField] private Button resourcePayButton;
 
-        [Tooltip("资源费用按钮上的文案（费用明细）；留空则不改按钮文字。")]
+        [Tooltip("主操作按钮上的文案（建设时是费用明细，盖放时是「确定盖放」）；留空则不改按钮文字。")]
         [SerializeField] private TMP_Text resourcePayLabel;
 
-        [Tooltip("建设：「选项二 · 用金券费用建造」的按钮。只在建设选费用时出现，平时隐藏。")]
+        [Tooltip("建设：「选项二 · 用金券费用建造」的按钮。只在建设选费用时出现，其余情况隐藏。")]
         [SerializeField] private Button voucherPayButton;
 
         [Tooltip("金券费用按钮上的文案；留空则不改按钮文字。")]
@@ -133,6 +136,8 @@ namespace NomadCity.UI
 
             closeAction = Hide;
             SetLabel(closeLabel, "关闭");
+            payResourceAction = null;
+            payVoucherAction = null;
             SetPayButtonsVisible(false);
 
             SetOpen(true);
@@ -154,7 +159,47 @@ namespace NomadCity.UI
 
             closeAction = Hide;
             SetLabel(closeLabel, "关闭");
+            payResourceAction = null;
+            payVoucherAction = null;
             SetPayButtonsVisible(false);
+
+            SetOpen(true);
+        }
+
+        /// <summary>
+        /// 盖放角色牌（§4.2 阶段 1）：先放大卡面看清楚，再让玩家点「确定盖放」才算数。
+        /// 关闭键改成「取消」—— 只收起弹窗、什么都不做，手牌原样退回。
+        /// </summary>
+        public void ShowForCharacterPlacement(GameState state, int cardId, Action onConfirm)
+        {
+            int index = CharacterHandPanel.SpriteIndexOf(cardId);
+            Sprite face = index >= 0 && index < characterFaces.Length ? characterFaces[index] : null;
+            if (face == null && characterFaces.Length == 0)
+                Debug.LogWarning("[卡面放大] 角色牌卡面库是空的 —— 放大图只有名字没有牌面。" +
+                                 "执行菜单 NomadCity / 卡面：填充卡面库（Card Faces）即可自动填好。", this);
+
+            ShowFaceSprite(face, CharacterNameOf(state, cardId));
+
+            // 取消 = 收起来，什么都不做（想盖放就再点一次那张牌）。
+            closeAction = Hide;
+            SetLabel(closeLabel, "取消");
+
+            // 盖放只需要一个主操作按钮，金券位一律隐藏。
+            payVoucherAction = null;
+            if (voucherPayButton != null) voucherPayButton.gameObject.SetActive(false);
+
+            payResourceAction = onConfirm;
+            if (resourcePayButton != null)
+            {
+                resourcePayButton.gameObject.SetActive(true);
+                resourcePayButton.interactable = true;
+            }
+            else
+            {
+                Debug.LogWarning("[卡面放大] 没有接主操作按钮（Resource Pay Button）——" +
+                                 "盖放角色牌时点不到「确定盖放」，只能取消。", this);
+            }
+            SetLabel(resourcePayLabel, "确定盖放");
 
             SetOpen(true);
         }
@@ -175,6 +220,8 @@ namespace NomadCity.UI
 
             closeAction = Hide;
             SetLabel(closeLabel, "关闭");
+            payResourceAction = null;
+            payVoucherAction = null;
             SetPayButtonsVisible(false);
 
             SetOpen(true);

@@ -349,7 +349,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &19355346
 RectTransform:
   m_ObjectHideFlags: 0
@@ -3392,8 +3392,8 @@ MonoBehaviour:
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
-    rgba: 4281479730
-  m_fontColor: {r: 0.19607843, g: 0.19607843, b: 0.19607843, a: 1}
+    rgba: 4075543551
+  m_fontColor: {r: 0.95, g: 0.92, b: 0.86, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:
@@ -3728,6 +3728,7 @@ GameObject:
   - component: {fileID: 222592271}
   - component: {fileID: 222592270}
   - component: {fileID: 222592269}
+  - component: {fileID: 222592272}
   m_Layer: 5
   m_Name: Btn_Chat
   m_TagString: Untagged
@@ -3794,11 +3795,25 @@ MonoBehaviour:
     m_PressedTrigger: Pressed
     m_SelectedTrigger: Selected
     m_DisabledTrigger: Disabled
-  m_Interactable: 0
+  m_Interactable: 1
   m_TargetGraphic: {fileID: 1934594075}
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &222592272
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 222592267}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3c7e2b91d5f84a6e9b0d1c47a8e63f52, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: NomadCity.UI::NomadCity.UI.ChatPanel
+  toggleButton: {fileID: 222592269}
+  font: {fileID: 11400000, guid: 693466f661a9513469ab2808986b399b, type: 2}
 --- !u!114 &222592270
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -12924,10 +12939,10 @@ RectTransform:
   - {fileID: 1919219615}
   m_Father: {fileID: 1263345744}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 1}
-  m_AnchorMax: {x: 0, y: 1}
-  m_AnchoredPosition: {x: 902, y: -572}
-  m_SizeDelta: {x: 680, y: 480}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 1, y: 1}
+  m_AnchoredPosition: {x: 0, y: 0}
+  m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &758365090
 MonoBehaviour:
@@ -17768,6 +17783,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: NomadCity.UI::NomadCity.UI.CityPatternPanel
   root: {fileID: 84184920}
+  toggleButton: {fileID: 355777546}
   cardButtons:
   - {fileID: 953906655}
   - {fileID: 790637601}
@@ -18834,7 +18850,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Unity.TextMeshPro::TMPro.TextMeshProUGUI
   m_Material: {fileID: 0}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_RaycastTarget: 1
+  m_RaycastTarget: 0
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
   m_OnCullStateChanged:
@@ -18849,8 +18865,8 @@ MonoBehaviour:
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
-    rgba: 4278190080
-  m_fontColor: {r: 0, g: 0, b: 0, a: 1}
+    rgba: 4075543551
+  m_fontColor: {r: 0.95, g: 0.92, b: 0.86, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:
@@ -20419,7 +20435,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 0.45, g: 0.36, b: 0.28, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -20629,6 +20645,7 @@ MonoBehaviour:
   characterHandPanel: {fileID: 184139381}
   playerCityPopup: {fileID: 1444838326}
   actionLogPanel: {fileID: 758365090}
+  chatPanel: {fileID: 222592272}
   screenController: {fileID: 1187456255}
   developerMode: 0
   entrepreneurPanel: {fileID: 778236307}
@@ -20721,6 +20738,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7393d6801d282934684767dda4e29f8e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: NomadCity.UI::NomadCity.UI.GameScreenController
+  companyButton: {fileID: 1055037906}
+  decisionButton: {fileID: 973687361}
 --- !u!1 &1193014143
 GameObject:
   m_ObjectHideFlags: 0
@@ -21726,13 +21745,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.ScrollRect
   m_Content: {fileID: 551708017}
-  m_Horizontal: 1
+  m_Horizontal: 0
   m_Vertical: 1
-  m_MovementType: 1
+  m_MovementType: 2
   m_Elasticity: 0.1
   m_Inertia: 1
   m_DecelerationRate: 0.135
-  m_ScrollSensitivity: 1
+  m_ScrollSensitivity: 30
   m_Viewport: {fileID: 476365124}
   m_HorizontalScrollbar: {fileID: 0}
   m_VerticalScrollbar: {fileID: 0}
@@ -21756,7 +21775,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 0.392}
+  m_Color: {r: 0.12, g: 0.1, b: 0.08, a: 0.85}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -24974,6 +24993,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: NomadCity.UI::NomadCity.UI.FacilitySupplyPanel
   root: {fileID: 572877870}
+  toggleButton: {fileID: 1386220115}
   cardButtons:
   - {fileID: 75635308}
   - {fileID: 841113136}
@@ -25062,7 +25082,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &1432882685
 RectTransform:
   m_ObjectHideFlags: 0
@@ -27490,6 +27510,12 @@ MonoBehaviour:
   - {fileID: -5777739403161424140, guid: b295bec8f4d0c654eacada302f1008ad, type: 3}
   - {fileID: -3999383484899937616, guid: 7cb6fb1d33f61794ab6f068368a04190, type: 3}
   - {fileID: 3620961125254409305, guid: 911d5ebbca4d1e843a1458e82f112544, type: 3}
+  voucherIcon: {fileID: 5670732621190257608, guid: 7d5b8f4d1511d524ab5162635ccea63d, type: 3}
+  resourceIcons:
+  - {fileID: 1662910832356577875, guid: f15795a3a0081ae4ea2751e661a8ba27, type: 3}
+  - {fileID: 4326485550046148022, guid: 80a1fa52dc624504d8722b9e2103b94c, type: 3}
+  - {fileID: 5103231540499187363, guid: c803d4cf6f573a14b8008da7ad656fa7, type: 3}
+  - {fileID: 55368272591372123, guid: 493301bf1b845c54c92d1b462d1a4efa, type: 3}
 --- !u!1 &1648634097
 GameObject:
   m_ObjectHideFlags: 0
@@ -27776,6 +27802,7 @@ GameObject:
   - component: {fileID: 1655654867}
   - component: {fileID: 1655654866}
   - component: {fileID: 1655654865}
+  - component: {fileID: 1655654868}
   m_Layer: 5
   m_Name: Btn_Codex
   m_TagString: Untagged
@@ -27842,11 +27869,67 @@ MonoBehaviour:
     m_PressedTrigger: Pressed
     m_SelectedTrigger: Selected
     m_DisabledTrigger: Disabled
-  m_Interactable: 0
+  m_Interactable: 1
   m_TargetGraphic: {fileID: 1233579647}
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &1655654868
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1655654863}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7b1f4c2e9a3d4f5b8c6d0e1a2b3c4d5e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: NomadCity.UI::NomadCity.UI.CodexPanel
+  toggleButton: {fileID: 1655654865}
+  font: {fileID: 11400000, guid: 693466f661a9513469ab2808986b399b, type: 2}
+  rulebookPages:
+  - {fileID: -7172265046424856472, guid: 35b4f5ed30740b1419b8d0a787d61e1f, type: 3}
+  - {fileID: -7917089741793237327, guid: 67f2145d3f27e1c4e90e2f38d54a8191, type: 3}
+  - {fileID: 1355713459812837854, guid: 4a86823cbc407e1479fc91043d284ab9, type: 3}
+  - {fileID: -3193974698671398841, guid: 16232dad39f6cd24ab6531ab83940976, type: 3}
+  - {fileID: 4541878883735591092, guid: dabfa33dda039a644a3685eb85f8856f, type: 3}
+  - {fileID: 488373100849998025, guid: 6a96c12246651a445a93cf8cd68c8f5f, type: 3}
+  - {fileID: -6787467279075026140, guid: b7698c756f5783148bc063821148fa71, type: 3}
+  - {fileID: -6463859701386385581, guid: 92933c9bd422031449ecb5cf65267f5e, type: 3}
+  - {fileID: 2468594057120127913, guid: 81c2e2a0c4ad47e46a3e522cb0a94767, type: 3}
+  - {fileID: 8286627065883545532, guid: f5428a0889f4ed348aa6fd73589b6d9f, type: 3}
+  - {fileID: -3150991083229638915, guid: 43bdd614dd965394796c5043f3bb6c2d, type: 3}
+  - {fileID: 3435833086912414669, guid: 5fe69c8c39ce2b244944a95395525529, type: 3}
+  - {fileID: 2151553396503953024, guid: 726b680fd270765488ee66e412bd6ab7, type: 3}
+  - {fileID: 2666640548637028172, guid: f5ed9b1a04b984c42bb6c31960d66390, type: 3}
+  - {fileID: -6469188121333217501, guid: f8c795832d7fe054699bebe3b6ecea81, type: 3}
+  - {fileID: 6564433190889807449, guid: 738a1937b56e2a44390256b8001ef96b, type: 3}
+  - {fileID: -3305045973422067753, guid: 9a4f0fafd8c410442887f7050902dd58, type: 3}
+  - {fileID: -6183556716548263797, guid: 6acbdfba9d1a0074499a5f8ee5b0d7d6, type: 3}
+  - {fileID: 6735627336933308969, guid: d1cba59523e44e04587077f848aaa575, type: 3}
+  - {fileID: 226583685477325506, guid: 14369cf0f9da3fe49a1c0e42df707b3b, type: 3}
+  - {fileID: -8051195104403662421, guid: c4b965dc059d6dc4f8a3176b4b0b8226, type: 3}
+  - {fileID: -5483450115844504234, guid: 614d1f0c0eb076e48a9725f1747942bb, type: 3}
+  - {fileID: -6086139625075946571, guid: da242869f08ec2f4da69433aa1d931c1, type: 3}
+  - {fileID: -3389036715601303297, guid: 04500f5a4ec84c44ea45ac25bba0a050, type: 3}
+  - {fileID: 6808548418248807387, guid: 4145832350754c44d8fc50a07ef32c57, type: 3}
+  - {fileID: 2512993624630955198, guid: 460e16e5cbf26714ca32c4cfe0289685, type: 3}
+  - {fileID: -3683691817641675127, guid: c3d5ce3c4bd6b73479ed835f11a586d0, type: 3}
+  - {fileID: 7364883219482188664, guid: a0f44dff45a5ba94ea232a291ec5a018, type: 3}
+  quickReferences:
+  - {fileID: 7187045069035327089, guid: 6727f48a832233f468bee0db9764e7c3, type: 3}
+  - {fileID: -8061470137062939507, guid: a1ad408ad813f5d4b88ceebf4471472d, type: 3}
+  mapCamera: {fileID: 519420033}
+  entrepreneurFaces:
+  - {fileID: 4355426909796552626, guid: cd449f7a5f7849a4794ef59ea38bc47a, type: 3}
+  - {fileID: -3583678091977215229, guid: ee4e6bbdefebaec4aa4909c747598120, type: 3}
+  - {fileID: 1339956442483752414, guid: 81347979f3de8644fb875b436ae40f30, type: 3}
+  - {fileID: -1307524567791997569, guid: ae4555858f8844443b7b578b622374fc, type: 3}
+  facilityPanel: {fileID: 1431766578}
+  cityPatternPanel: {fileID: 1033168606}
+  characterPanel: {fileID: 184139381}
+  eventCardPanel: {fileID: 1850862560}
 --- !u!114 &1655654866
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -31385,7 +31468,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 0.247, g: 0.208, b: 0.153, a: 0.78}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1

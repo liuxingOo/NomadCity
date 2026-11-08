@@ -72,6 +72,9 @@ namespace NomadCity.Core.Engine
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
 
+            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat);
+            if (!quota.Ok) return quota;
+
             PlayerState player = state.Player(ActorSeat);
             if (NodeId < 0 || NodeId >= state.Map.Nodes.Count)
                 return CommandResult.Fail($"资源点 {NodeId} 不存在。");
@@ -256,6 +259,10 @@ namespace NomadCity.Core.Engine
         {
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
+
+            // 这是三步里的收尾步：名额在步 1 就已经算在这次探索上了，这里不再查（见 ValidateMainActionAvailable）。
+            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat, isContinuation: true);
+            if (!quota.Ok) return quota;
 
             if (NodeId < 0 || NodeId >= state.Map.Nodes.Count)
                 return CommandResult.Fail($"资源点 {NodeId} 不存在。");

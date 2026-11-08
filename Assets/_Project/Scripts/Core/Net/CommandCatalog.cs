@@ -31,6 +31,9 @@ namespace NomadCity.Core.Net
             { typeof(UsePatternSpecialActionCommand), CommandKind.UsePatternSpecialAction },
             { typeof(ResolveHarvestCommand), CommandKind.ResolveHarvest },
             { typeof(SubmitHarvestChoiceCommand), CommandKind.SubmitHarvestChoice },
+            { typeof(SkipPendingActionCommand), CommandKind.SkipPendingAction },
+            { typeof(PassActionCommand), CommandKind.PassAction },
+            { typeof(EndTurnCommand), CommandKind.EndTurn },
         };
 
         /// <summary>查命令类型对应的 Kind；未登记时抛出异常（有意为之，逼新增命令登记）。</summary>

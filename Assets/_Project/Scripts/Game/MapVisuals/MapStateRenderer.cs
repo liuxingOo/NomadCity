@@ -252,6 +252,33 @@ namespace NomadCity.Game
         }
 #endif
 
+        /// <summary>
+        /// 离给定世界坐标最近的资源点（只找 <paramref name="maxDistance"/> 以内的）；没有返回 -1。
+        /// 用于「点绿色区域」这类本来就该宽容的操作：画在底图上的资源点圆圈比命中圆大得多，
+        /// 严格按命中圆判定会让玩家觉得「明明点到了却没反应」。
+        /// </summary>
+        public int NearestNodeId(Vector2 world, float maxDistance)
+        {
+            if (!IsReady) return -1;
+
+            int best = -1;
+            float bestDistance = maxDistance;
+            int count = Mathf.Min(nodeViews.Count, state.Map.Nodes.Count);
+            for (int i = 0; i < count; i++)
+            {
+                if (nodeViews[i] == null) continue;
+
+                float distance = Vector2.Distance(world, nodeViews[i].transform.position);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = i;
+                }
+            }
+
+            return best;
+        }
+
         /// <summary>把世界坐标处的点击解析成地图元素；没有命中返回 false。</summary>
         public bool TryPick(Vector2 world, out MapHit hit)
         {

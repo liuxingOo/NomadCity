@@ -44,6 +44,13 @@ namespace NomadCity.Core.Model
         public int ActionRound = 1;
 
         /// <summary>
+        /// 当前行动玩家本轮是否已经做过 1 次主要行动（§6.1）。主要行动不再自动交出行动权 ——
+        /// 玩家做完之后仍可任意次执行快速行动，直到点「结束回合」（<see cref="Engine.EndTurnCommand"/>）。
+        /// 换人 / 进入新一轮时复位；为 true 且没有额外主要行动余额时，不能再做第二次主要行动。
+        /// </summary>
+        public bool MainActionTakenThisRound;
+
+        /// <summary>
         /// 采集阶段是否还等着玩家做选择（§7）：进入采集阶段时置 true，
         /// 由 <see cref="Engine.GameEngine.ResolveHarvest"/> 结算后置 false。
         /// 为 true 时不允许推进到收尾阶段，避免有人跳过整个采集。
@@ -160,6 +167,7 @@ namespace NomadCity.Core.Model
                 FirstPlayerSeat = FirstPlayerSeat,
                 ActiveSeat = ActiveSeat,
                 ActionRound = ActionRound,
+                MainActionTakenThisRound = MainActionTakenThisRound,
                 SeatOrder = SeatOrder == null ? Array.Empty<int>() : (int[])SeatOrder.Clone(),
                 IsGameOver = IsGameOver,
                 HarvestPending = HarvestPending,

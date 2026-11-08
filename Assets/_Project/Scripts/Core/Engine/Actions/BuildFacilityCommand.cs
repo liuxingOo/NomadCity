@@ -54,6 +54,9 @@ namespace NomadCity.Core.Engine
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
 
+            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat);
+            if (!quota.Ok) return quota;
+
             PlayerState player = state.Player(ActorSeat);
 
             FacilityCardDef card = state.Catalog.Facility(FacilityId);

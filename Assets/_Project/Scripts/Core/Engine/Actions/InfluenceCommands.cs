@@ -38,6 +38,9 @@ namespace NomadCity.Core.Engine
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
 
+            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat);
+            if (!quota.Ok) return quota;
+
             if (state.Player(ActorSeat).MarkersInSupply <= 0)
                 return CommandResult.Fail("你的玩家供应堆里没有标记了，无法放置影响力（§11.3）。");
 
@@ -74,6 +77,9 @@ namespace NomadCity.Core.Engine
         {
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
+
+            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat);
+            if (!quota.Ok) return quota;
 
             if (Moves == null || Moves.Count == 0) return CommandResult.Fail("调度至少要移动 1 个影响力。");
             if (Moves.Count > 2) return CommandResult.Fail("调度一次至多移动 2 个影响力。");
