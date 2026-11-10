@@ -140,6 +140,9 @@ namespace NomadCity.Core.Model
 
         /// <summary>城市面板上**非彩色**设施的种数（按不同牌名去重）—— 「城邦工业区」。</summary>
         NonColorFacilityKinds = 2,
+
+        /// <summary>玩家放在**航道**上的影响力总数 —— 「罗德岛」2 级企业特效。</summary>
+        InfluenceOnRoutes = 3,
     }
 
     /// <summary>

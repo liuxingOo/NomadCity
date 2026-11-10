@@ -31,5 +31,10 @@ namespace NomadCity.Core.Net
         SkipPendingAction = 20,
         PassAction = 21,
         EndTurn = 22,
+
+        // —— 企业扩展 ——
+        ChooseInitialEnterprise = 23,
+        AdvanceEnterpriseLevel = 24,
+        TriggerEnterpriseEffect = 25,
     }
 }

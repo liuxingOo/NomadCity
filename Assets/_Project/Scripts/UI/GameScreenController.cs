@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using NomadCity.Core.Engine;
 using NomadCity.Core.Model;
+using NomadCity.Core.Model.Enterprise;
 using NomadCity.Core.Rules;
 using NomadCity.Game;
 using UnityEngine;
@@ -133,6 +134,14 @@ namespace NomadCity.UI
 
         /// <summary>特殊行动效果里「要玩家点选」的收集会话；已跑完或没在收集时为 null。</summary>
         private EffectChoiceSession specialSession;
+
+        /// <summary>企业特效里「要玩家点选」的收集会话；已跑完或没在收集时为 null。</summary>
+        private EffectChoiceSession enterpriseSession;
+
+        /// <summary>正在触发的企业特效：座位 / 企业板 id / 合作等级。</summary>
+        private int enterpriseSeat = -1;
+        private int enterpriseBoardId = -1;
+        private int enterpriseLevel;
 
         // —— 采集阶段（§7）：玩家自选资源点（不再是自动结算） ——
 
@@ -322,6 +331,8 @@ namespace NomadCity.UI
                 panel.EndTurnRequested += OnEndTurnRequested;
             }
 
+            if (companyButton != null) companyButton.onClick.AddListener(OnCompanyButtonClicked);
+
             if (eventCardPanel != null) eventCardPanel.OptionSelected += OnEventOptionSelected;
             if (supplyPanel != null) supplyPanel.CardClicked += OnSupplyCardClicked;
             if (cityPanel != null) cityPanel.SlotClicked += OnCitySlotClicked;
@@ -382,6 +393,8 @@ namespace NomadCity.UI
                 panel.CharacterCardRequested -= OnCharacterCardRequested;
                 panel.EndTurnRequested -= OnEndTurnRequested;
             }
+
+            if (companyButton != null) companyButton.onClick.RemoveListener(OnCompanyButtonClicked);
 
             if (eventCardPanel != null) eventCardPanel.OptionSelected -= OnEventOptionSelected;
             if (supplyPanel != null) supplyPanel.CardClicked -= OnSupplyCardClicked;
@@ -774,6 +787,9 @@ namespace NomadCity.UI
 
             // 角色牌效果里的「点地图」选择（与部署 / 调度 / 城市移动同源）。
             if (characterSession != null && HandleCharacterMapPick(hit)) return;
+
+            // 企业特效里的「点地图」选择（放置 / 移动 / 替换影响力等）。
+            if (enterpriseSession != null && HandleEnterpriseMapPick(hit)) return;
 
             // 城市样式特殊行动效果里的「点地图」选择（与部署 / 调度 / 城市移动同源）。
             if (specialSession != null && HandleSpecialMapPick(hit)) return;
@@ -3729,6 +3745,369 @@ namespace NomadCity.UI
                     ? playerNames[seat]
                     : match.Value;
             });
+        }
+
+        // —— 企业扩展（合作企业板 / 企业特效） ——
+
+        /// <summary>
+        /// 操作区的「企业」按钮：按当前进度依次处理
+        /// ①开局「抽 2 选 1」→ ②待提升合作等级（牌面要求选 1 家其他企业）→ ③触发本回合的企业特效。
+        /// 规则判断仍全部交给引擎，这里只负责把可选内容摆出来。
+        /// </summary>
+        private void OnCompanyButtonClicked()
+        {
+            if (engine == null) return;
+
+            GameState state = engine.State;
+            if (state.Setup == null || !state.Setup.IsEnterpriseEnabled)
+            {
+                SetStatus("本局没有启用企业扩展。");
+                return;
+            }
+
+            if (state.IsGameOver)
+            {
+                SetStatus("本局已经结束。");
+                return;
+            }
+
+            EnterpriseState enterprises = state.Enterprises;
+
+            if (enterprises.PendingAdvanceSeat >= 0)
+            {
+                if (!CanOperateSeat(enterprises.PendingAdvanceSeat))
+                {
+                    SetStatus($"正在等 {SeatLabel(enterprises.PendingAdvanceSeat)} 选择要提升的企业板。");
+                    return;
+                }
+
+                BeginEnterpriseAdvance(enterprises.PendingAdvanceSeat);
+                return;
+            }
+
+            if (!enterprises.DraftDone)
+            {
+                int seat = FindSeatNeedingEnterprisePick();
+                if (seat < 0)
+                {
+                    SetStatus("企业抽选已完成，可以决定初始资源点了。");
+                    return;
+                }
+
+                BeginEnterprisePick(seat);
+                return;
+            }
+
+            BeginEnterpriseEffectMenu(lockToLocalSeat ? localSeat : state.ActiveSeat);
+        }
+
+        /// <summary>这个座位现在能不能由本机操作（联机只看本机座位；单机热座都能操作）。</summary>
+        private bool CanOperateSeat(int seat)
+        {
+            if (engine == null || seat < 0 || seat >= engine.State.Players.Count) return false;
+            return !lockToLocalSeat || seat == localSeat;
+        }
+
+        /// <summary>找出下一位还没选企业、且本机可以替他操作的座位；-1 = 都选完了。</summary>
+        private int FindSeatNeedingEnterprisePick()
+        {
+            if (engine == null) return -1;
+
+            EnterpriseState enterprises = engine.State.Enterprises;
+            for (int seat = 0; seat < enterprises.ChosenBoards.Count; seat++)
+            {
+                if (enterprises.ChosenBoards[seat] >= 0) continue;
+                if (enterprises.Offers[seat].Count == 0) continue;
+                if (!CanOperateSeat(seat)) continue;
+                return seat;
+            }
+
+            return -1;
+        }
+
+        /// <summary>开局：把这名玩家抽到的 2 张企业板摆出来，选 1 张（§ 企业扩展设置）。</summary>
+        private void BeginEnterprisePick(int seat)
+        {
+            if (engine == null || choicePopup == null)
+            {
+                SetStatus("没接小选择弹窗，暂时没法选企业板。");
+                return;
+            }
+
+            EnterpriseState enterprises = engine.State.Enterprises;
+            List<int> offers = enterprises.Offers[seat];
+            if (offers.Count == 0)
+            {
+                SetStatus($"{SeatLabel(seat)} 没有待选的企业板。");
+                return;
+            }
+
+            var boardIds = new List<int>(offers);
+            var labels = new List<string>(offers.Count);
+            foreach (int boardId in boardIds)
+            {
+                EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
+                labels.Add(def != null ? $"{def.Name}（{def.Subtitle}）" : $"企业板 {boardId}");
+            }
+
+            string title = $"{SeatLabel(seat)}：从抽到的 {labels.Count} 张合作企业板中选 1 张（选完立即 +1 级）。";
+            choicePopup.Show(title, labels, choice =>
+            {
+                if (choice < 0 || choice >= boardIds.Count) return;
+
+                int boardId = boardIds[choice];
+                var command = new ChooseInitialEnterpriseCommand(seat, boardId);
+                if (!Dispatch(command)) return;
+
+                EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
+                SetStatus($"{SeatLabel(seat)} 选择了「{(def != null ? def.Name : boardId.ToString())}」。" +
+                          (engine.State.Enterprises.DraftDone
+                              ? "全部玩家已选定企业，接着决定初始资源点。"
+                              : "请继续把「企业」按钮交给下一位玩家选择。"));
+            }, allowCancel: false);
+        }
+
+        /// <summary>牌面要求「选择 1 家其他企业提升 1 级」时，把合法的企业板摆出来。</summary>
+        private void BeginEnterpriseAdvance(int seat)
+        {
+            if (engine == null) return;
+
+            EnterpriseState enterprises = engine.State.Enterprises;
+            var boardIds = new List<int>();
+            var labels = new List<string>();
+
+            foreach (int boardId in enterprises.ActiveBoards)
+            {
+                if (boardId == enterprises.PendingAdvanceExcludeBoard) continue;
+                int level = enterprises.LevelOf(boardId, seat);
+                if (level < 0 || level >= 5) continue;
+
+                EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
+                boardIds.Add(boardId);
+                labels.Add($"{(def != null ? def.Name : boardId.ToString())}：合作等级 {level} → {level + 1}");
+            }
+
+            if (labels.Count == 0)
+            {
+                SetStatus("场上没有还能提升合作等级的企业板。");
+                return;
+            }
+
+            if (choicePopup == null)
+            {
+                SetStatus("没接小选择弹窗，暂时没法选择要提升的企业板。");
+                return;
+            }
+
+            string reason = string.IsNullOrEmpty(enterprises.PendingAdvanceReason)
+                ? "选择 1 家企业提升 1 级合作等级。"
+                : enterprises.PendingAdvanceReason;
+            choicePopup.Show($"{SeatLabel(seat)}：{reason}", labels, choice =>
+            {
+                if (choice < 0 || choice >= boardIds.Count) return;
+
+                int boardId = boardIds[choice];
+                if (!Dispatch(new AdvanceEnterpriseLevelCommand(seat, boardId))) return;
+
+                EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
+                int level = engine.State.Enterprises.LevelOf(boardId, seat);
+                SetStatus($"{SeatLabel(seat)} 把「{(def != null ? def.Name : boardId.ToString())}」提升到 {level} 级。");
+            }, allowCancel: false);
+        }
+
+        /// <summary>把这名玩家当前可触发（已解锁、本回合没用过）的企业特效列出来。</summary>
+        private void BeginEnterpriseEffectMenu(int seat)
+        {
+            if (engine == null) return;
+
+            GameState state = engine.State;
+            if (state.Phase != TurnPhase.PlayerActions)
+            {
+                SetStatus("企业特效只能在玩家行动阶段触发。");
+                return;
+            }
+
+            if (seat < 0 || (!state.DeveloperMode && state.ActiveSeat != seat))
+            {
+                SetStatus("企业特效只能在自己行动时触发。");
+                return;
+            }
+
+            EnterpriseState enterprises = state.Enterprises;
+            var boardIds = new List<int>();
+            var levels = new List<int>();
+            var labels = new List<string>();
+            var summary = new List<string>();
+
+            foreach (int boardId in enterprises.ActiveBoards)
+            {
+                EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
+                int current = enterprises.LevelOf(boardId, seat);
+                if (def == null || current < 0) continue;
+
+                summary.Add($"{def.Name} {current} 级");
+
+                for (int level = 1; level <= current; level++)
+                {
+                    EnterpriseLevel entry = def.Level(level);
+                    if (entry == null || !entry.IsEffect) continue;
+                    if (enterprises.HasUsedEffectThisTurn(boardId, seat, level)) continue;
+
+                    boardIds.Add(boardId);
+                    levels.Add(level);
+                    labels.Add($"{def.Name} {level} 级：{entry.Text}");
+                }
+            }
+
+            string title = summary.Count > 0
+                ? $"合作等级：{string.Join("、", summary)}。选择要触发的企业特效。"
+                : "还没有任何企业合作等级。";
+
+            if (labels.Count == 0)
+            {
+                SetStatus($"{title} 当前没有可触发的企业特效（同一特效一回合只能触发 1 次）。");
+                return;
+            }
+
+            if (choicePopup == null)
+            {
+                SetStatus("没接小选择弹窗，暂时没法触发企业特效。");
+                return;
+            }
+
+            choicePopup.Show($"{SeatLabel(seat)}：{title}", labels, choice =>
+            {
+                if (choice < 0 || choice >= boardIds.Count) return;
+                BeginEnterpriseTrigger(seat, boardIds[choice], levels[choice]);
+            });
+        }
+
+        /// <summary>触发某个企业特效：带点选的效果先走收集会话，收集完再派发命令。</summary>
+        private void BeginEnterpriseTrigger(int seat, int boardId, int level)
+        {
+            if (engine == null) return;
+
+            EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
+            EnterpriseLevel entry = def?.Level(level);
+            if (entry == null) return;
+
+            enterpriseSeat = seat;
+            enterpriseBoardId = boardId;
+            enterpriseLevel = level;
+
+            if (entry.Option == null || choicePopup == null)
+            {
+                DispatchEnterpriseEffect(Array.Empty<int>());
+                return;
+            }
+
+            if (panel != null) panel.SetLocked(true);
+
+            enterpriseSession = new EffectChoiceSession(engine.State,
+                (sandbox, choices) => EffectResolver.ExecuteOption(sandbox, seat, entry.Option, true, choices));
+            enterpriseSession.Advance();
+            ContinueEnterpriseChoices();
+        }
+
+        /// <summary>抛出企业特效的下一个待答选择：点地图的走地图，其余走弹窗。</summary>
+        private void ContinueEnterpriseChoices()
+        {
+            if (enterpriseSession == null) return;
+
+            if (enterpriseSession.IsComplete)
+            {
+                IReadOnlyList<int> answers = enterpriseSession.Answers;
+                enterpriseSession = null;
+                DispatchEnterpriseEffect(answers);
+                return;
+            }
+
+            ChoiceRequest request = enterpriseSession.Pending;
+
+            if (request.Pick != null && request.Pick.Kind != ChoicePickKind.None)
+            {
+                if (choicePopup != null && choicePopup.IsVisible) choicePopup.Hide();
+                SetStatus("企业特效：请在地图上点击要选择的目标。");
+                UpdateHint();
+                return;
+            }
+
+            var options = new List<string>(request.Options.Count);
+            foreach (ChoiceOption option in request.Options) options.Add(option.Label);
+
+            EffectChoiceSession session = enterpriseSession;
+            choicePopup.Show(request.Prompt, options, choice =>
+            {
+                if (session != enterpriseSession) return;
+
+                if (choice >= 0)
+                {
+                    session.Answer(choice);
+                    ContinueEnterpriseChoices();
+                    return;
+                }
+
+                if (session.Back()) ContinueEnterpriseChoices();
+                else ExitEnterpriseFlow("已取消这次企业特效（没有结算）。");
+            }, request.AllowCancel);
+        }
+
+        /// <summary>企业特效里「点地图」的那一次选择：照候选清单把点击翻译成选项下标。</summary>
+        private bool HandleEnterpriseMapPick(MapHit hit)
+        {
+            if (enterpriseSession == null || enterpriseSession.IsComplete) return false;
+
+            ChoicePick pick = enterpriseSession.Pending != null ? enterpriseSession.Pending.Pick : null;
+            if (pick == null || pick.Kind == ChoicePickKind.None) return false;
+
+            if (!TryTranslateMapPick(pick, hit, out int index)) return true;
+
+            enterpriseSession.Answer(index);
+            ContinueEnterpriseChoices();
+            return true;
+        }
+
+        /// <summary>照收集到的答案派发「触发企业特效」命令。</summary>
+        private void DispatchEnterpriseEffect(IReadOnlyList<int> answers)
+        {
+            if (engine == null) return;
+
+            EnterpriseBoardDef def = EnterpriseCatalog.Board(enterpriseBoardId);
+            var command = new TriggerEnterpriseEffectCommand(enterpriseSeat, enterpriseBoardId, enterpriseLevel,
+                new RecordedChoices(answers, strict: false));
+
+            bool dispatched = Dispatch(command);
+            enterpriseSession = null;
+            if (panel != null) panel.SetLocked(false);
+
+            if (!dispatched)
+            {
+                enterpriseSeat = -1;
+                return;
+            }
+
+            string name = def != null ? def.Name : enterpriseBoardId.ToString();
+            string suffix = command.Report != null && command.Report.Entries.Count > 0
+                ? $"；效果：{command.Report.Describe()}"
+                : string.Empty;
+            SetStatus($"{SeatLabel(enterpriseSeat)} 触发「{name}」{enterpriseLevel} 级企业特效{suffix}");
+
+            // 罗德岛 1 级：触发后立刻要求选择 1 家其他企业提升 1 级，别让玩家再点一次按钮。
+            EnterpriseState enterprises = engine.State.Enterprises;
+            if (enterprises.PendingAdvanceSeat == enterpriseSeat && CanOperateSeat(enterpriseSeat))
+                BeginEnterpriseAdvance(enterpriseSeat);
+
+            enterpriseSeat = -1;
+        }
+
+        /// <summary>中途放弃企业特效：解锁与使用次数都不变（命令没派发）。</summary>
+        private void ExitEnterpriseFlow(string status)
+        {
+            enterpriseSession = null;
+            enterpriseSeat = -1;
+            if (panel != null) panel.SetLocked(false);
+            if (!string.IsNullOrEmpty(status)) SetStatus(status);
+            UpdateHint();
         }
 
         /// <summary>顶栏「行动座位」在单机热座下跟着实际操作者走（盖放／采集阶段引擎不轮转 ActiveSeat）。</summary>

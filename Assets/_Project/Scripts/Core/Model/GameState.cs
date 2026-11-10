@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using NomadCity.Core.Model.Enterprise;
 using NomadCity.Core.Rules;
 
 namespace NomadCity.Core.Model
@@ -149,6 +150,9 @@ namespace NomadCity.Core.Model
         /// </summary>
         public int ActiveSpecialActionPatternId = -1;
 
+        /// <summary>企业扩展的运行时状态（8 块企业板、各玩家的合作等级、科室板等）。</summary>
+        public EnterpriseState Enterprises = new();
+
         public GameState(GameSetup setup)
         {
             Setup = setup;
@@ -181,6 +185,7 @@ namespace NomadCity.Core.Model
                 PendingStartMarkerSeat = PendingStartMarkerSeat,
                 LastCityMoveRouteId = LastCityMoveRouteId,
                 ActiveSpecialActionPatternId = ActiveSpecialActionPatternId,
+                Enterprises = Enterprises == null ? new EnterpriseState() : Enterprises.Clone(),
             };
 
             foreach (PlayerState player in Players) copy.Players.Add(player.Clone());

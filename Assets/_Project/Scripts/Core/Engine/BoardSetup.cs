@@ -30,6 +30,11 @@ namespace NomadCity.Core.Engine
             AssignCoreCommandTowers(state, catalog);
             DealInitialFunds(state, firstPlayerSeat);
 
+            // 企业扩展：洗混 8 张合作企业板，每名玩家抽 2 张（正式选择由 ChooseInitialEnterpriseCommand 完成）。
+            // 未启用时也要按人数复位一次，保证联机快照 / 各端状态的结构一致。
+            if (state.Setup.IsEnterpriseEnabled) EnterpriseRules.Prepare(state, rng);
+            else state.Enterprises.Reset(state.Players.Count);
+
             // 开局入场·步 2「决定初始资源点」是需要玩家逐位交互的步骤，不在这里预置：
             // 由 ChooseStartNodeCommand 在玩家点选绿色资源点时执行
             // （移动城市停靠 + 翻开绿色事件牌放上资源点指示物 + B-01 特例）。
@@ -151,6 +156,8 @@ namespace NomadCity.Core.Engine
             {
                 PlayerState player = state.Players[seat];
                 int vouchers = variant.InitialVouchers(order);
+                // 企业扩展：每名玩家的初始资金额外 +5 金券（企业扩展设置第 4 步）。
+                if (state.Setup.IsEnterpriseEnabled) vouchers += 5;
                 player.Vouchers += vouchers;
                 player.Score += variant.InitialBonusScore(order);
                 seat = state.NextSeat(seat);

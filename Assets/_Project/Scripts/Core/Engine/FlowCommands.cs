@@ -95,6 +95,10 @@ namespace NomadCity.Core.Engine
             if (state.Player(ActorSeat).MobileCityNodeId >= 0)
                 return CommandResult.Fail("你已经决定过初始资源点了。");
 
+            // 企业扩展：企业抽选（抽 2 选 1）排在初始资源点之前（§4.3 步 2 与扩展设置）。
+            if (EnterpriseRules.Enabled(state) && !state.Enterprises.DraftDone)
+                return CommandResult.Fail("请先完成合作企业的「抽 2 选 1」，再决定初始资源点。");
+
             int chooser = NextChooser(state);
             if (chooser != ActorSeat) return CommandResult.Fail($"当前轮到玩家 {chooser + 1} 决定初始资源点。");
 

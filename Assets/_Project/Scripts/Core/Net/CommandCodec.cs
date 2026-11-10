@@ -231,6 +231,36 @@ namespace NomadCity.Core.Net
                 case EndTurnCommand c:
                     return new CommandDto { Kind = CommandKind.EndTurn, Seat = c.ActorSeat };
 
+                // 选择合作企业：P0 = BoardId。
+                case ChooseInitialEnterpriseCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.ChooseInitialEnterprise,
+                        Seat = c.ActorSeat,
+                        P0 = c.BoardId,
+                    };
+
+                // 提升合作等级：P0 = BoardId。
+                case AdvanceEnterpriseLevelCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.AdvanceEnterpriseLevel,
+                        Seat = c.ActorSeat,
+                        P0 = c.BoardId,
+                    };
+
+                // 触发企业特效：P0 = BoardId；P1 = Level；P3 = 答案个数，Items = 答案。
+                case TriggerEnterpriseEffectCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.TriggerEnterpriseEffect,
+                        Seat = c.ActorSeat,
+                        P0 = c.BoardId,
+                        P1 = c.Level,
+                        P3 = AnswerCount(c.EffectChoices),
+                        Items = AnswerItems(c.EffectChoices),
+                    };
+
                 // P0 = 座位号；P1 = 选点数；Items = 本座位的选点 id（只传自己的）。
                 case SubmitHarvestChoiceCommand c:
                 {
@@ -342,6 +372,15 @@ namespace NomadCity.Core.Net
 
                 case CommandKind.EndTurn:
                     return new EndTurnCommand(dto.Seat >= 0 ? dto.Seat : dto.P0);
+
+                case CommandKind.ChooseInitialEnterprise:
+                    return new ChooseInitialEnterpriseCommand(dto.Seat, dto.P0);
+
+                case CommandKind.AdvanceEnterpriseLevel:
+                    return new AdvanceEnterpriseLevelCommand(dto.Seat, dto.P0);
+
+                case CommandKind.TriggerEnterpriseEffect:
+                    return new TriggerEnterpriseEffectCommand(dto.Seat, dto.P0, dto.P1, DecodeAnswers(dto));
 
                 default:
                     throw new ArgumentException($"无法解码未知的命令 Kind：{dto.Kind}。", nameof(dto));

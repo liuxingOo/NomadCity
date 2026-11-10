@@ -275,6 +275,27 @@
 
 ---
 
+## 9.1 落码（2026-11-10，第一阶段）
+
+> 企业板 / 科室板卡面已扫描录入（`Assets/_Project/Art/Cards/Enterprise/card_enterprise.jpg`、`laiyin1–3.png`），
+> 上面「待核实清单」的 1／2／3 项已按卡面补全；以下为实现现状。
+
+| 已实现 | 位置 |
+|---|---|
+| 8 块企业板 × 0–5 级、3 张科室板 × 2–5 级的文字与可执行效果 | `Core/Model/Enterprise/EnterpriseCatalog.cs` |
+| 企业牌堆、场上企业板、各座位合作等级、科室板、每回合特效使用记录 | `Core/Model/Enterprise/EnterpriseState.cs` |
+| 开局洗牌、每人抽 2 张、2／3 人局补足 4 块、初始资金 +5 金券 | `Core/Engine/EnterpriseRules.cs`、`Core/Engine/BoardSetup.cs` |
+| 抽 2 选 1（`ChooseInitialEnterpriseCommand`）、提升 1 级（`AdvanceEnterpriseLevelCommand`）、触发特效（`TriggerEnterpriseEffectCommand`） | `Core/Engine/Actions/EnterpriseCommands.cs` |
+| 联机注册与快照（快照版本升到 3） | `Core/Net/CommandKind.cs`、`CommandCodec.cs`、`GameStateSnapshot*.cs` |
+| 界面入口：操作区「企业」按钮 → 开局抽选 / 待提升 / 特效菜单（点选复用事件牌那套收集会话） | `UI/GameScreenController.cs` |
+
+**尚未接入（触发时会给出中文原因）**：干员特派、弃牌区回手、供应区洗回牌堆＋免费建造、切换科室板、
+从设施牌堆建造、不占用主要行动的建设、立刻采集、结构科 5 级降级结算。
+**近似实现**：富森银行 4 级「1 位对手失去 1 分」暂按**分数最高的对手**结算（UI 选对手待补）。
+**未实现的开局差异**：每人手牌 5 → 7（山／玛恩纳卡面未定）、初始资源点获得的资源 +1、红色区域开放回合的全体提升。
+
+---
+
 ## 10. 与后续扩展（感染者扩展）的接口要求
 
 企业扩展已验证的注入点已经覆盖了「新增牌堆 / 改写设置 / 新增并行系统 / 新增触发时机 / 改写底层规则」五类改动。**感染者扩展的接入应按同一套挂载点设计**，若出现无法挂载的新需求，应回头扩充挂载点定义，而不是在基础流程里加分支。

@@ -30,6 +30,10 @@ namespace NomadCity.Core.Engine
             if (state.CityMoveOriginNodeId >= 0)
                 return CommandResult.Fail("城市移动还没走完（还要在出发点放置 1 个影响力），不能结束回合（§6.4d）。");
 
+            // 企业特效要求「选择 1 家其他企业提升 1 级」还没选完，不能结束回合。
+            if (state.Enterprises != null && state.Enterprises.PendingAdvanceSeat == ActorSeat)
+                return CommandResult.Fail("还要先选择 1 家其他企业提升 1 级合作等级（企业特效）。");
+
             // 规则要求每轮必须做 1 次主要行动才能结束回合；开发者模式放开这条，
             // 方便单独测快速行动 / 阶段流程。
             if (!state.DeveloperMode && !state.MainActionTakenThisRound)

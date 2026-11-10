@@ -115,6 +115,12 @@ namespace NomadCity.Core.Engine
                     return AdjacentToCoreFacilityCount(player);
                 case CountSource.NonColorFacilityKinds:
                     return NonColorFacilityKindCount(player, state.Catalog);
+                case CountSource.InfluenceOnRoutes:
+                {
+                    int count = 0;
+                    foreach (RouteState route in state.Map.Routes) count += route.Slots.CountOf(seat);
+                    return count;
+                }
                 default:
                     return 0;
             }

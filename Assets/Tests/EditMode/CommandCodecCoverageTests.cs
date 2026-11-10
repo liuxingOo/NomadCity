@@ -154,6 +154,21 @@ namespace NomadCity.Tests
                     Items = new[] { 0, 1, 5, 1, 2, 6, 7 },
                 },
 
+            // 企业扩展：P0 = 企业板 id。
+            CommandKind.ChooseInitialEnterprise =>
+                new CommandDto { Kind = kind, Seat = 1, P0 = 3 },
+
+            // 企业扩展：P0 = 企业板 id。
+            CommandKind.AdvanceEnterpriseLevel =>
+                new CommandDto { Kind = kind, Seat = 1, P0 = 3 },
+
+            // 企业扩展：P0 = 企业板 id；P1 = 合作等级；P3 = 答案个数，Items = 答案。
+            CommandKind.TriggerEnterpriseEffect =>
+                new CommandDto
+                {
+                    Kind = kind, Seat = 1, P0 = 3, P1 = 2, P3 = 2, Items = new[] { 1, -1 },
+                },
+
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind,
                 "新增了 CommandKind 却没在往返测试里给出样本 DTO。"),
         };

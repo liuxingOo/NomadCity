@@ -138,6 +138,8 @@ namespace NomadCity.Core.Engine
             }
 
             state.TurnNumber++;
+            // 企业扩展：企业特效「同一特效一回合只能触发 1 次」，新回合全部复位。
+            state.Enterprises?.ResetTurnEffects();
             // 起始玩家顺时针传递（§8）；「联邦理事会」若在本回合收尾阶段生效，则改由它指定的玩家担任。
             state.FirstPlayerSeat = state.PendingStartMarkerSeat >= 0
                 ? state.PendingStartMarkerSeat

@@ -38,6 +38,19 @@ namespace NomadCity.Core.Net
             writer.Int(snapshot.LastCityMoveRouteId);
             writer.Int(snapshot.ActiveSpecialActionPatternId);
 
+            // —— 企业扩展 ——
+            writer.Bool(snapshot.EnterpriseDraftDone);
+            writer.Int(snapshot.EnterprisePendingAdvanceSeat);
+            writer.Int(snapshot.EnterprisePendingAdvanceExcludeBoard);
+            writer.String(snapshot.EnterprisePendingAdvanceReason);
+            writer.Ints(snapshot.EnterpriseLevels);
+            writer.Ints(snapshot.EnterpriseUsedMasks);
+            writer.Ints(snapshot.EnterpriseOffers);
+            writer.Ints(snapshot.EnterpriseDeck);
+            writer.Ints(snapshot.EnterpriseBoards);
+            writer.Ints(snapshot.EnterpriseChosen);
+            writer.Ints(snapshot.EnterpriseDepartments);
+
             // —— 玩家 ——
             writer.Int(snapshot.Players.Count);
             foreach (GameStateSnapshot.PlayerSnapshot player in snapshot.Players)
@@ -155,7 +168,19 @@ namespace NomadCity.Core.Net
                 PendingStartMarkerSeat = reader.Int(),
                 LastCityMoveRouteId = reader.Int(),
                 ActiveSpecialActionPatternId = reader.Int(),
+                EnterpriseDraftDone = reader.Bool(),
+                EnterprisePendingAdvanceSeat = reader.Int(),
+                EnterprisePendingAdvanceExcludeBoard = reader.Int(),
+                EnterprisePendingAdvanceReason = reader.String(),
+                EnterpriseLevels = reader.Ints(),
+                EnterpriseUsedMasks = reader.Ints(),
+                EnterpriseOffers = reader.Ints(),
             };
+
+            snapshot.EnterpriseDeck.AddRange(reader.Ints());
+            snapshot.EnterpriseBoards.AddRange(reader.Ints());
+            snapshot.EnterpriseChosen.AddRange(reader.Ints());
+            snapshot.EnterpriseDepartments.AddRange(reader.Ints());
 
             // —— 玩家 ——
             int playerCount = reader.Int();

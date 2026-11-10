@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using NomadCity.Core.Model;
+using NomadCity.Core.Model.Enterprise;
 using NomadCity.Core.Rules;
 
 namespace NomadCity.Core.Net
@@ -17,7 +18,7 @@ namespace NomadCity.Core.Net
     public sealed class GameStateSnapshot
     {
         /// <summary>当前快照格式版本；协议握手时与对方比对。</summary>
-        public const int Version = 2;
+        public const int Version = 3;
 
         public int PlayerCount;
         public ExpansionFlags Expansions;
@@ -42,6 +43,26 @@ namespace NomadCity.Core.Net
         public int PendingStartMarkerSeat = -1;
         public int LastCityMoveRouteId = -1;
         public int ActiveSpecialActionPatternId = -1;
+
+        // —— 企业扩展 ——
+        public bool EnterpriseDraftDone;
+        public int EnterprisePendingAdvanceSeat = -1;
+        public int EnterprisePendingAdvanceExcludeBoard = -1;
+        public string EnterprisePendingAdvanceReason = string.Empty;
+
+        /// <summary>合作等级：按「企业板 id × 座位号」拉平，长度 = 8 × 人数。</summary>
+        public int[] EnterpriseLevels = Array.Empty<int>();
+
+        /// <summary>本回合已触发的企业特效位掩码：同样按「企业板 id × 座位号」拉平。</summary>
+        public int[] EnterpriseUsedMasks = Array.Empty<int>();
+
+        /// <summary>各座位开局抽到的 2 张企业板，每座位固定 2 个槽位（-1 = 空）。</summary>
+        public int[] EnterpriseOffers = Array.Empty<int>();
+
+        public readonly List<int> EnterpriseDeck = new();
+        public readonly List<int> EnterpriseBoards = new();
+        public readonly List<int> EnterpriseChosen = new();
+        public readonly List<int> EnterpriseDepartments = new();
 
         public readonly List<PlayerSnapshot> Players = new();
         public readonly List<NodeSnapshot> Nodes = new();
@@ -108,6 +129,42 @@ namespace NomadCity.Core.Net
             foreach (CityPatternState pattern in state.CityPatternStates)
                 snapshot.CityPatternStates.Add(PatternSnapshot.Capture(pattern));
 
+            // —— 企业扩展 ——
+            EnterpriseState enterprises = state.Enterprises;
+            if (enterprises != null)
+            {
+                snapshot.EnterpriseDraftDone = enterprises.DraftDone;
+                snapshot.EnterprisePendingAdvanceSeat = enterprises.PendingAdvanceSeat;
+                snapshot.EnterprisePendingAdvanceExcludeBoard = enterprises.PendingAdvanceExcludeBoard;
+                snapshot.EnterprisePendingAdvanceReason = enterprises.PendingAdvanceReason ?? string.Empty;
+
+                snapshot.EnterpriseDeck.AddRange(enterprises.Deck);
+                snapshot.EnterpriseBoards.AddRange(enterprises.ActiveBoards);
+                snapshot.EnterpriseChosen.AddRange(enterprises.ChosenBoards);
+                snapshot.EnterpriseDepartments.AddRange(enterprises.Departments);
+
+                int playerCount = state.Players.Count;
+                snapshot.EnterpriseOffers = new int[playerCount * 2];
+                for (int seat = 0; seat < playerCount; seat++)
+                {
+                    List<int> offer = seat < enterprises.Offers.Count ? enterprises.Offers[seat] : null;
+                    snapshot.EnterpriseOffers[seat * 2] = offer != null && offer.Count > 0 ? offer[0] : -1;
+                    snapshot.EnterpriseOffers[seat * 2 + 1] = offer != null && offer.Count > 1 ? offer[1] : -1;
+                }
+
+                snapshot.EnterpriseLevels = new int[EnterpriseCatalog.BoardCount * playerCount];
+                snapshot.EnterpriseUsedMasks = new int[EnterpriseCatalog.BoardCount * playerCount];
+                for (int board = 0; board < EnterpriseCatalog.BoardCount; board++)
+                {
+                    for (int seat = 0; seat < playerCount; seat++)
+                    {
+                        int index = board * playerCount + seat;
+                        snapshot.EnterpriseLevels[index] = enterprises.LevelOf(board, seat);
+                        snapshot.EnterpriseUsedMasks[index] = enterprises.UsedMaskOf(board, seat);
+                    }
+                }
+            }
+
             return snapshot;
         }
 
@@ -154,6 +211,42 @@ namespace NomadCity.Core.Net
 
             state.CityPatternCards.AddRange(CityPatternCards);
             foreach (PatternSnapshot pattern in CityPatternStates) state.CityPatternStates.Add(pattern.Restore());
+
+            // —— 企业扩展 ——
+            EnterpriseState enterprises = state.Enterprises;
+            enterprises.Reset(Players.Count);
+            enterprises.DraftDone = EnterpriseDraftDone;
+            enterprises.PendingAdvanceSeat = EnterprisePendingAdvanceSeat;
+            enterprises.PendingAdvanceExcludeBoard = EnterprisePendingAdvanceExcludeBoard;
+            enterprises.PendingAdvanceReason = EnterprisePendingAdvanceReason ?? string.Empty;
+            enterprises.Deck.AddRange(EnterpriseDeck);
+            enterprises.ActiveBoards.AddRange(EnterpriseBoards);
+
+            for (int seat = 0; seat < enterprises.ChosenBoards.Count; seat++)
+            {
+                if (seat < EnterpriseChosen.Count) enterprises.ChosenBoards[seat] = EnterpriseChosen[seat];
+                if (seat < EnterpriseDepartments.Count) enterprises.Departments[seat] = EnterpriseDepartments[seat];
+
+                enterprises.Offers[seat].Clear();
+                for (int slot = 0; slot < 2; slot++)
+                {
+                    int index = seat * 2 + slot;
+                    if (index < EnterpriseOffers.Length && EnterpriseOffers[index] >= 0)
+                        enterprises.Offers[seat].Add(EnterpriseOffers[index]);
+                }
+            }
+
+            int playerCount = Players.Count;
+            for (int board = 0; board < EnterpriseCatalog.BoardCount; board++)
+            {
+                for (int seat = 0; seat < playerCount; seat++)
+                {
+                    int index = board * playerCount + seat;
+                    if (index < EnterpriseLevels.Length) enterprises.SetLevel(board, seat, EnterpriseLevels[index]);
+                    if (index < EnterpriseUsedMasks.Length)
+                        enterprises.SetUsedMask(board, seat, EnterpriseUsedMasks[index]);
+                }
+            }
 
             return state;
         }
