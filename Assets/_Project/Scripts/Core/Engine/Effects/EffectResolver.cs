@@ -61,11 +61,62 @@ namespace NomadCity.Core.Engine
         int ChooseNode(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates);
 
         /// <summary>
+        /// 在若干条航道里选 1 条（候选 = 航道 id；企业扩展「开辟商路」）。
+        /// 返回 -1 表示作罢，该效果跳过。
+        /// </summary>
+        int ChooseRoute(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates);
+
+        /// <summary>
+        /// 在若干块场上企业板里选 1 块（候选 = 企业板 id；企业扩展「选择 1 家企业」）。
+        /// 返回 -1 表示作罢，该效果跳过。
+        /// </summary>
+        int ChooseEnterpriseBoard(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates);
+
+        /// <summary>
+        /// 在选定的企业板上挑一个要触发的特效等级（候选 = 合作等级）。
+        /// 返回 -1 表示作罢，该效果跳过。
+        /// </summary>
+        int ChooseEnterpriseEffectLevel(int seat, RewardOp op, GameState state, int boardId,
+            IReadOnlyList<int> candidates);
+
+        /// <summary>
+        /// 【莱茵生命 1 级】从其余科室板里选 1 张切换过去（候选 = 科室板 id）。
+        /// 返回 -1 表示这次不切换。
+        /// </summary>
+        int ChooseRhineDepartment(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates);
+
+        /// <summary>
+        /// 【富森银行 4 级】选 1 位对手（候选 = 座位号，已排除自己）。
+        /// 返回 -1 表示作罢。
+        /// </summary>
+        int ChooseOpponent(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates);
+
+        /// <summary>
+        /// 从角色牌弃牌区里选 1 张（候选 = 角色牌 id；企业扩展「罗德岛 4 级」）。
+        /// 返回 -1 表示不取回（弃牌区为空时不会调用）。
+        /// </summary>
+        int ChooseDiscardedCharacterCard(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates);
+
+        /// <summary>
+        /// 【干员特派】从抽到的干员牌里选 1 张加入手牌（候选 = 干员角色牌 id）。
+        /// 返回 -1 表示「全部洗回牌堆，获得 1 分」。
+        /// </summary>
+        int ChooseOperatorCard(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates);
+
+        /// <summary>
+        /// 【干员特派】选 1 张角色牌放回游戏盒（候选 = 手牌 + 角色牌弃牌区，可能包含刚拿到的干员牌）。
+        /// 返回 -1 表示不处理（候选为空时不会调用）。
+        /// </summary>
+        int ChooseCharacterCardIntoBox(int seat, RewardOp op, GameState state,
+            IReadOnlyList<int> candidates);
+
+        /// <summary>
         /// 为「进行一次建造」选设施牌与面板空位（候选 = 设施牌 id / 面板格子下标）。
         /// 返回 null 表示作罢，跳过这次建造。
+        /// <paramref name="freeOnly"/> = true 时这是卡牌给的免费建造：不再询问付费方式，直接免单。
         /// </summary>
         BuildChoice? ChooseBuild(int seat, RewardOp op, GameState state,
-            IReadOnlyList<int> facilityIds, IReadOnlyList<int> panelSlots);
+            IReadOnlyList<int> facilityIds, IReadOnlyList<int> panelSlots, bool freeOnly = false);
 
         /// <summary>为「从余下延伸枢纽中选 1 张并建设」选一张延伸枢纽（候选 = 设施牌 id）；-1 表示作罢。</summary>
         int ChooseExtensionHub(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates);
@@ -131,10 +182,40 @@ namespace NomadCity.Core.Engine
         public int ChooseNode(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates) =>
             candidates != null && candidates.Count > 0 ? candidates[0] : -1;
 
+        public int ChooseRoute(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates) =>
+            candidates != null && candidates.Count > 0 ? candidates[0] : -1;
+
+        public int ChooseEnterpriseBoard(int seat, RewardOp op, GameState state,
+            IReadOnlyList<int> candidates) =>
+            candidates != null && candidates.Count > 0 ? candidates[0] : -1;
+
+        public int ChooseEnterpriseEffectLevel(int seat, RewardOp op, GameState state, int boardId,
+            IReadOnlyList<int> candidates) =>
+            candidates != null && candidates.Count > 0 ? candidates[0] : -1;
+
+        public int ChooseRhineDepartment(int seat, RewardOp op, GameState state,
+            IReadOnlyList<int> candidates) =>
+            candidates != null && candidates.Count > 0 ? candidates[0] : -1;
+
+        public int ChooseOpponent(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates) =>
+            candidates != null && candidates.Count > 0 ? candidates[0] : -1;
+
+        public int ChooseDiscardedCharacterCard(int seat, RewardOp op, GameState state,
+            IReadOnlyList<int> candidates) =>
+            candidates != null && candidates.Count > 0 ? candidates[0] : -1;
+
+        public int ChooseOperatorCard(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates) =>
+            candidates != null && candidates.Count > 0 ? candidates[0] : -1;
+
+        public int ChooseCharacterCardIntoBox(int seat, RewardOp op, GameState state,
+            IReadOnlyList<int> candidates) =>
+            candidates != null && candidates.Count > 0 ? candidates[0] : -1;
+
         public BuildChoice? ChooseBuild(int seat, RewardOp op, GameState state,
-            IReadOnlyList<int> facilityIds, IReadOnlyList<int> panelSlots) =>
+            IReadOnlyList<int> facilityIds, IReadOnlyList<int> panelSlots, bool freeOnly = false) =>
             facilityIds != null && facilityIds.Count > 0 && panelSlots != null && panelSlots.Count > 0
-                ? new BuildChoice(facilityIds[0], panelSlots[0], FacilityPayment.Resources)
+                ? new BuildChoice(facilityIds[0], panelSlots[0],
+                    freeOnly ? FacilityPayment.None : FacilityPayment.Resources)
                 : (BuildChoice?)null;
 
         public int ChooseExtensionHub(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates) =>
@@ -179,7 +260,7 @@ namespace NomadCity.Core.Engine
         bool Handles(RewardOp op, GameState state);
 
         /// <summary>执行一个扩展专属效果；返回 false 表示无法执行（记为跳过，不阻断后续效果）。</summary>
-        bool Execute(RewardOp op, int seat, GameState state);
+        bool Execute(RewardOp op, int seat, GameState state, IEffectChoices choices);
     }
 
     /// <summary>一条效果的执行记要。</summary>
@@ -200,7 +281,9 @@ namespace NomadCity.Core.Engine
             Note = note;
         }
 
-        public override string ToString() => Applied ? $"{Op} ✓" : $"{Op} ✗（{Note}）";
+        public override string ToString() => Applied
+            ? (string.IsNullOrEmpty(Note) ? $"{Op} ✓" : $"{Op} ✓（{Note}）")
+            : $"{Op} ✗（{Note}）";
     }
 
     /// <summary>一次效果执行的报告。只读，供 UI 显示「做了什么／哪里没做成」。</summary>
@@ -242,7 +325,8 @@ namespace NomadCity.Core.Engine
         public string Describe()
         {
             if (Declined) return Note ?? "效果被放弃。";
-            if (Entries.Count == 0) return "没有可执行的效果。";
+            if (Entries.Count == 0)
+                return string.IsNullOrEmpty(Note) ? "没有可执行的效果。" : Note;
 
             var parts = new List<string>(Entries.Count);
             foreach (EffectLogEntry entry in Entries) parts.Add(entry.ToString());
@@ -272,7 +356,12 @@ namespace NomadCity.Core.Engine
         /// <summary>该效果类型是否只属于扩展包、基础规则不实现其语义。</summary>
         public static bool IsExtensionOnly(RewardKind kind) => kind switch
         {
-            RewardKind.ChooseEnterprise => true, // 企业扩展
+            RewardKind.ChooseEnterprise => true,               // 企业扩展
+            RewardKind.AdvanceEnterpriseAllPlayers => true,    // 企业扩展（玛恩纳·策略）
+            RewardKind.AdvanceOwnEnterpriseLevel => true,      // 企业扩展（玛恩纳·计谋）
+            RewardKind.TriggerEnterpriseEffectOnce => true,    // 企业扩展
+            RewardKind.AdvanceAndTriggerEnterprise => true,    // 企业扩展（山·计谋）
+            RewardKind.PlaceHighway => true,                   // 企业扩展（山·策略）
             _ => false,
         };
 
@@ -350,7 +439,7 @@ namespace NomadCity.Core.Engine
             {
                 if (extension != null && extension.Handles(op, state))
                 {
-                    bool ok = extension.Execute(op, seat, state);
+                    bool ok = extension.Execute(op, seat, state, choices);
                     return new EffectLogEntry(op, ok, ok ? null : "扩展未能执行该效果。");
                 }
                 return new EffectLogEntry(op, false, "该效果属于扩展内容（例如企业扩展），当前未接入。");
@@ -429,6 +518,7 @@ namespace NomadCity.Core.Engine
                     int count = CityPanelQuery.Count(state, seat, op.Count);
                     int gained = count * op.Amount;
                     player.Vouchers += gained;
+                    note = $"按 {count} 个计数单位结算，获得 {gained} 金券。";
                     return true;
                 }
 

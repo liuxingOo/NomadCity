@@ -169,6 +169,14 @@ namespace NomadCity.Tests
                     Kind = kind, Seat = 1, P0 = 3, P1 = 2, P3 = 2, Items = new[] { 1, -1 },
                 },
 
+            // 开局弃 2 张角色牌：P0 = 第一张，P1 = 第二张。
+            CommandKind.DiscardSetupHandCards =>
+                new CommandDto { Kind = kind, Seat = 0, P0 = 11, P1 = 18 },
+
+            // 莱茵生命科室板：P0 = 科室板 id。
+            CommandKind.PickRhineDepartment =>
+                new CommandDto { Kind = kind, Seat = 1, P0 = 2 },
+
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind,
                 "新增了 CommandKind 却没在往返测试里给出样本 DTO。"),
         };

@@ -23,7 +23,7 @@
 | 开局入场·新增步骤 | 决定初始企业并提升 1 级 |
 | 开局入场·新增步骤 | 弃 2 张手牌放回游戏盒 |
 | 开局入场·条件分支 | 罗德岛 / 莱茵生命的特殊处理 |
-| 拓荒探索·触发点 | 红色区域开放回合前，全体提升 1 级企业合作等级 |
+| 拓荒探索·触发点 | 红色区域开放回合的角色牌盖放阶段前，每名玩家各选 1 家企业，把自己的合作等级提升 1 级 |
 | 底层规则·新增 | 公路指示物覆盖航道；角色牌放回游戏盒后的延迟结算 |
 | **新增并行系统** | **企业合作等级 + 企业特效** |
 
@@ -82,7 +82,7 @@
 
 > **范例**：`富森银行` 是红色玩家选择的初始企业板，他需将其上的红色玩家标记向上移动一格。标记到达 1 级，将奖励他**解锁一个【企业特效】**。此时红色玩家**无法触发**该企业特效，即无法立刻获得 8 金券。只有后续使用【触发企业特效】的效果才能使用此特效获得 8 金券。
 >
-> ⚠️此范例中的「8 金券」与本规则书 P23 富森银行 3 级特效的「20 金券」冲突，见 [8.5](#85-富森银行) 的说明。
+> ✅**已按实体企业板核对（2026-11-11）**：富森银行 **1 级**特效果真是「获得 8 金券」，**3 级**特效是「获得 20 金券 + 每位对手 4 金券」。此前记录的「数字冲突」是两个不同等级，**并不矛盾**。
 
 ### 4.2 在决定初始资源点后：弃 2 张手牌
 
@@ -146,6 +146,16 @@
 ### 6.3 触发企业特效
 
 玩家触发企业特效时，**必须从已解锁的企业特效中选择一个发动**。
+
+### 6.4 卡面图标（2026-11-11 已与规则持有者确认）
+
+事件牌、角色牌（山／玛恩纳）上出现的两种企业图标：
+
+| 图标形状 | 含义 |
+|---|---|
+| 握手 + 三道向上箭头 | **提升 1 级企业合作等级**（「所有玩家」字样出现时，全部玩家各提升 1 级） |
+| 三角框 + 握手 | **触发 1 个已解锁的企业特效**（从自己在该企业板上已解锁的特效中选 1 个发动） |
+
 
 ---
 
@@ -211,11 +221,13 @@
 
 | 等级 | 效果 |
 |---|---|
-| **3 级** | 玩家**先获得 20 金券**，之后**除了发动该效果的玩家以外，其余玩家均获得 4 金券**。 |
+| **5 级** | 获得 3 分（即时奖励）。 |
+| **4 级** | 【企业特效】你获得 1 分 → 1 位对手失去 1 分。 |
+| **3 级** | 【企业特效】玩家**先获得 20 金券**，之后**除了发动该效果的玩家以外，其余玩家均获得 4 金券**。 |
+| **2 级** | （空白，无奖励。） |
+| **1 级** | 【企业特效】获得 8 金券。 |
 
-> ⚠️**规则书内部矛盾，待实体板确认**：本文 [4.1 范例](#41-在决定初始资源点前决定初始企业并获得初始企业合作等级)（照抄规则书 P17 开局入场）说富森银行 **1 级**解锁的特效是「立刻获得 **8 金券**」，而规则书企业效果详解页（本表，即 P23）写富森银行 **3 级**特效是「先得 **20 金券**，其余玩家各 4 金券」——两个数字对不上。
-> **已删除**此前本文中「（对应 3 级特效，为 8 金券相关）」的推断，那是推测而非原文。
-> 结论只能等实体合作企业板录入：需确认富森银行 **1 级**格上到底写着什么特效、以及 **8 金券**出自哪一级。
+> ✅**已按实体企业板核对（2026-11-11）**：8 金券出自 **1 级**、20 金券出自 **3 级**，两者是不同等级，此前记录的「规则书内部矛盾」不成立。
 
 ### 8.6 约翰老妈（MAMA JOHN'S）
 
@@ -266,9 +278,9 @@
 | 2 | **约翰老妈**的全部企业特效 |
 | 3 | **莱茵生命** 3 张科室板的具体效果 |
 | 4 | ~~2 张扩展事件牌（`洞穴遗迹`、`采集平台残骸`）的替换后内容~~ —— **已录入**，见 `EventCards.md` §6 |
-| 5 | 3 张扩展设施牌的牌面（费用 / 分数 / 入场效果） |
+| 5 | ~~3 张扩展设施牌的牌面（费用 / 分数 / 入场效果）~~ —— **已录入**，见 `FacilityCards.md` §6.3（id 600–602，`CardCatalog.BuildEnterpriseFacilities`） |
 | 6 | 6 张扩展城市样式牌（I 级 4 张、II 级 2 张）的宣告条件与奖励 |
-| 7 | 山、玛恩纳的**卡面完整文案**（角色构成已确认：4 色 × 2 张 = 8 张） |
+| 7 | ~~山、玛恩纳的**卡面完整文案**~~ —— **已录入**，见 §3.2 / §4.2 与本文件 9.2 |
 | 8 | 「企业办事处」「干员特派」等设施的入场效果原文 |
 
 > **补录建议**：合作企业板、科室板、扩展事件牌、扩展设施牌、扩展城市样式牌需要整批扫描后逐张录入。
@@ -284,15 +296,71 @@
 |---|---|
 | 8 块企业板 × 0–5 级、3 张科室板 × 2–5 级的文字与可执行效果 | `Core/Model/Enterprise/EnterpriseCatalog.cs` |
 | 企业牌堆、场上企业板、各座位合作等级、科室板、每回合特效使用记录 | `Core/Model/Enterprise/EnterpriseState.cs` |
-| 开局洗牌、每人抽 2 张、2／3 人局补足 4 块、初始资金 +5 金券 | `Core/Engine/EnterpriseRules.cs`、`Core/Engine/BoardSetup.cs` |
-| 抽 2 选 1（`ChooseInitialEnterpriseCommand`）、提升 1 级（`AdvanceEnterpriseLevelCommand`）、触发特效（`TriggerEnterpriseEffectCommand`） | `Core/Engine/Actions/EnterpriseCommands.cs` |
-| 联机注册与快照（快照版本升到 3） | `Core/Net/CommandKind.cs`、`CommandCodec.cs`、`GameStateSnapshot*.cs` |
-| 界面入口：操作区「企业」按钮 → 开局抽选 / 待提升 / 特效菜单（点选复用事件牌那套收集会话） | `UI/GameScreenController.cs` |
+| 开局洗牌、3／4 人局每人抽 2 张、2 人局每人抽 4 张、2／3 人局补足 4 块、初始资金 +5 金券 | `Core/Engine/EnterpriseRules.cs`、`Core/Engine/BoardSetup.cs` |
+| 抽 2 选 1 / 2 人局抽 4 选 2（`ChooseInitialEnterpriseCommand`）、提升 1 级（`AdvanceEnterpriseLevelCommand`）、触发特效（`TriggerEnterpriseEffectCommand`） | `Core/Engine/Actions/EnterpriseCommands.cs` |
+| 联机注册与快照（快照版本升到 5） | `Core/Net/CommandKind.cs`、`CommandCodec.cs`、`GameStateSnapshot*.cs` |
+| 界面入口：操作区「企业」按钮 → 开局抽选 / 待提升 / 总览查看；企业特效本身只能由卡牌效果（角色牌 / 设施 / 城市样式特殊行动 / 事件牌）解锁并触发 | `UI/GameScreenController.cs` |
 
-**尚未接入（触发时会给出中文原因）**：干员特派、弃牌区回手、供应区洗回牌堆＋免费建造、切换科室板、
-从设施牌堆建造、不占用主要行动的建设、立刻采集、结构科 5 级降级结算。
-**近似实现**：富森银行 4 级「1 位对手失去 1 分」暂按**分数最高的对手**结算（UI 选对手待补）。
-**未实现的开局差异**：每人手牌 5 → 7（山／玛恩纳卡面未定）、初始资源点获得的资源 +1、红色区域开放回合的全体提升。
+## 9.2 落码（第二阶段：山 / 玛恩纳 + 公路）
+| 已实现 | 位置 |
+|---|---|
+| 手牌 5 → 7：新增四色 × {山, 玛恩纳} 共 8 张角色牌（id 20–27），统一走扩展 id 段 | `Core/Model/Cards/CardCatalog.cs` |
+| 开局入场「7 选 5」：`DiscardSetupHandCardsCommand`（放弃 2 张放回游戏盒；未完成不能行动 / 盖放） | `Core/Engine/Actions/CharacterCardCommands.cs`、`ActionRules.cs` |
+| 手牌区运行时补足 7 个牌位；卡面库索引扩到 7（山 = 5、玛恩纳 = 6） | `UI/CharacterHandPanel.cs`、`Editor/CardFaceFiller.cs` |
+| 公路指示物：`RouteState.IsHighway`、覆盖影响力格、探索 / 采集免路费、地图渲染 | `Core/Model/MapState.cs`、`ActionRules.cs`、`TollCalculator.cs`、`Game/MapVisuals/*` |
+| 4 个角色效果：开辟商路 / 商业网络 / 公事公办（二选一）/ 游说赞助 | `Core/Engine/Effects/EnterpriseEffectExtension.cs` |
+| 状态同步：`PlayerState.SetupDiscardDone`、`RouteState.IsHighway` 进快照（版本 5） | `Core/Net/GameStateSnapshot*.cs` |
+
+## 9.3 落码（第三阶段：开局自动抽选 + 企业板总览 + 公路素材）
+
+| 已实现 | 位置 |
+|---|---|
+| 开局抽选自动接入：企业家选完 → 决定初始企业 → 决定初始资源点 → 7 选 5；未选完企业时不能选点 / 弃牌 | `UI/GameScreenController.cs`（`TryBeginEnterpriseDraft`） |
+| 2 人局「抽 4 选 2」：每人 2 家初始企业，两块板上各有自己的 1 个标记停在 1 级 | `Core/Engine/EnterpriseRules.cs`、`EnterpriseCommands.cs`、`EnterpriseState.cs` |
+| 企业板总览：操作区「企业」按钮 → 并排展示场上企业板 + 各座位标记（数字 = 座位号）+ 单板放大 | `UI/EnterpriseBoardPanel.cs` |
+| 公路美术：`Art/Icons/highway.jpg` 按航道方向拉伸覆盖；多端航道按分支各铺一条 | `Game/MapVisuals/MapStateRenderer.cs`（`DrawHighway`） |
+
+
+**当时的接入状态（已被 §9.4 / §9.5 取代）**：干员特派、罗德岛 1 级选企业、罗德岛 2 级金券、罗德岛 4 级弃牌区回手均已接入；
+富森银行 4 级「1 位对手失分」仍按分数最高的对手结算；其余企业特效应由卡牌效果解锁触发。
+
+## 9.4 落码（第四阶段：扩展设施 / 扩展事件 / 城市样式牌开局）
+
+| 已实现 | 位置 |
+|---|---|
+| 企业办事处 3 张（id 600–602 红/蓝/黄）：启用扩展时混入设施牌堆（41 → 44），正常建造、可进图鉴 | `Core/Model/Cards/CardCatalog.cs`（`BuildEnterpriseFacilities`、`FacilityDeckIds(bool)`）、`BoardSetup.PrepareFacilityBoard` |
+| 企业办事处卡面：`card_facility.jpg` 的 `Enterprise-Office_*_exp` 切片，卡面库 48 → 51 | `Editor/CardFaceFiller.cs`、`UI/FacilitySupplyPanel.cs`（`SpriteIndexOf`） |
+| 扩展事件 2 张（450/451）按 `VariantOfId` 替换 407/418，牌堆总数不变 | `CardCatalog.EventDeckIds(bool)`、`UI/EventCardPanel.cs` |
+| 城市样式牌扩展开局：基础 6 + 扩展 6 共 12 张按 I / II 级分堆，各堆洗混后抽 4 + 2；基础 6 张时不洗、顺序不变 | `Core/Engine/BoardSetup.cs`（`RevealCityPatterns`）、`CardCatalog.CityPatternIds(bool)` |
+| 等级放大查看只在单卡窗口生效；返回键回到单卡窗口 | `UI/EnterpriseBoardPanel.cs` |
+| 红色区域开放：红区回合盖放阶段前，从起始玩家顺时针，每名玩家各选 1 家企业把自己的等级 +1（可选自己所在企业；满级自动跳过；走完才放行盖放阶段；进度进快照） | `Core/Engine/EnterpriseRules.cs`（`BeginRedZoneAdvance` / `ContinueRedZoneAdvance`）、`TurnFlow.cs`、`EnterpriseCommands.cs`、`GameStateSnapshot(.Codec).cs` |
+
+## 9.5 落码（第五阶段：企业特效共用结算 + 图鉴企业页卡面）
+
+| 已实现 | 位置 |
+|---|---|
+| 企业特效结算抽成共用入口 `EnterpriseEffectResolver.Resolve`：命令 `Apply` 与界面的「先收集点选」会话走同一段，带点选的特效（罗德岛 4 级选弃牌区角色牌）现在会真的弹选择窗 | `Core/Engine/Actions/EnterpriseCommands.cs`、`UI/GameScreenController.cs`（`BeginEnterpriseTrigger`） |
+| 罗德岛 4 级：角色牌弃牌区为空时直接拒绝（牌面规则「弃牌区为空则不能使用」） | `EnterpriseCommands.cs`（`TriggerEnterpriseEffectCommand.Validate`） |
+| 图鉴「企业」页改成 8 张企业板卡面缩略图（不再堆文字说明）；点缩略图 → 单板查看，再点左侧 L1–L5 等级方块 → 放大该级效果段 | `UI/CodexPanel.cs`（`BuildEnterprisePage`）、`UI/EnterpriseCardArt.cs`（`BoardSprite`）、`UI/EnterpriseBoardPanel.cs`（`Mode.Codex` / `OpenSingle`） |
+| 图鉴单板视图不需要对局状态（标题界面也能看），没有玩家标记与确认按钮 | `UI/EnterpriseBoardPanel.cs` |
+| 干员特派（罗德岛 3 / 5 级）：抽 2 张干员牌（2 人局 3 张）→ 选 1 张加入手牌、其余洗回，再从手牌 / 弃牌区选 1 张角色牌放回游戏盒；或全部洗回并得 1 分 | `Core/Engine/Actions/EnterpriseCommands.cs`（`DispatchOperators`）、`Core/Model/Enterprise/EnterpriseState.cs`（`OperatorDeck`）、`EffectResolver` 的 `ChooseOperatorCard` / `ChooseCharacterCardIntoBox` |
+| 8 张干员角色牌（700–707，全蓝）：银灰 / 泥岩 / 森蚺 / 可露希尔 / 凯尔希 / W / 多萝西 / 异客；卡面按 `rhodes_operators_exp.png` 的 4×2 网格运行时取图，不用手动切片 | `Core/Model/Cards/CardCatalog.cs`（`BuildOperatorCharacters`）、`UI/OperatorCardArt.cs` |
+| 干员牌可直接打出的 4 个效果：可露希尔·采购协议、凯尔希·派遣特使、W·伺机出动、多萝西·拓荒人脉 | `CardCatalog.BuildOperatorStrategyOps` |
+| 海德兄弟 4 级：支付 6 源岩 → 供应区全部牌放回设施牌堆并补满 → 免费建造 1 次（免单、不占主要行动、不要求正处于自己的行动窗口） | `TriggerEnterpriseEffectCommand.ReshuffleSupplyAndFreeBuild`、`BuildFacilityCommand`（`freeBuild` / `ignoreActionBudget`）、`IEffectChoices.ChooseBuild(freeOnly)` |
+| 莱茵生命 1 级【切换科室板】：从其余两张科室板里选 1 张换过去，再按**当前合作等级**结算新科室板的奖励（1 级时科室板没有奖励，只换板） | `EnterpriseEffectResolver.SwitchDepartment`、`IEffectChoices.ChooseRhineDepartment` |
+| 莱茵生命 2–5 级：升级时按**当前科室板**结算对应等级奖励；结构科 5 级先把莱茵生命降 1 级，再结算降级后那一级的奖励 | `EnterpriseEffectResolver.SettleDepartment`、`EnterpriseRules.SettleLevel` |
+| 升级也走「先收集点选」会话：科室板奖励里的放置 / 移动影响力、防御科付费、工程科建造都能让玩家真选，而不是自动取第一个候选 | `AdvanceEnterpriseLevelCommand(choices)`、`UI/GameScreenController.cs`（`BeginEnterpriseAdvanceSettle`）、`CommandCodec`（P3 / Items 答案） |
+| 不占用主要行动的建设（雷神工业 3 级、工程科 4 级）；工程科 5 级改为「从设施供应区免费建造 1 张金券费用 ≤ 23 的设施」 | `EnterpriseEffectResolver.BuildWithoutAction`、`EnterpriseSpecial.BuildFreeFromSupply`、`EnterpriseLevel.Amount` |
+| 雷神工业 5 级：从设施牌堆选 1 张建设（正常付费、不占主要行动），随后洗混设施牌堆；牌堆顺序由「回合 / 行动座位 / 牌堆内容」派生的固定种子重排，主机与各端、复盘结果一致 | `EnterpriseEffectResolver.BuildFromDeckAndShuffle`、`ShuffleFacilityDeck` |
+| 富森银行 4 级：对手由玩家点选（放弃选择时退回分数最高的对手） | `EnterpriseRules.LetOneOpponentLoseScore`、`IEffectChoices.ChooseOpponent` |
+| 雷姆必拓 4 级：失去 1 分后立刻进行 1 次采集，逐点询问「采哪个点 / 是否继续」，路费与资格判定复用采集阶段 | `EnterpriseEffectResolver.ExtraHarvest`、`HarvestResolver.ResolveSingle` |
+| 开发者测试弹窗（仅 `GameState.DeveloperMode` 下按 F2 打开）：按企业板逐级列出测试按钮，点了先把合作等级直接写成该级（`DeveloperSetEnterpriseLevelCommand`），再走与正式流程完全相同的触发界面；该级若是**即时奖励**（如莱茵生命科室板奖励）则改为「设级并结算」，同样会弹点选窗。正式界面**不**提供无条件触发按钮 | `UI/DeveloperTestPanel.cs`、`UI/GameScreenController.cs`（`EnsureDeveloperPanel` / `OnDeveloperEnterpriseLevelPicked` / `BeginDeveloperSettle`）、`Core/Engine/Actions/EnterpriseCommands.cs`（`DeveloperSetEnterpriseLevelCommand`） |
+| 企业合作图标（`RewardKind.ChooseEnterprise`）= 在全场所有企业里挑 1 个**已解锁、本回合未用过**的企业特效触发（先选企业板 → 再选该板的特效等级 → 走正式触发结算）；企业办事处入场效果与 2 张扩展事件牌的「选择 1 家企业」都按这条结算 | `Core/Engine/Effects/EnterpriseEffectExtension.cs`（`TryTriggerEffect`）、`CardDefinitions.cs`（`RewardKind.ChooseEnterprise`） |
+| 卡牌带出来的企业效果现在都会转交企业扩展：事件牌选项、设施入场效果、城市样式特殊行动、企业等级奖励、延迟结算 | `FlowCommands.cs`、`BuildFacilityCommand.cs`、`UsePatternSpecialActionCommand.cs`、`EnterpriseRules.cs`、`CleanupResolver.cs` |
+| 卡牌给出的触发时机不受「玩家行动阶段 / 自己行动」限制（事件牌在事件阶段触发也合法）；只有从企业板界面主动触发才做时机校验 | `TriggerEnterpriseEffectCommand(ignoreTiming)` |
+| 效果日志在「成功且有说明」时也显示说明：罗德岛 2 级会写明「按 N 个计数单位结算，获得 N 金券」，干员特派 / 4 级取回牌也会显示抽到 / 取回了什么 | `Core/Engine/Effects/EffectResolver.cs`（`EffectLogEntry.ToString`、`EffectReport.Describe`、`GainVouchersPerCount`） |
+
+**尚未接入**：8 张干员牌里需要新机制的 12 个效果 —— 银灰（商业手腕 / 制衡战略）、泥岩（源岩D.I.Y / 泥岩小队）、森蚺（我寻思能行 / "暴躁铁皮"）、可露希尔·工程订购、凯尔希·掌控全局、W·致命攻势、多萝西·为了大家、异客（沁礁黑市 / 隐蔽仓库）。其中 4 个持续性计谋与森蚺的被动修正需要「角色牌持续留在场上 / 资源支付替代」子系统。
 
 ---
 

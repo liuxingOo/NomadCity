@@ -5,13 +5,23 @@ namespace NomadCity.Core.Model
     /// <summary>卡牌数量常量 —— 全部来自规则规格 §3 组件清单。</summary>
     public static class CardCounts
     {
-        public const int CharacterRoles = 5;              // 每色 5 个角色
+        public const int CharacterRoles = 5;              // 每色 5 个基础角色
         public const int CharacterColors = 4;             // 绿 / 黄 / 红 / 蓝
-        public const int CharacterCards = 20;             // 5 × 4
+        public const int CharacterCards = 20;             // 基础版：5 × 4
+
+        /// <summary>企业扩展追加的角色数：山 / 玛恩纳（EnterpriseExpansion.md §3.2）。</summary>
+        public const int CharacterExtensionRoles = 2;
+
+        /// <summary>企业扩展追加的角色牌张数：2 × 4 = 8。</summary>
+        public const int CharacterExtensionCards = CharacterExtensionRoles * CharacterColors;
+
+        /// <summary>启用企业扩展后每人的手牌张数（基础 5 + 山 / 玛恩纳 2）。</summary>
+        public const int CharacterHandSizeWithExtension = CharacterRoles + CharacterExtensionRoles;
 
         public const int StandardFacilities = 41;         // 设施牌堆
         public const int CoreCommandTowers = 4;           // 核心指挥塔，每色 1
         public const int ExtensionHubs = 3;               // 延伸枢纽，红 / 黄 / 蓝
+        public const int FacilityEnterprise = 3;          // 企业扩展设施牌（企业办事处），红 / 蓝 / 黄
 
         public const int EventCards = 22;                 // 事件牌
         public const int EventGreen = 6;
@@ -22,6 +32,9 @@ namespace NomadCity.Core.Model
         public const int CityPatternLevel1 = 4;
         public const int CityPatternLevel2 = 2;
         public const int CityPatternEnterprise = 6;       // 企业扩展城市样式牌：I 级 4 + II 级 2
+
+        /// <summary>干员角色牌（罗德岛·干员特派）：8 张，全部为蓝色。</summary>
+        public const int OperatorCards = 8;
     }
 
     /// <summary>
@@ -30,8 +43,11 @@ namespace NomadCity.Core.Model
     /// </summary>
     public static class CardIds
     {
-        /// <summary>角色牌：+color×5+role，共 20（0–19）。</summary>
+        /// <summary>基础角色牌：+color×5+role，共 20（0–19）。</summary>
         public const int CharacterBase = 0;
+
+        /// <summary>企业扩展角色牌（山 / 玛恩纳）：+color×2+role，共 8（20–27）。</summary>
+        public const int CharacterExtensionBase = 20;
 
         /// <summary>普通设施牌：共 41（100–140）。</summary>
         public const int FacilityBase = 100;
@@ -41,6 +57,9 @@ namespace NomadCity.Core.Model
 
         /// <summary>延伸枢纽：共 3（300–302）。</summary>
         public const int ExtensionHubBase = 300;
+
+        /// <summary>企业扩展设施牌「企业办事处」：共 3（600–602，红 / 蓝 / 黄），启用扩展时混入设施牌堆。</summary>
+        public const int FacilityEnterpriseBase = 600;
 
         /// <summary>事件牌：共 22（400–421）。</summary>
         public const int EventBase = 400;
@@ -54,6 +73,9 @@ namespace NomadCity.Core.Model
 
         /// <summary>企业扩展城市样式牌：共 6（550–555），I 级 4 + II 级 2。</summary>
         public const int CityPatternEnterpriseBase = 550;
+
+        /// <summary>干员角色牌（罗德岛·干员特派）：共 8（700–707），不进常规手牌，由干员牌堆抽取。</summary>
+        public const int OperatorCharacterBase = 700;
     }
 
     /// <summary>
@@ -68,11 +90,17 @@ namespace NomadCity.Core.Model
         EventCardDef Event(int id);
         CityPatternCardDef CityPattern(int id);
 
-        /// <summary>某颜色玩家的初始角色牌（基础版 5 张；扩展后为 7 张）。</summary>
+        /// <summary>
+        /// 某颜色玩家的角色牌 id：固定 7 张（基础 5 + 企业扩展的山 / 玛恩纳）。
+        /// 是否真的发 7 张由 <c>BoardSetup.DealCharacterCards</c> 按企业扩展开关裁剪。
+        /// </summary>
         IReadOnlyList<int> CharacterCardIds(PlayerColor color);
 
-        /// <summary>设施牌堆（41 张普通设施）。</summary>
-        IReadOnlyList<int> FacilityDeckIds();
+        /// <summary>
+        /// 设施牌堆。启用企业扩展（<paramref name="enterpriseEnabled"/>）时，把 3 张企业办事处
+        /// 混入牌堆（41 → 44 张，见 <c>Doc/EnterpriseExpansion.md</c> §3.1）。
+        /// </summary>
+        IReadOnlyList<int> FacilityDeckIds(bool enterpriseEnabled);
 
         /// <summary>
         /// 某一颜色的事件牌堆。启用企业扩展（<paramref name="enterpriseEnabled"/>）时，
@@ -82,8 +110,12 @@ namespace NomadCity.Core.Model
         /// </summary>
         IReadOnlyList<int> EventDeckIds(NodeColor backColor, bool enterpriseEnabled);
 
-        /// <summary>场上的城市样式牌（I 级 4 张 + II 级 2 张）。</summary>
-        IReadOnlyList<int> CityPatternIds();
+        /// <summary>
+        /// 城市样式牌 id 列表：基础版 6 张（I 级 4 + II 级 2）。
+        /// 启用企业扩展（<paramref name="enterpriseEnabled"/>）时再追加扩展版 6 张（共 12），
+        /// 由 <c>BoardSetup.RevealCityPatterns</c> 按等级分堆后抽 4 + 2。
+        /// </summary>
+        IReadOnlyList<int> CityPatternIds(bool enterpriseEnabled);
 
         /// <summary>某颜色玩家拿取的核心指挥塔。</summary>
         int CoreCommandTowerId(PlayerColor color);
@@ -116,14 +148,34 @@ namespace NomadCity.Core.Model
         private static readonly RewardOp[][] RoleStrategyOps = BuildRoleStrategyOps();
         private static readonly RewardOp[][] RoleTacticsOps = BuildRoleTacticsOps();
 
+        // 企业扩展追加的 2 个角色（山 / 玛恩纳），四色共用同一套效果（EnterpriseExpansion.md §3.2 / §4.2）。
+        private static readonly string[] ExtensionRoleNames = { "山", "玛恩纳" };
+        private static readonly string[] ExtensionRoleStrategyNames = { "开辟商路", "公事公办" };
+        private static readonly string[] ExtensionRoleTacticsNames = { "商业网络", "游说赞助" };
+        private static readonly RewardOp[][] ExtensionRoleStrategyOps = BuildExtensionRoleStrategyOps();
+        private static readonly RewardOp[][] ExtensionRoleTacticsOps = BuildExtensionRoleTacticsOps();
+
         private static readonly CharacterCardDef[] Characters = BuildCharacters();
+        private static readonly CharacterCardDef[] ExtensionCharacters = BuildExtensionCharacters();
+        private static readonly CharacterCardDef[] OperatorCharacters = BuildOperatorCharacters();
         private static readonly FacilityCardDef[] Facilities = BuildFacilities();
         private static readonly EventCardDef[] Events = BuildEvents();
         private static readonly EventCardDef[] EnterpriseEvents = BuildEnterpriseEvents();
         private static readonly CityPatternCardDef[] CityPatterns = BuildCityPatterns();
         private static readonly CityPatternCardDef[] EnterpriseCityPatterns = BuildEnterpriseCityPatterns();
 
-        public CharacterCardDef Character(int id) => Characters[id - CardIds.CharacterBase];
+        public CharacterCardDef Character(int id)
+        {
+            if (id >= CardIds.CharacterBase && id < CardIds.CharacterBase + CardCounts.CharacterCards)
+                return Characters[id - CardIds.CharacterBase];
+            if (id >= CardIds.CharacterExtensionBase
+                && id < CardIds.CharacterExtensionBase + CardCounts.CharacterExtensionCards)
+                return ExtensionCharacters[id - CardIds.CharacterExtensionBase];
+            if (id >= CardIds.OperatorCharacterBase
+                && id < CardIds.OperatorCharacterBase + CardCounts.OperatorCards)
+                return OperatorCharacters[id - CardIds.OperatorCharacterBase];
+            throw new System.ArgumentOutOfRangeException(nameof(id), id, "不是有效的角色牌 id。");
+        }
 
         public FacilityCardDef Facility(int id)
         {
@@ -133,6 +185,9 @@ namespace NomadCity.Core.Model
                 return Facilities[TowersOffset + (id - CardIds.CoreCommandTowerBase)];
             if (id >= CardIds.ExtensionHubBase && id < CardIds.EventBase)
                 return Facilities[HubsOffset + (id - CardIds.ExtensionHubBase)];
+            if (id >= CardIds.FacilityEnterpriseBase
+                && id < CardIds.FacilityEnterpriseBase + CardCounts.FacilityEnterprise)
+                return Facilities[EnterpriseFacilityOffset + (id - CardIds.FacilityEnterpriseBase)];
             throw new System.ArgumentOutOfRangeException(nameof(id), id, "不是有效的设施牌 id。");
         }
 
@@ -158,15 +213,23 @@ namespace NomadCity.Core.Model
         public IReadOnlyList<int> CharacterCardIds(PlayerColor color)
         {
             int first = CardIds.CharacterBase + (int)color * CardCounts.CharacterRoles;
-            var ids = new int[CardCounts.CharacterRoles];
-            for (int i = 0; i < ids.Length; i++) ids[i] = first + i;
+            var ids = new int[CardCounts.CharacterHandSizeWithExtension];
+            for (int i = 0; i < CardCounts.CharacterRoles; i++) ids[i] = first + i;
+
+            // 企业扩展：同色的山 / 玛恩纳追加在手牌末尾。
+            int extensionFirst = CardIds.CharacterExtensionBase + (int)color * CardCounts.CharacterExtensionRoles;
+            for (int i = 0; i < CardCounts.CharacterExtensionRoles; i++)
+                ids[CardCounts.CharacterRoles + i] = extensionFirst + i;
+
             return ids;
         }
 
-        public IReadOnlyList<int> FacilityDeckIds()
+        public IReadOnlyList<int> FacilityDeckIds(bool enterpriseEnabled)
         {
-            var ids = new int[CardCounts.StandardFacilities];
-            for (int i = 0; i < ids.Length; i++) ids[i] = CardIds.FacilityBase + i;
+            int extra = enterpriseEnabled ? CardCounts.FacilityEnterprise : 0;
+            var ids = new int[CardCounts.StandardFacilities + extra];
+            for (int i = 0; i < CardCounts.StandardFacilities; i++) ids[i] = CardIds.FacilityBase + i;
+            for (int i = 0; i < extra; i++) ids[CardCounts.StandardFacilities + i] = CardIds.FacilityEnterpriseBase + i;
             return ids;
         }
 
@@ -199,10 +262,12 @@ namespace NomadCity.Core.Model
             return false;
         }
 
-        public IReadOnlyList<int> CityPatternIds()
+        public IReadOnlyList<int> CityPatternIds(bool enterpriseEnabled)
         {
-            var ids = new int[CityPatterns.Length];
-            for (int i = 0; i < ids.Length; i++) ids[i] = CityPatterns[i].Id;
+            var ids = new List<int>(CityPatterns.Length + (enterpriseEnabled ? EnterpriseCityPatterns.Length : 0));
+            foreach (CityPatternCardDef def in CityPatterns) ids.Add(def.Id);
+            if (enterpriseEnabled)
+                foreach (CityPatternCardDef def in EnterpriseCityPatterns) ids.Add(def.Id);
             return ids;
         }
 
@@ -219,6 +284,7 @@ namespace NomadCity.Core.Model
 
         private const int TowersOffset = CardCounts.StandardFacilities;
         private const int HubsOffset = TowersOffset + CardCounts.CoreCommandTowers;
+        private const int EnterpriseFacilityOffset = HubsOffset + CardCounts.ExtensionHubs;
 
         private static CharacterCardDef[] BuildCharacters()
         {
@@ -237,7 +303,149 @@ namespace NomadCity.Core.Model
             return defs;
         }
 
-        // —— 角色牌效果数据（来源：Doc/CardEffects.md §3；顺序与 RoleNames 一致）——
+        /// <summary>企业扩展的 8 张角色牌：四色 × {山, 玛恩纳}，同色内两张效果相同。</summary>
+        private static CharacterCardDef[] BuildExtensionCharacters()
+        {
+            var defs = new CharacterCardDef[CardCounts.CharacterExtensionCards];
+            for (int color = 0; color < CardCounts.CharacterColors; color++)
+            {
+                for (int role = 0; role < CardCounts.CharacterExtensionRoles; role++)
+                {
+                    int id = CardIds.CharacterExtensionBase + color * CardCounts.CharacterExtensionRoles + role;
+                    defs[id - CardIds.CharacterExtensionBase] = new CharacterCardDef(
+                        id, (PlayerColor)color, ExtensionRoleNames[role],
+                        ExtensionRoleStrategyNames[role], ExtensionRoleTacticsNames[role],
+                        ExtensionRoleStrategyOps[role], ExtensionRoleTacticsOps[role]);
+                }
+            }
+            return defs;
+        }
+
+        // —— 企业扩展角色牌效果数据（EnterpriseExpansion.md §3.2）——
+
+        private static RewardOp[][] BuildExtensionRoleStrategyOps() => new[]
+        {
+            // 山·策略「开辟商路」：选 1 条航道，移除其上所有影响力并在该航道放置公路指示物；
+            // 受影响的玩家各得 1 金券，你额外再得 1 金券。
+            new[] { RewardOp.PlaceHighway() },
+
+            // 玛恩纳·策略「公事公办」：选 1 家企业 → 所有玩家提升 1 级；或 选 1 家企业 → 触发 1 个已解锁企业特效。
+            new[]
+            {
+                RewardOp.Alternative(
+                    new EffectBranch("所有玩家提升 1 级该企业",
+                        RewardOp.AdvanceEnterpriseAllPlayers()),
+                    new EffectBranch("触发 1 个已解锁的企业特效",
+                        RewardOp.TriggerEnterpriseEffectOnce())),
+            },
+        };
+
+        private static RewardOp[][] BuildExtensionRoleTacticsOps() => new[]
+        {
+            // 山·计谋「商业网络」：支付 2 金券 → 选 1 家企业提升 1 级，并触发该企业 1 个已解锁特效。
+            new[]
+            {
+                RewardOp.PayVouchers(2),
+                RewardOp.AdvanceAndTriggerEnterprise(),
+            },
+
+            // 玛恩纳·计谋「游说赞助」：选 1 家企业提升 1 级；获得 1 源岩 + 1 源石 + 1 异铁。
+            new[]
+            {
+                RewardOp.AdvanceOwnEnterpriseLevel(1),
+                RewardOp.Gain(ResourceType.Orirock, 1),
+                RewardOp.Gain(ResourceType.Originium, 1),
+                RewardOp.Gain(ResourceType.Oriron, 1),
+            },
+        };
+
+        // —— 干员角色牌（罗德岛·干员特派，Doc/CardEffects.md §5）——
+        // 顺序与卡面拼版图 rhodes_operators_exp.png 的 4×2 排布一致（UI/OperatorCardArt 按同一顺序取图）。
+
+        private static readonly string[] OperatorNames =
+            { "银灰", "泥岩", "森蚺", "可露希尔", "凯尔希", "W", "多萝西", "异客" };
+
+        private static readonly string[] OperatorStrategyNames =
+            { "商业手腕", "源岩D.I.Y", "我寻思能行", "采购协议", "派遣特使", "伺机出动", "拓荒人脉", "沁礁黑市" };
+
+        private static readonly string[] OperatorTacticsNames =
+            { "制衡战略", "泥岩小队", "\"暴躁铁皮\"", "工程订购", "掌控全局", "致命攻势", "为了大家", "隐蔽仓库" };
+
+        /// <summary>8 张干员牌全部是蓝色；它们不进常规手牌，只能由【干员特派】抽进手牌。</summary>
+        private static CharacterCardDef[] BuildOperatorCharacters()
+        {
+            RewardOp[][] strategies = BuildOperatorStrategyOps();
+            RewardOp[][] tactics = BuildOperatorTacticsOps();
+            var defs = new CharacterCardDef[CardCounts.OperatorCards];
+            for (int i = 0; i < defs.Length; i++)
+            {
+                defs[i] = new CharacterCardDef(CardIds.OperatorCharacterBase + i, PlayerColor.Blue,
+                    OperatorNames[i], OperatorStrategyNames[i], OperatorTacticsNames[i],
+                    strategies[i], tactics[i]);
+            }
+            return defs;
+        }
+
+        private static RewardOp[][] BuildOperatorStrategyOps() => new[]
+        {
+            // 银灰·策略「商业手腕」：选 1 种资源 + 1 位玩家，该玩家以 4 金券单价卖掉全部该资源；你得 1 分。
+            new RewardOp[0],
+
+            // 泥岩·策略「源岩D.I.Y」：支付 1 源岩，进行 1 次建造。
+            new RewardOp[0],
+
+            // 森蚺·策略「我寻思能行」：免费移除对手影响力时，改为移动这些影响力（被动修正，暂未接入）。
+            new RewardOp[0],
+
+            // 可露希尔·策略「采购协议」：获得 1 源岩 + 1 源石 + 1 异铁；或选 1 家企业触发其 1 个已解锁特效。
+            new[]
+            {
+                RewardOp.Alternative(
+                    new EffectBranch("获得 1 源岩、1 源石、1 异铁",
+                        RewardOp.Gain(ResourceType.Orirock, 1),
+                        RewardOp.Gain(ResourceType.Originium, 1),
+                        RewardOp.Gain(ResourceType.Oriron, 1)),
+                    new EffectBranch("选择 1 家企业，触发其 1 个已解锁的企业特效",
+                        RewardOp.TriggerEnterpriseEffectOnce())),
+            },
+
+            // 凯尔希·策略「派遣特使」：选择 1 家企业，提升 2 级合作等级，获得 1 分。
+            new[]
+            {
+                RewardOp.AdvanceOwnEnterpriseLevel(2),
+                RewardOp.Score(1),
+            },
+
+            // W·策略「伺机出动」：放置 2 次影响力；本回合收尾阶段移除 2 个你的影响力。
+            new[]
+            {
+                RewardOp.Influence(InfluencePlacementScope.DeployRules, 2),
+                RewardOp.Deferred(RewardOp.RemoveOwnInfluence(2)),
+            },
+
+            // 多萝西·策略「拓荒人脉」：移除 2 个你的影响力，然后放置 3 次影响力。
+            new[]
+            {
+                RewardOp.RemoveOwnInfluence(2),
+                RewardOp.Influence(InfluencePlacementScope.DeployRules, 3),
+            },
+
+            // 异客·策略「沁礁黑市」：从 1 位对手处获取至多 4 个所选资源，双方各得 1 分。
+            new RewardOp[0],
+        };
+
+        private static RewardOp[][] BuildOperatorTacticsOps() => new[]
+        {
+            // 以下计谋都需要「持续留在场上 / 特殊替换」的机制，尚未接入，先保留牌面名。
+            new RewardOp[0], // 银灰·制衡战略
+            new RewardOp[0], // 泥岩·泥岩小队
+            new RewardOp[0], // 森蚺·"暴躁铁皮"
+            new RewardOp[0], // 可露希尔·工程订购
+            new RewardOp[0], // 凯尔希·掌控全局
+            new RewardOp[0], // W·致命攻势
+            new RewardOp[0], // 多萝西·为了大家
+            new RewardOp[0], // 异客·隐蔽仓库
+        };
 
         private static RewardOp[][] BuildRoleStrategyOps() => new[]
         {
@@ -317,7 +525,8 @@ namespace NomadCity.Core.Model
 
         private static FacilityCardDef[] BuildFacilities()
         {
-            var defs = new FacilityCardDef[CardCounts.StandardFacilities + CardCounts.CoreCommandTowers + CardCounts.ExtensionHubs];
+            var defs = new FacilityCardDef[CardCounts.StandardFacilities + CardCounts.CoreCommandTowers
+                + CardCounts.ExtensionHubs + CardCounts.FacilityEnterprise];
 
             BuildStandardFacilities(defs);
 
@@ -336,7 +545,31 @@ namespace NomadCity.Core.Model
                 defs[HubsOffset + i] = new FacilityCardDef(
                     CardIds.ExtensionHubBase + i, FacilityKind.ExtensionHub, "延伸枢纽", hubColors[i], -1);
             }
+
+            BuildEnterpriseFacilities(defs);
             return defs;
+        }
+
+        /// <summary>
+        /// 3 张企业办事处（企业扩展，id 600–602，红 / 蓝 / 黄）。启用扩展时混入设施牌堆，按普通设施建造。
+        /// 分数 1、资源费用 源岩 3 + 源石 1 + 异铁 3、金券费用 23、入场效果「选择 1 家企业」
+        /// （来源：Doc/FacilityCards.md §6.3）。
+        /// </summary>
+        private static void BuildEnterpriseFacilities(FacilityCardDef[] defs)
+        {
+            var colors = new[] { FacilityColor.Red, FacilityColor.Blue, FacilityColor.Yellow };
+            var cost = new[]
+            {
+                RewardOp.Pay(ResourceType.Orirock, 3),
+                RewardOp.Pay(ResourceType.Originium, 1),
+                RewardOp.Pay(ResourceType.Oriron, 3),
+            };
+            for (int i = 0; i < colors.Length; i++)
+            {
+                defs[EnterpriseFacilityOffset + i] = new FacilityCardDef(
+                    CardIds.FacilityEnterpriseBase + i, FacilityKind.Standard, "企业办事处", colors[i],
+                    1, cost, 23, FacilityKeyword.None, new[] { RewardOp.Enterprise() });
+            }
         }
 
         /// <summary>

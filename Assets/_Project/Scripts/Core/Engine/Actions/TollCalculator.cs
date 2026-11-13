@@ -57,9 +57,15 @@ namespace NomadCity.Core.Engine
         public static bool RouteHasOwnInfluence(GameState state, int routeId, int seat) =>
             state.Map.Route(routeId).Slots.CountOf(seat) > 0;
 
-        /// <summary>经过这条航道的费用：有自己影响力为 0，否则 2。</summary>
-        public static int RouteCost(GameState state, int seat, int routeId) =>
-            RouteHasOwnInfluence(state, routeId, seat) ? 0 : CostPerRoute;
+        /// <summary>
+        /// 经过这条航道的费用：公路（企业扩展「开辟商路」）免路费；有自己影响力也免费；否则 2。
+        /// </summary>
+        public static int RouteCost(GameState state, int seat, int routeId)
+        {
+            RouteState route = state.Map.Route(routeId);
+            if (route.IsHighway) return 0;
+            return route.Slots.CountOf(seat) > 0 ? 0 : CostPerRoute;
+        }
 
         /// <summary>该航道上所有「对手」的座位号（按槽位顺序，去重）。玩家要在其中选一位支付（§6.6）。</summary>
         public static IReadOnlyList<int> OpponentsOnRoute(GameState state, int routeId, int seat)

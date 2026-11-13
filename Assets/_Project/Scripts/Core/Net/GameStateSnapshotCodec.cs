@@ -43,12 +43,19 @@ namespace NomadCity.Core.Net
             writer.Int(snapshot.EnterprisePendingAdvanceSeat);
             writer.Int(snapshot.EnterprisePendingAdvanceExcludeBoard);
             writer.String(snapshot.EnterprisePendingAdvanceReason);
+            writer.Bool(snapshot.EnterpriseRedZoneAdvanceStarted);
+            writer.Int(snapshot.EnterpriseRedZoneAdvanceSeat);
+            writer.Int(snapshot.EnterpriseRedZoneAdvanceDoneMask);
+            writer.Int(snapshot.EnterprisePicksPerPlayer);
+            writer.Int(snapshot.EnterpriseOffersPerSeat);
             writer.Ints(snapshot.EnterpriseLevels);
             writer.Ints(snapshot.EnterpriseUsedMasks);
             writer.Ints(snapshot.EnterpriseOffers);
             writer.Ints(snapshot.EnterpriseDeck);
+            writer.Ints(snapshot.EnterpriseOperatorDeck);
             writer.Ints(snapshot.EnterpriseBoards);
             writer.Ints(snapshot.EnterpriseChosen);
+            writer.Ints(snapshot.EnterpriseSecondChosen);
             writer.Ints(snapshot.EnterpriseDepartments);
 
             // —— 玩家 ——
@@ -78,6 +85,7 @@ namespace NomadCity.Core.Net
                 writer.Ints(player.UsedPatternActionsThisTurn);
                 writer.Int(player.ExtraMainActionsThisTurn);
                 writer.Int(player.CharacterCardBanRound);
+                writer.Bool(player.SetupDiscardDone);
             }
 
             // —— 资源点 ——
@@ -108,6 +116,7 @@ namespace NomadCity.Core.Net
                 writer.Int((int)route.District);
                 writer.Int(route.Capacity);
                 writer.Ints(route.Owners);
+                writer.Bool(route.IsHighway);
             }
 
             // —— 公共牌堆 ——
@@ -172,14 +181,21 @@ namespace NomadCity.Core.Net
                 EnterprisePendingAdvanceSeat = reader.Int(),
                 EnterprisePendingAdvanceExcludeBoard = reader.Int(),
                 EnterprisePendingAdvanceReason = reader.String(),
+                EnterpriseRedZoneAdvanceStarted = reader.Bool(),
+                EnterpriseRedZoneAdvanceSeat = reader.Int(),
+                EnterpriseRedZoneAdvanceDoneMask = reader.Int(),
+                EnterprisePicksPerPlayer = reader.Int(),
+                EnterpriseOffersPerSeat = reader.Int(),
                 EnterpriseLevels = reader.Ints(),
                 EnterpriseUsedMasks = reader.Ints(),
                 EnterpriseOffers = reader.Ints(),
             };
 
             snapshot.EnterpriseDeck.AddRange(reader.Ints());
+            snapshot.EnterpriseOperatorDeck.AddRange(reader.Ints());
             snapshot.EnterpriseBoards.AddRange(reader.Ints());
             snapshot.EnterpriseChosen.AddRange(reader.Ints());
+            snapshot.EnterpriseSecondChosen.AddRange(reader.Ints());
             snapshot.EnterpriseDepartments.AddRange(reader.Ints());
 
             // —— 玩家 ——
@@ -213,6 +229,7 @@ namespace NomadCity.Core.Net
                 player.UsedPatternActionsThisTurn.AddRange(reader.Ints());
                 player.ExtraMainActionsThisTurn = reader.Int();
                 player.CharacterCardBanRound = reader.Int();
+                player.SetupDiscardDone = reader.Bool();
 
                 snapshot.Players.Add(player);
             }
@@ -251,6 +268,7 @@ namespace NomadCity.Core.Net
                     District = (NomadCity.Core.Model.District)reader.Int(),
                     Capacity = reader.Int(),
                     Owners = reader.Ints(),
+                    IsHighway = reader.Bool(),
                 };
                 snapshot.Routes.Add(route);
             }

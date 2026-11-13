@@ -16,6 +16,6 @@ namespace NomadCity.Core.Net
         /// 新旧两端混用不会报错，只会让主机按「第一个合法候选」结算、玩家看到的落点却不是自己点的 ——
         /// 所以必须在这里 +1，让版本不一致在握手阶段就被拒绝。
         /// </summary>
-        public const int Version = 3;
+        public const int Version = 4;
     }
 }

@@ -41,5 +41,8 @@ namespace NomadCity.Game
 
         /// <summary>资源点编号标签。</summary>
         public static readonly Color Label = new Color(1f, 1f, 1f, 0.85f);
+
+        /// <summary>企业扩展「公路」：盖住整条航道影响力格的暖褐色。</summary>
+        public static readonly Color Highway = new Color(0.72f, 0.55f, 0.32f, 0.92f);
     }
 }

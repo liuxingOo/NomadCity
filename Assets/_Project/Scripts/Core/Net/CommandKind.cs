@@ -36,5 +36,7 @@ namespace NomadCity.Core.Net
         ChooseInitialEnterprise = 23,
         AdvanceEnterpriseLevel = 24,
         TriggerEnterpriseEffect = 25,
+        DiscardSetupHandCards = 26,
+        PickRhineDepartment = 27,
     }
 }

@@ -278,7 +278,10 @@ namespace NomadCity.Core.Model
         /// <summary>放置影响力：落点由 <see cref="RewardOp.Scope"/> 决定。</summary>
         PlaceInfluence = 6,
 
-        /// <summary>选择企业：仅选定企业板，本身不改变等级（见 EnterpriseExpansion.md §4.1）。</summary>
+        /// <summary>
+        /// 企业合作（握手图标）：在全场所有企业里挑 1 个已解锁、本回合还没用过的企业特效触发。
+        /// 卡面写作「选择 1 家企业」，实际结算见 <c>EnterpriseEffectExtension.TryTriggerEffect</c>。
+        /// </summary>
         ChooseEnterprise = 7,
 
         /// <summary>所有对手各获得资源。</summary>
@@ -410,6 +413,27 @@ namespace NomadCity.Core.Model
         /// （「源石工业中枢」/「高效移动管理体系」特殊行动）。记为 <c>PlayerState.CharacterCardBanRound</c>。
         /// </summary>
         ForbidCharacterCardsThisRound = 35,
+
+        /// <summary>
+        /// 企业扩展（山 / 玛恩纳）：选 1 家企业板，**所有玩家**提升 1 级该企业合作等级。
+        /// 奖励按「发动者先结算，其余玩家顺时针」的顺序发放（EnterpriseExpansion.md §6.2-3）。
+        /// </summary>
+        AdvanceEnterpriseAllPlayers = 36,
+
+        /// <summary>企业扩展：选 1 家企业板，发动者自己提升 1 级该企业合作等级。</summary>
+        AdvanceOwnEnterpriseLevel = 37,
+
+        /// <summary>企业扩展：选 1 家企业板，再触发该企业上自己 1 个已解锁且本回合未用过的特效。</summary>
+        TriggerEnterpriseEffectOnce = 38,
+
+        /// <summary>企业扩展（山·计谋）：选 1 家企业板，先提升 1 级，再触发该企业 1 个已解锁特效。</summary>
+        AdvanceAndTriggerEnterprise = 39,
+
+        /// <summary>
+        /// 企业扩展（山·策略「开辟商路」）：选 1 条航道，移除其上所有影响力并放置公路指示物；
+        /// 受影响的玩家各得 1 金券，发动者额外再得 1 金券。
+        /// </summary>
+        PlaceHighway = 40,
     }
 
     /// <summary>
@@ -594,6 +618,26 @@ namespace NomadCity.Core.Model
         public static RewardOp ForbidCharacterCardsThisRound() =>
             new(RewardKind.ForbidCharacterCardsThisRound, default, 1, default);
 
+        /// <summary>选 1 家企业板，所有玩家提升 1 级该企业合作等级。</summary>
+        public static RewardOp AdvanceEnterpriseAllPlayers() =>
+            new(RewardKind.AdvanceEnterpriseAllPlayers, default, 1, default);
+
+        /// <summary>选 1 家企业板，自己提升 1 级该企业合作等级。</summary>
+        public static RewardOp AdvanceOwnEnterpriseLevel(int amount = 1) =>
+            new(RewardKind.AdvanceOwnEnterpriseLevel, default, amount, default);
+
+        /// <summary>选 1 家企业板，触发该企业上自己 1 个已解锁特效。</summary>
+        public static RewardOp TriggerEnterpriseEffectOnce() =>
+            new(RewardKind.TriggerEnterpriseEffectOnce, default, 1, default);
+
+        /// <summary>选 1 家企业板：先提升 1 级，再触发该企业 1 个已解锁特效。</summary>
+        public static RewardOp AdvanceAndTriggerEnterprise() =>
+            new(RewardKind.AdvanceAndTriggerEnterprise, default, 1, default);
+
+        /// <summary>选 1 条航道：移除其上所有影响力、放置公路指示物并结算金券。</summary>
+        public static RewardOp PlaceHighway() =>
+            new(RewardKind.PlaceHighway, default, 1, default);
+
         public override string ToString() => Kind switch
         {
             RewardKind.GainResource => $"获得 {Resource}×{Amount}",
@@ -603,7 +647,7 @@ namespace NomadCity.Core.Model
             RewardKind.GainScore => $"获得 {Amount} 分",
             RewardKind.LoseScore => $"失去 {Amount} 分",
             RewardKind.PlaceInfluence => $"放置影响力×{Amount}（{Scope}）",
-            RewardKind.ChooseEnterprise => $"选择企业×{Amount}",
+            RewardKind.ChooseEnterprise => $"企业合作（触发企业特效）×{Amount}",
             RewardKind.OpponentsGainResource => $"所有对手各获得 {Resource}×{Amount}",
             RewardKind.OpponentsGainVouchers => $"所有对手各获得金券×{Amount}",
             RewardKind.Alternative => Branches == null || Branches.Count == 0
@@ -640,6 +684,11 @@ namespace NomadCity.Core.Model
             RewardKind.PlaceInfluencePerPatternMarkers => $"放置影响力×样式牌上自己的标记数（至多 {Amount}）",
             RewardKind.ExtraMainActions => $"本回合额外主要行动×{Amount}",
             RewardKind.ForbidCharacterCardsThisRound => "本轮不能使用角色牌",
+            RewardKind.AdvanceEnterpriseAllPlayers => "选 1 家企业，所有玩家提升 1 级",
+            RewardKind.AdvanceOwnEnterpriseLevel => $"选 1 家企业，自己提升 {Amount} 级",
+            RewardKind.TriggerEnterpriseEffectOnce => "选 1 家企业，触发 1 个已解锁特效",
+            RewardKind.AdvanceAndTriggerEnterprise => "选 1 家企业，提升 1 级并触发 1 个已解锁特效",
+            RewardKind.PlaceHighway => "选 1 条航道，移除其上影响力并放置公路",
             _ => Kind.ToString(),
         };
     }

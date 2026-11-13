@@ -151,6 +151,7 @@ namespace NomadCity.UI
         {
             int index = CharacterHandPanel.SpriteIndexOf(cardId);
             Sprite face = index >= 0 && index < characterFaces.Length ? characterFaces[index] : null;
+            if (face == null) face = OperatorCardArt.SpriteFor(cardId);
             if (face == null && characterFaces.Length == 0)
                 Debug.LogWarning("[卡面放大] 角色牌卡面库是空的 —— 放大图只有名字没有牌面。" +
                                  "执行菜单 NomadCity / 卡面：填充卡面库（Card Faces）即可自动填好。", this);
@@ -174,6 +175,7 @@ namespace NomadCity.UI
         {
             int index = CharacterHandPanel.SpriteIndexOf(cardId);
             Sprite face = index >= 0 && index < characterFaces.Length ? characterFaces[index] : null;
+            if (face == null) face = OperatorCardArt.SpriteFor(cardId);
             if (face == null && characterFaces.Length == 0)
                 Debug.LogWarning("[卡面放大] 角色牌卡面库是空的 —— 放大图只有名字没有牌面。" +
                                  "执行菜单 NomadCity / 卡面：填充卡面库（Card Faces）即可自动填好。", this);
@@ -303,8 +305,13 @@ namespace NomadCity.UI
         private static string CharacterNameOf(GameState state, int cardId)
         {
             if (state == null) return $"角色牌 {cardId}";
-            if (cardId < CardIds.CharacterBase || cardId >= CardIds.CharacterBase + CardCounts.CharacterCards)
-                return $"角色牌 {cardId}";
+            bool isCharacter = (cardId >= CardIds.CharacterBase
+                                && cardId < CardIds.CharacterBase + CardCounts.CharacterCards)
+                               || (cardId >= CardIds.CharacterExtensionBase
+                                   && cardId < CardIds.CharacterExtensionBase + CardCounts.CharacterExtensionCards)
+                               || (cardId >= CardIds.OperatorCharacterBase
+                                   && cardId < CardIds.OperatorCharacterBase + CardCounts.OperatorCards);
+            if (!isCharacter) return $"角色牌 {cardId}";
 
             CharacterCardDef card = state.Catalog.Character(cardId);
             if (card == null || string.IsNullOrEmpty(card.Name)) return $"角色牌 {cardId}";

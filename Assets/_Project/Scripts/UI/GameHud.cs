@@ -25,6 +25,9 @@ namespace NomadCity.UI
         [Tooltip("最近一次命令的结果或失败原因")]
         [SerializeField] private TMP_Text statusText;
 
+        /// <summary>界面中文字体：运行时新建弹窗（如企业板总览）时复用同一套字体。</summary>
+        public TMP_FontAsset UiFont => turnText != null ? turnText.font : null;
+
         [Tooltip("状态栏槽位：数组顺序即从上到下的显示顺序，运行时按本局行动顺序填写，不要在编辑器里把某一行绑给某个颜色")]
         [SerializeField] private GameHudRow[] rows = Array.Empty<GameHudRow>();
 

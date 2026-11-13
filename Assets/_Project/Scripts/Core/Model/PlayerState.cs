@@ -30,6 +30,12 @@ namespace NomadCity.Core.Model
         /// <summary>角色牌弃牌区。</summary>
         public readonly List<int> DiscardCharacterCards = new();
 
+        /// <summary>
+        /// 开局入场时「从 7 张手牌里选 2 张放回游戏盒」是否已完成（EnterpriseExpansion.md §4.2）。
+        /// 未启用企业扩展时恒为 true（保持旧行为）；完成后才能盖放角色牌。
+        /// </summary>
+        public bool SetupDiscardDone = true;
+
         /// <summary>本回合盖放的角色牌 id；未盖放为 -1。私有。</summary>
         public int PlacedCharacterCard = -1;
 
@@ -137,6 +143,7 @@ namespace NomadCity.Core.Model
                 MobileCityNodeId = MobileCityNodeId,
                 ExtraMainActionsThisTurn = ExtraMainActionsThisTurn,
                 CharacterCardBanRound = CharacterCardBanRound,
+                SetupDiscardDone = SetupDiscardDone,
             };
 
             copy.HandCharacterCards.AddRange(HandCharacterCards);

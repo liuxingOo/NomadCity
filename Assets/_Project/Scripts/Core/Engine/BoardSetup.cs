@@ -23,14 +23,16 @@ namespace NomadCity.Core.Engine
         public static void Run(GameState state, ICardCatalog catalog, Random rng, int firstPlayerSeat)
         {
             PrepareEventDecks(state, catalog, rng);
-            RevealCityPatterns(state, catalog);
+            RevealCityPatterns(state, catalog, rng);
             PrepareFacilityBoard(state, catalog, rng);
             PrepareExtensionHubs(state, catalog);
             DealCharacterCards(state, catalog);
             AssignCoreCommandTowers(state, catalog);
+            PlaceScoreStartMarkers(state);
             DealInitialFunds(state, firstPlayerSeat);
 
-            // 企业扩展：洗混 8 张合作企业板，每名玩家抽 2 张（正式选择由 ChooseInitialEnterpriseCommand 完成）。
+            // 企业扩展：洗混 8 张合作企业板，3／4 人局每人抽 2 张、2 人局每人抽 4 张
+            // （正式选择由 ChooseInitialEnterpriseCommand 完成）。
             // 未启用时也要按人数复位一次，保证联机快照 / 各端状态的结构一致。
             if (state.Setup.IsEnterpriseEnabled) EnterpriseRules.Prepare(state, rng);
             else state.Enterprises.Reset(state.Players.Count);
@@ -76,24 +78,47 @@ namespace NomadCity.Core.Engine
             return kept;
         }
 
-        /// <summary>把 6 张城市样式牌牌面朝上放到场上（§4.1 步 3）。</summary>
-        public static void RevealCityPatterns(GameState state, ICardCatalog catalog)
+        /// <summary>
+        /// 把城市样式牌牌面朝上放到场上（§4.1 步 3）。
+        /// 启用企业扩展时，基础 6 张 + 扩展 6 张共 12 张，按牌背标识分成 I / II 两个牌堆，
+        /// 各堆洗混后抽 I 级 4 张、II 级 2 张（EnterpriseExpansion.md §3.1 第 2 条）。
+        /// </summary>
+        public static void RevealCityPatterns(GameState state, ICardCatalog catalog, Random rng)
         {
             state.CityPatternCards.Clear();
             state.CityPatternStates.Clear();
 
-            foreach (int id in catalog.CityPatternIds())
+            var level1 = new List<int>();
+            var level2 = new List<int>();
+            foreach (int id in catalog.CityPatternIds(state.Setup.IsEnterpriseEnabled))
             {
-                state.CityPatternCards.Add(id);
-                state.CityPatternStates.Add(new CityPatternState(id, catalog.CityPattern(id).Level));
+                int level = catalog.CityPattern(id).Level;
+                if (level == 1) level1.Add(id);
+                else if (level == 2) level2.Add(id);
             }
+
+            // 基础版每种等级的张数正好等于要抽的张数，不需要洗也不会变；只有启用扩展后才洗混。
+            if (level1.Count > CardCounts.CityPatternLevel1) Shuffle(level1, rng);
+            if (level2.Count > CardCounts.CityPatternLevel2) Shuffle(level2, rng);
+
+            int take1 = level1.Count < CardCounts.CityPatternLevel1 ? level1.Count : CardCounts.CityPatternLevel1;
+            int take2 = level2.Count < CardCounts.CityPatternLevel2 ? level2.Count : CardCounts.CityPatternLevel2;
+
+            for (int i = 0; i < take1; i++) AddCityPattern(state, catalog, level1[i]);
+            for (int i = 0; i < take2; i++) AddCityPattern(state, catalog, level2[i]);
+        }
+
+        private static void AddCityPattern(GameState state, ICardCatalog catalog, int id)
+        {
+            state.CityPatternCards.Add(id);
+            state.CityPatternStates.Add(new CityPatternState(id, catalog.CityPattern(id).Level));
         }
 
         /// <summary>设施牌堆洗混，并翻开 6 张作为设施供应区（§4.1 步 4）。</summary>
         public static void PrepareFacilityBoard(GameState state, ICardCatalog catalog, Random rng)
         {
             state.FacilityDeck.Clear();
-            state.FacilityDeck.AddRange(catalog.FacilityDeckIds());
+            state.FacilityDeck.AddRange(catalog.FacilityDeckIds(state.Setup.IsEnterpriseEnabled));
             Shuffle(state.FacilityDeck, rng);
 
             state.FacilitySupply.Clear();
@@ -119,14 +144,24 @@ namespace NomadCity.Core.Engine
             state.ExtensionHubSupply.AddRange(catalog.ExtensionHubIds());
         }
 
-        /// <summary>每人拿取本色的初始角色牌作为手牌（基础版 5 张，§4.2 步 1）。</summary>
+        /// <summary>
+        /// 每人拿取本色的初始角色牌作为手牌：基础版 5 张（§4.2 步 1）；
+        /// 启用企业扩展时再加上山 / 玛恩纳，共 7 张（EnterpriseExpansion.md §3.2 / §4.2）。
+        /// </summary>
         public static void DealCharacterCards(GameState state, ICardCatalog catalog)
         {
+            bool enterprise = state.Setup.IsEnterpriseEnabled;
+            int count = enterprise ? CardCounts.CharacterHandSizeWithExtension : CardCounts.CharacterRoles;
+
             foreach (PlayerState player in state.Players)
             {
                 player.HandCharacterCards.Clear();
                 player.DiscardCharacterCards.Clear();
-                player.HandCharacterCards.AddRange(catalog.CharacterCardIds(player.Color));
+                player.SetupDiscardDone = !enterprise;
+
+                IReadOnlyList<int> ids = catalog.CharacterCardIds(player.Color);
+                for (int i = 0; i < ids.Count && i < count; i++)
+                    player.HandCharacterCards.Add(ids[i]);
             }
         }
 
@@ -162,6 +197,16 @@ namespace NomadCity.Core.Engine
                 player.Score += variant.InitialBonusScore(order);
                 seat = state.NextSeat(seat);
             }
+        }
+
+        /// <summary>
+        /// §4.2 步 3：每名玩家从自己的供应堆拿 1 个玩家标记放到计分轨的「0」处（用于记录分数）。
+        /// 这个标记在整局游戏里**永久占住计分轨**，不再回到供应堆 —— 所以每人可用的玩家标记是 29 个。
+        /// </summary>
+        public static void PlaceScoreStartMarkers(GameState state)
+        {
+            foreach (PlayerState player in state.Players)
+                if (player.MarkersInSupply > 0) player.MarkersInSupply--;
         }
 
         private static void FillShuffled(List<int> target, IReadOnlyList<int> source, Random rng)

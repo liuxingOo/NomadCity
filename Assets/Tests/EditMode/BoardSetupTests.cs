@@ -52,7 +52,7 @@ namespace NomadCity.Tests
         public void Catalog_FacilityDeck_共41张普通设施()
         {
             ICardCatalog catalog = PlaceholderCardCatalog.Default;
-            IReadOnlyList<int> ids = catalog.FacilityDeckIds();
+            IReadOnlyList<int> ids = catalog.FacilityDeckIds(false);
 
             Assert.AreEqual(CardCounts.StandardFacilities, ids.Count);
             AssertUnique(ids);
@@ -63,7 +63,7 @@ namespace NomadCity.Tests
         public void Catalog_有的设施不在牌堆内()
         {
             ICardCatalog catalog = PlaceholderCardCatalog.Default;
-            var deck = new List<int>(catalog.FacilityDeckIds());
+            var deck = new List<int>(catalog.FacilityDeckIds(false));
 
             foreach (PlayerColor color in Enum.GetValues(typeof(PlayerColor)))
             {
@@ -110,7 +110,7 @@ namespace NomadCity.Tests
         public void Catalog_城市样式牌_I级4张_II级2张()
         {
             ICardCatalog catalog = PlaceholderCardCatalog.Default;
-            IReadOnlyList<int> ids = catalog.CityPatternIds();
+            IReadOnlyList<int> ids = catalog.CityPatternIds(false);
 
             Assert.AreEqual(CardCounts.CityPatterns, ids.Count);
             AssertUnique(ids);

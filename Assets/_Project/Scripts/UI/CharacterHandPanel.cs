@@ -21,8 +21,7 @@ namespace NomadCity.UI
     ///   CharacterHandPanel（宿主容器，挂本脚本，自身永远激活）
     ///     小标签按钮         ← 拖进 Toggle Button（与 Root 平级；点它展开 / 收起，开局默认收起）
     ///     Root               ← 托盘本体，由「玩家手里有牌」＋「已展开」两个条件控制显隐
-    ///       牌位 1 … 5        ← 每个都是一个 Button，逐个拖进 Card Buttons（脚本会自动叠放排列，别挂 Layout Group）
-    ///         牌名文本        ← 拖进 Card Labels（可选）
+    ///       牌位 1 … 5        ← 每个都是一个 Button，逐个拖进 Card Buttons（脚本会自动叠放排列，别挂 Layout Group）    ///         牌名文本        ← 拖进 Card Labels（可选）
     ///         卡面 Image      ← 拖进 Card Images（可选；装饰用，Raycast Target 关掉）
     /// </summary>
     public sealed class CharacterHandPanel : MonoBehaviour
@@ -37,7 +36,8 @@ namespace NomadCity.UI
         [Tooltip("小标签上的文字（可选）：收起时显示「手牌」，展开时显示「收起手牌」。")]
         [SerializeField] private TMP_Text toggleLabel;
 
-        [Tooltip("手牌牌位按钮，顺序与手牌列表一致（下标 0 是最左边那张牌）。最多按手牌上限（5 张）摆。")]
+        [Tooltip("手牌牌位按钮，顺序与手牌列表一致（下标 0 是最左边那张牌）。" +
+                 "场景里先摆 5 个；启用企业扩展后手牌 7 张，不足的牌位会在运行时按第 1 个的样子自动复制补齐。")]
         [SerializeField] private Button[] cardButtons = Array.Empty<Button>();
 
         [Tooltip("每个牌位上的牌名文本，与 Card Buttons 一一对应（可选）")]
@@ -46,8 +46,9 @@ namespace NomadCity.UI
         [Tooltip("每个牌位上的卡面 Image，与 Card Buttons 一一对应（可选；装饰用，Raycast Target 关掉）")]
         [SerializeField] private Image[] cardImages = Array.Empty<Image>();
 
-        [Tooltip("角色牌卡面 sprite 库：四个颜色共用同一张正面，所以这里只存 5 张角色图，下标 = 角色" +
-                 "（0 雷蛇 Liskarm / 1 极境 Elysium / 2 德克萨斯 Texas / 3 锡人 Tin Man / 4 坎诺特 Canot）。" +
+        [Tooltip("角色牌卡面 sprite 库：四个颜色共用同一张正面，下标 = 角色" +
+                 "（0 雷蛇 Liskarm / 1 极境 Elysium / 2 德克萨斯 Texas / 3 锡人 Tin Man / 4 坎诺特 Canot / " +
+                 "5 山 Mountain / 6 玛恩纳 Młynar）。" +
                  "映射见 SpriteIndexOf。用菜单 NomadCity / 卡面：填充卡面库（Card Faces）会自动按切片名填好，无需手动拖。")]
         [SerializeField] private Sprite[] cardFaces = Array.Empty<Sprite>();
 
@@ -105,6 +106,7 @@ namespace NomadCity.UI
 
         private void Awake()
         {
+            EnsureCardSlots(CardCounts.CharacterHandSizeWithExtension);
             CachePlaceholders();
 
             if (toggleButton != null)
@@ -144,6 +146,37 @@ namespace NomadCity.UI
             ColorBlock colors = button.colors;
             colors.disabledColor = Color.white;
             button.colors = colors;
+        }
+
+        /// <summary>
+        /// 保证牌位数量够用：场景里只摆了 5 个牌位，企业扩展后手牌 7 张，
+        /// 这里按第 1 个牌位的样子在运行时复制出不足的槽位（不改场景文件）。
+        /// </summary>
+        private void EnsureCardSlots(int count)
+        {
+            if (cardButtons.Length == 0 || cardButtons.Length >= count) return;
+
+            Button template = cardButtons[0];
+            if (template == null) return;
+
+            var buttons = new List<Button>(cardButtons);
+            var labels = new List<TMP_Text>(cardLabels);
+            var images = new List<Image>(cardImages);
+
+            while (buttons.Count < count)
+            {
+                Button copy = Instantiate(template, template.transform.parent);
+                copy.name = $"CardSlot{buttons.Count + 1}";
+                copy.onClick.RemoveAllListeners(); // 复制出来的按钮只认自己的下标
+
+                buttons.Add(copy);
+                labels.Add(copy.GetComponentInChildren<TMP_Text>(true));
+                images.Add(copy.GetComponentInChildren<Image>(true));
+            }
+
+            cardButtons = buttons.ToArray();
+            cardLabels = labels.ToArray();
+            cardImages = images.ToArray();
         }
 
         /// <summary>记下每个牌位 Image 在场景里原本的 sprite（占位贴图）——只记一次，按需补记。</summary>
@@ -192,6 +225,8 @@ namespace NomadCity.UI
 
                 int faceIndex = SpriteIndexOf(cardId);
                 Sprite face = faceIndex >= 0 && faceIndex < cardFaces.Length ? cardFaces[faceIndex] : null;
+                // 干员牌不走场景里切好的 sprite 数组：按拼版图的格子直接取图。
+                if (face == null) face = OperatorCardArt.SpriteFor(cardId);
 
                 if (i < cardImages.Length && cardImages[i] != null)
                     cardImages[i].sprite = face != null ? face : placeholderSprites[i];
@@ -246,6 +281,12 @@ namespace NomadCity.UI
         {
             if (cardId >= CardIds.CharacterBase && cardId < CardIds.CharacterBase + CardCounts.CharacterCards)
                 return (cardId - CardIds.CharacterBase) % CardCounts.CharacterRoles;
+
+            // 企业扩展：山（0）/ 玛恩纳（1）的卡面排在基础 5 张之后（下标 5、6）。
+            if (cardId >= CardIds.CharacterExtensionBase
+                && cardId < CardIds.CharacterExtensionBase + CardCounts.CharacterExtensionCards)
+                return CardCounts.CharacterRoles
+                       + (cardId - CardIds.CharacterExtensionBase) % CardCounts.CharacterExtensionRoles;
 
             return -1;
         }

@@ -90,8 +90,10 @@ namespace NomadCity.Core.Engine
             state.ActiveSpecialActionPatternId = PatternCardId;
 
             var entries = new System.Collections.Generic.List<EffectLogEntry>();
-            EffectReport costReport = EffectResolver.Execute(state, ActorSeat, card.SpecialActionCost, choices);
-            EffectReport effectReport = EffectResolver.Execute(state, ActorSeat, card.SpecialActionEffects, choices);
+            EffectReport costReport = EffectResolver.Execute(state, ActorSeat, card.SpecialActionCost, choices,
+                EnterpriseEffectExtension.Instance);
+            EffectReport effectReport = EffectResolver.Execute(state, ActorSeat, card.SpecialActionEffects, choices,
+                EnterpriseEffectExtension.Instance);
             entries.AddRange(costReport.Entries);
             entries.AddRange(effectReport.Entries);
             Report = new EffectReport(ActorSeat, entries, false, null);

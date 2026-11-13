@@ -3,6 +3,7 @@ using NomadCity.UI;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace NomadCity.EditorTools
@@ -24,16 +25,19 @@ namespace NomadCity.EditorTools
         private const string PatternLevel2Sheet = "Assets/_Project/Art/Cards/CityPattern/card_cp_lv2.jpg";
         private const string CharacterSheet = "Assets/_Project/Art/Cards/Character/bas_operators.png";
 
-        /// <summary>设施牌卡面库长度：41 张普通设施 + 4 张核心指挥塔 + 3 张延伸枢纽。</summary>
-        private const int FacilityLibrarySize = 48;
+        /// <summary>面板都摆在这个场景里；从别的场景点菜单会先切过来。</summary>
+        private const string GameScenePath = "Assets/_Project/Scenes/Game.unity";
 
-        /// <summary>角色牌卡面库长度：5 个角色（四色共用一张正面，等于 CardCounts.CharacterRoles）。</summary>
-        private const int CharacterLibrarySize = 5;
+        /// <summary>设施牌卡面库长度：41 张普通设施 + 4 张核心指挥塔 + 3 张延伸枢纽 + 3 张企业办事处（企业扩展）。</summary>
+        private const int FacilityLibrarySize = 51;
+
+        /// <summary>角色牌卡面库长度：5 个基础角色 + 企业扩展的山 / 玛恩纳，共 7。</summary>
+        private const int CharacterLibrarySize = 7;
 
         /// <summary>
         /// 设施切片名主干 → 该组第一张牌的 id（同组后续切片依次 +1）。
         /// 已对照 CardCatalog.BuildStandardFacilities / card_facility.jpg.meta 逐条核实。
-        /// 带「_exp」后缀的是企业办事处扩展牌，不在这套库里，自动跳过。
+        /// 带「_exp」后缀的是企业办事处扩展牌（600–602），由 CardCatalog.BuildEnterpriseFacilities 定义。
         /// </summary>
         private static readonly Dictionary<string, int> FacilityStemToBaseId = new Dictionary<string, int>
         {
@@ -66,6 +70,10 @@ namespace NomadCity.EditorTools
             { "Extension-Hub_red", 302 },
             // —— 核心指挥塔 200–203 ——
             { "Core-Command-Tower_rainbow", 200 },
+            // —— 企业办事处（企业扩展）600–602 ——
+            { "Enterprise-Office_red_exp", 600 },
+            { "Enterprise-Office_blue_exp", 601 },
+            { "Enterprise-Office_yellow_exp", 602 },
         };
 
         /// <summary>
@@ -92,20 +100,24 @@ namespace NomadCity.EditorTools
         /// <summary>
         /// 角色牌切片名（英文角色名）→ 角色下标（即 <see cref="CharacterHandPanel.SpriteIndexOf"/> 的返回下标）。
         /// 四色共用一张正面，所以一张角色图只对应一个下标，与牌 id 的 4 个颜色副本无关。
-        /// 拼版图里还画了企业扩展的玛恩纳（Młynar）/ 山（Mountain）与占位符，均不收录，遇到自动跳过。
+        /// 5 / 6 是企业扩展（EnterpriseExpansion.md §3.2）的山 / 玛恩纳，切片名带「_exp」后缀。
         /// </summary>
         private static readonly Dictionary<string, int> CharacterStemToRoleIndex = new Dictionary<string, int>
         {
-            { "Liskarm", 0 },   // 雷蛇
-            { "Elysium", 1 },   // 极境
-            { "Texas",   2 },   // 德克萨斯
-            { "Tin Man", 3 },   // 锡人
-            { "Canot",   4 },   // 坎诺特
+            { "Liskarm", 0 },       // 雷蛇
+            { "Elysium", 1 },       // 极境
+            { "Texas",   2 },       // 德克萨斯
+            { "Tin Man", 3 },       // 锡人
+            { "Canot",   4 },       // 坎诺特
+            { "Mountain_exp", 5 },  // 山
+            { "Młynar_exp",   6 },  // 玛恩纳
         };
 
         [MenuItem("NomadCity/卡面：填充卡面库（Card Faces）")]
         private static void FillAll()
         {
+            if (!EnsureGameSceneOpen()) return;
+
             Sprite[] facilityLibrary = BuildFacilityLibrary();
             if (facilityLibrary == null) return;
 
@@ -123,7 +135,7 @@ namespace NomadCity.EditorTools
                 filled += FillPanel<CharacterHandPanel>("角色牌手牌", characterLibrary);
 
             // 卡面放大弹窗自己也要一份库：城市面板点设施、设施供应区只读点牌靠设施库，
-            // 手牌点角色牌靠角色库。以前这份是生成弹窗时顺手填的，这里一并补上，省得手动拖 48 + 5 个 Sprite。
+            // 手牌点角色牌靠角色库。以前这份是生成弹窗时顺手填的，这里一并补上，省得手动拖 51 + 7 个 Sprite。
             filled += FillPanel<CardPreviewPopup>("卡面放大", facilityLibrary);
             if (characterLibrary != null)
                 filled += FillPanel<CardPreviewPopup>("卡面放大", characterLibrary, "characterFaces");
@@ -138,6 +150,27 @@ namespace NomadCity.EditorTools
                 ? $"[卡面填充] 已填 {filled} 个面板的卡面库（设施库 {facilityLibrary.Length} 项，样式库 {patternLibrary.Length} 项，" +
                   $"角色库 {(characterLibrary != null ? characterLibrary.Length : 0)} 项），并接好 {images} 个卡面 Image 位。"
                 : "[卡面填充] 当前场景里没找到这几个面板，什么都没改。请先打开 Game 场景再执行。");
+        }
+
+        /// <summary>
+        /// 菜单只对 Game 场景有效。当前打开的是别的场景（比如 MainMenu）时先切过去，
+        /// 免得一路「找不到面板」刷屏。场景有改动会先问是否保存，取消就什么都不做。
+        /// </summary>
+        private static bool EnsureGameSceneOpen()
+        {
+            if (SceneManager.GetActiveScene().path == GameScenePath) return true;
+
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return false;
+
+            EditorSceneManager.OpenScene(GameScenePath, OpenSceneMode.Single);
+            if (SceneManager.GetActiveScene().path == GameScenePath)
+            {
+                Debug.Log($"[卡面填充] 当前打开的不是 Game 场景，已切到 {GameScenePath} 再填充。");
+                return true;
+            }
+
+            Debug.LogError($"[卡面填充] 打不开 {GameScenePath}，请先手动打开 Game 场景再跑本菜单。");
+            return false;
         }
 
         /// <summary>点菜单时顺便报告素材本身的问题，帮用户提前发现漏切 / 命名变化。</summary>
@@ -155,7 +188,6 @@ namespace NomadCity.EditorTools
             foreach (string name in byName.Keys)
             {
                 if (!name.StartsWith("card_facility_")) continue;
-                if (name.EndsWith("_exp")) continue;                     // 企业办事处扩展牌：不在本库
                 string body = name.Substring("card_facility_".Length);
                 if (body.StartsWith("None")) continue;                   // 切图残留的空格
                 string stem = StemOf(body);
@@ -225,7 +257,7 @@ namespace NomadCity.EditorTools
         }
 
         /// <summary>
-        /// 角色牌卡面库：按切片名（英文角色名）定位角色下标。四色共用一张正面，所以这里只有 5 格。
+        /// 角色牌卡面库：按切片名（英文角色名）定位角色下标。四色共用一张正面，所以这里只有 7 格。
         /// 允许这张图还没切片 —— 返回 null 表示跳过，调用方不该因此中断其它面板。
         /// </summary>
         internal static Sprite[] BuildCharacterLibrary()
@@ -248,7 +280,7 @@ namespace NomadCity.EditorTools
                 if (!CharacterStemToRoleIndex.TryGetValue(stem, out int roleIndex) &&
                     !CharacterStemToRoleIndex.TryGetValue(body, out roleIndex) &&
                     !CharacterStemToRoleIndex.TryGetValue(entry.Key, out roleIndex))
-                    continue;   // 占位符 / 企业扩展角色 / 名字对不上：跳过
+                    continue;   // 占位符 / 名字对不上：跳过
 
                 library[roleIndex] = entry.Value;
             }

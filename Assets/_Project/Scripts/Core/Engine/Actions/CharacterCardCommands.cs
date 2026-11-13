@@ -42,6 +42,14 @@ namespace NomadCity.Core.Engine
                 return CommandResult.Fail(
                     "2 人局盖放角色牌前，每名玩家要先从设施供应区弃 1 张设施牌（§12 变体 4）。");
 
+            // 企业扩展：开局入场还要从 7 张手牌里选 2 张放回游戏盒（EnterpriseExpansion.md §4.2）。
+            if (!player.SetupDiscardDone)
+                return CommandResult.Fail("请先从 7 张手牌里选 2 张放回游戏盒（企业扩展开局入场）。");
+
+            // 企业扩展：红区开放回合要先选 1 家企业提升 1 级，再开始盖放（§3.2）。
+            if (state.Enterprises != null && state.Enterprises.RedZoneAdvanceSeat == ActorSeat)
+                return CommandResult.Fail("红色区域已开放：请先点「企业」按钮，选择 1 家企业把自己的合作等级提升 1 级。");
+
             // 手牌空时按规则先回收弃牌区，所以候选池是「手牌 ∪ 弃牌区」。
             IReadOnlyList<int> pool = player.HandCharacterCards.Count > 0
                 ? player.HandCharacterCards
@@ -145,6 +153,15 @@ namespace NomadCity.Core.Engine
             if (def.OpsOf(Effect).Count == 0)
                 return CommandResult.Fail($"「{def.NameOf(Effect)}」还没有录入效果。");
 
+            // 计谋可能要「先支付 N 金券」（如山·商业网络）：付不起不能发动。
+            int voucherCost = 0;
+            foreach (RewardOp op in def.OpsOf(Effect))
+            {
+                if (op.Kind == RewardKind.PayVouchers) voucherCost += op.Amount;
+            }
+            if (voucherCost > 0 && !ActionRules.IgnoresCosts(state) && player.Vouchers < voucherCost)
+                return CommandResult.Fail($"发动「{def.NameOf(Effect)}」需要先支付 {voucherCost} 金券。");
+
             return CommandResult.Success;
         }
 
@@ -153,7 +170,9 @@ namespace NomadCity.Core.Engine
             PlayerState player = state.Player(ActorSeat);
             CharacterCardDef def = state.Catalog.Character(player.PlacedCharacterCard);
 
-            Report = EffectResolver.Execute(state, ActorSeat, def.OpsOf(Effect), choices);
+            // 企业角色牌（山 / 玛恩纳）的效果由企业扩展执行器处理。
+            Report = EffectResolver.Execute(state, ActorSeat, def.OpsOf(Effect), choices,
+                EnterpriseEffectExtension.Instance);
 
             if (Effect == CharacterEffectKind.Strategy) player.UsedCharacterStrategyThisTurn = true;
             else player.UsedCharacterTacticsThisTurn = true;
@@ -214,5 +233,74 @@ namespace NomadCity.Core.Engine
         }
 
         public void Apply(GameState state) => UseCharacterCardCommand.DiscardPlacedCard(state.Player(ActorSeat));
+    }
+
+    /// <summary>
+    /// 企业扩展·开局入场：从 7 张手牌里选 2 张放回游戏盒（EnterpriseExpansion.md §4.2）。
+    /// 必须在开局入场（决定初始资源点 + 结算事件牌）走完之后、本人盖放角色牌之前完成；
+    /// 放回游戏盒的牌直接移出本局，不进弃牌区。
+    /// </summary>
+    public sealed class DiscardSetupHandCardsCommand : ICommand
+    {
+        public readonly int CardA;
+        public readonly int CardB;
+
+        public DiscardSetupHandCardsCommand(int seat, int cardA, int cardB)
+        {
+            ActorSeat = seat;
+            CardA = cardA;
+            CardB = cardB;
+        }
+
+        public int ActorSeat { get; }
+        public string Name => "开局弃 2 张角色牌";
+
+        /// <summary>开局设置，不占主要行动名额。</summary>
+        public bool ConsumesAction => false;
+
+        public CommandResult Validate(GameState state)
+        {
+            if (state == null) return CommandResult.Fail("引擎没有游戏状态。");
+            if (state.IsGameOver) return CommandResult.Fail("本局已经结束。");
+            if (!state.Setup.IsEnterpriseEnabled)
+                return CommandResult.Fail("本局没有启用企业扩展，开局手牌是 5 张，不需要弃牌。");
+            if (state.TurnNumber != 1 || state.Phase != TurnPhase.CharacterPlacement)
+                return CommandResult.Fail("开局弃牌只能在第 1 回合的角色牌盖放阶段进行。");
+
+            if (ActorSeat < 0 || ActorSeat >= state.Players.Count)
+                return CommandResult.Fail($"座位号 {ActorSeat} 无效。");
+
+            PlayerState player = state.Player(ActorSeat);
+            if (player.SetupDiscardDone)
+                return CommandResult.Fail("你本局已经完成开局弃牌了。");
+
+            // 开局入场「7 选 5」属于开局设置，排在 2 人局弃设施牌之前，所以这里不看 SupplyDiscardRemaining。
+            if (ChooseStartNodeCommand.CurrentOperator(state) >= 0)
+                return CommandResult.Fail("请先完成开局入场（决定初始资源点并结算事件牌）。");
+
+            if (CardA == CardB)
+                return CommandResult.Fail("要放回游戏盒的必须是两张不同的角色牌。");
+            if (!Contains(player.HandCharacterCards, CardA) || !Contains(player.HandCharacterCards, CardB))
+                return CommandResult.Fail("选中的角色牌不在你的手牌里。");
+
+            return CommandResult.Success;
+        }
+
+        public void Apply(GameState state)
+        {
+            PlayerState player = state.Player(ActorSeat);
+            player.HandCharacterCards.Remove(CardA);
+            player.HandCharacterCards.Remove(CardB);
+            player.SetupDiscardDone = true;
+        }
+
+        private static bool Contains(IReadOnlyList<int> list, int value)
+        {
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i] == value) return true;
+            }
+            return false;
+        }
     }
 }

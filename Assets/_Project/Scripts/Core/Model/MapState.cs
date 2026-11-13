@@ -168,6 +168,12 @@ namespace NomadCity.Core.Model
         public readonly District District;
         public readonly InfluenceSlots Slots;
 
+        /// <summary>
+        /// 企业扩展「开辟商路」：这条航道上已放置公路指示物。
+        /// 公路会覆盖该航道所有影响力格（不能再放置 / 移动影响力），且经过它探索或采集免路费。
+        /// </summary>
+        public bool IsHighway;
+
         public RouteState(int id, int[] nodes, District district, int influenceCapacity)
         {
             if (nodes == null || nodes.Length < 2)
@@ -232,6 +238,7 @@ namespace NomadCity.Core.Model
             {
                 var clone = new RouteState(route.Id, (int[])route.Nodes.Clone(), route.District, route.Slots.Capacity);
                 clone.Slots.CopyFrom(route.Slots);
+                clone.IsHighway = route.IsHighway;
                 copy.Routes.Add(clone);
             }
 

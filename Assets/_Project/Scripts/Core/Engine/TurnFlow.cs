@@ -46,6 +46,9 @@ namespace NomadCity.Core.Engine
                 state.SupplyDiscardRemaining = 0;
                 state.SupplyDiscardSeat = -1;
             }
+
+            // 企业扩展：红区开放回合，盖放前先让每名玩家选 1 家企业提升 1 级。
+            EnterpriseRules.BeginRedZoneAdvance(state);
         }
 
         /// <summary>
@@ -169,6 +172,9 @@ namespace NomadCity.Core.Engine
 
                 // 第 1 回合的「开局入场」（§4.3）也在盖放阶段里：要等每个人都选好初始资源点、并把翻出的事件牌结算完。
                 if (state.TurnNumber == 1 && ChooseStartNodeCommand.CurrentOperator(state) >= 0) return false;
+
+                // 企业扩展：红区开放的提升没走完之前不放行（§3.2）。
+                if (state.Enterprises != null && state.Enterprises.RedZoneAdvanceStarted) return false;
 
                 if (!AllCharacterCardsPlaced(state)) return false;
 

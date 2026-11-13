@@ -371,7 +371,7 @@ namespace NomadCity.Tests
             public bool Handles(RewardOp op, GameState state) =>
                 op.Kind == RewardKind.ChooseEnterprise && state.Setup.IsEnterpriseEnabled;
 
-            public bool Execute(RewardOp op, int seat, GameState state)
+            public bool Execute(RewardOp op, int seat, GameState state, IEffectChoices choices)
             {
                 Executed++;
                 return true;

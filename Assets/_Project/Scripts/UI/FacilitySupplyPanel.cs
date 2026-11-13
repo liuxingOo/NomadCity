@@ -309,7 +309,7 @@ namespace NomadCity.UI
         /// <summary>
         /// 设施牌 id → <see cref="cardFaces"/> 下标。
         /// 普通设施 100–140 → 0–40（按素材拼版图从左到右、从上到下编号，跳过其中的延伸枢纽槽位）；
-        /// 核心指挥塔 200–203 → 41–44；延伸枢纽 300–302 → 45–47；其余 id 返回 -1。
+        /// 核心指挥塔 200–203 → 41–44；延伸枢纽 300–302 → 45–47；企业办事处 600–602 → 48–50；其余 id 返回 -1。
         /// </summary>
         public static int SpriteIndexOf(int cardId)
         {
@@ -321,6 +321,11 @@ namespace NomadCity.UI
 
             if (cardId >= CardIds.ExtensionHubBase && cardId < CardIds.ExtensionHubBase + CardCounts.ExtensionHubs)
                 return CardCounts.StandardFacilities + CardCounts.CoreCommandTowers + (cardId - CardIds.ExtensionHubBase);
+
+            if (cardId >= CardIds.FacilityEnterpriseBase
+                && cardId < CardIds.FacilityEnterpriseBase + CardCounts.FacilityEnterprise)
+                return CardCounts.StandardFacilities + CardCounts.CoreCommandTowers + CardCounts.ExtensionHubs
+                    + (cardId - CardIds.FacilityEnterpriseBase);
 
             return -1;
         }

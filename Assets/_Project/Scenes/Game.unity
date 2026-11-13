@@ -3392,7 +3392,7 @@ MonoBehaviour:
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
-    rgba: 4075543551
+    rgba: 4292602866
   m_fontColor: {r: 0.95, g: 0.92, b: 0.86, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
@@ -3539,6 +3539,8 @@ MonoBehaviour:
   - {fileID: 1902159239, guid: fe01afe98b3280c4899f245d0eb4d1c6, type: 3}
   - {fileID: 1780651054, guid: fe01afe98b3280c4899f245d0eb4d1c6, type: 3}
   - {fileID: -2099748309, guid: fe01afe98b3280c4899f245d0eb4d1c6, type: 3}
+  - {fileID: -926530063, guid: fe01afe98b3280c4899f245d0eb4d1c6, type: 3}
+  - {fileID: 1195666348, guid: fe01afe98b3280c4899f245d0eb4d1c6, type: 3}
   cardStep: 70
   centerGroup: 1
 --- !u!1 &209362567
@@ -3800,20 +3802,6 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
---- !u!114 &222592272
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 222592267}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 3c7e2b91d5f84a6e9b0d1c47a8e63f52, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: NomadCity.UI::NomadCity.UI.ChatPanel
-  toggleButton: {fileID: 222592269}
-  font: {fileID: 11400000, guid: 693466f661a9513469ab2808986b399b, type: 2}
 --- !u!114 &222592270
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3852,6 +3840,20 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 222592267}
   m_CullTransparentMesh: 1
+--- !u!114 &222592272
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 222592267}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3c7e2b91d5f84a6e9b0d1c47a8e63f52, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: NomadCity.UI::NomadCity.UI.ChatPanel
+  toggleButton: {fileID: 222592269}
+  font: {fileID: 11400000, guid: 693466f661a9513469ab2808986b399b, type: 2}
 --- !u!1 &230634040
 GameObject:
   m_ObjectHideFlags: 0
@@ -5841,6 +5843,9 @@ MonoBehaviour:
   - {fileID: -29383907, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
   - {fileID: -940059718, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
   - {fileID: -1196588495, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
+  - {fileID: 1330269641, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
+  - {fileID: -9820165, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
+  - {fileID: -1823629160, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
   buildSlotHighlight: {r: 0.25, g: 0.85, b: 0.45, a: 0.35}
 --- !u!1 &371105942
 GameObject:
@@ -8028,7 +8033,6 @@ MonoBehaviour:
   worldCamera: {fileID: 0}
   mapView: {fileID: 60051747}
   maxZoomIn: 5
-  minZoomOut: 1.25
   zoomPerNotch: 0.8
   zoomSpeed: 1
   windowOffset: {x: 0, y: -40}
@@ -18865,7 +18869,7 @@ MonoBehaviour:
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
-    rgba: 4075543551
+    rgba: 4292602866
   m_fontColor: {r: 0.95, g: 0.92, b: 0.86, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
@@ -19071,9 +19075,8 @@ MonoBehaviour:
   specialActionButton: {fileID: 2004659328}
   characterCardButton: {fileID: 1273123836}
   declarePatternButton: {fileID: 2120900094}
-  commitButton: {fileID: 19355347}
-  cancelButton: {fileID: 1432882686}
   hintText: {fileID: 1798758447}
+  endTurnButton: {fileID: 0}
 --- !u!1 &1095196986
 GameObject:
   m_ObjectHideFlags: 0
@@ -20715,6 +20718,8 @@ MonoBehaviour:
   - {fileID: -5777739403161424140, guid: b295bec8f4d0c654eacada302f1008ad, type: 3}
   - {fileID: -3999383484899937616, guid: 7cb6fb1d33f61794ab6f068368a04190, type: 3}
   - {fileID: 3620961125254409305, guid: 911d5ebbca4d1e843a1458e82f112544, type: 3}
+  highwaySprite: {fileID: 0}
+  highwayWidth: 0.42
   showScoreMarkers: 1
   scoreTrackBottomStart: {x: -19.95, y: -23.865}
   scoreTrackBottomStep: 1.7548
@@ -25064,6 +25069,9 @@ MonoBehaviour:
   - {fileID: -29383907, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
   - {fileID: -940059718, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
   - {fileID: -1196588495, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
+  - {fileID: 1330269641, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
+  - {fileID: -9820165, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
+  - {fileID: -1823629160, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
 --- !u!1 &1432882684
 GameObject:
   m_ObjectHideFlags: 0
@@ -27874,6 +27882,44 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &1655654866
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1655654863}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
+  m_Material: {fileID: 0}
+  m_Color: {r: 0.43137255, g: 0.47843137, b: 0.5176471, a: 1}
+  m_RaycastTarget: 1
+  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
+  m_Maskable: 1
+  m_OnCullStateChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  m_Sprite: {fileID: 0}
+  m_Type: 1
+  m_PreserveAspect: 0
+  m_FillCenter: 1
+  m_FillMethod: 4
+  m_FillAmount: 1
+  m_FillClockwise: 1
+  m_FillOrigin: 0
+  m_UseSpriteMesh: 0
+  m_PixelsPerUnitMultiplier: 1
+--- !u!222 &1655654867
+CanvasRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1655654863}
+  m_CullTransparentMesh: 1
 --- !u!114 &1655654868
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -27930,44 +27976,6 @@ MonoBehaviour:
   cityPatternPanel: {fileID: 1033168606}
   characterPanel: {fileID: 184139381}
   eventCardPanel: {fileID: 1850862560}
---- !u!114 &1655654866
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1655654863}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
-  m_Material: {fileID: 0}
-  m_Color: {r: 0.43137255, g: 0.47843137, b: 0.5176471, a: 1}
-  m_RaycastTarget: 1
-  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
-  m_Maskable: 1
-  m_OnCullStateChanged:
-    m_PersistentCalls:
-      m_Calls: []
-  m_Sprite: {fileID: 0}
-  m_Type: 1
-  m_PreserveAspect: 0
-  m_FillCenter: 1
-  m_FillMethod: 4
-  m_FillAmount: 1
-  m_FillClockwise: 1
-  m_FillOrigin: 0
-  m_UseSpriteMesh: 0
-  m_PixelsPerUnitMultiplier: 1
---- !u!222 &1655654867
-CanvasRenderer:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1655654863}
-  m_CullTransparentMesh: 1
 --- !u!1 &1659732382
 GameObject:
   m_ObjectHideFlags: 0
@@ -31079,12 +31087,17 @@ MonoBehaviour:
   - {fileID: -29383907, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
   - {fileID: -940059718, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
   - {fileID: -1196588495, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
+  - {fileID: 1330269641, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
+  - {fileID: -9820165, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
+  - {fileID: -1823629160, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
   characterFaces:
   - {fileID: -6332468748009234693, guid: fe01afe98b3280c4899f245d0eb4d1c6, type: 3}
   - {fileID: 306811553, guid: fe01afe98b3280c4899f245d0eb4d1c6, type: 3}
   - {fileID: 1902159239, guid: fe01afe98b3280c4899f245d0eb4d1c6, type: 3}
   - {fileID: 1780651054, guid: fe01afe98b3280c4899f245d0eb4d1c6, type: 3}
   - {fileID: -2099748309, guid: fe01afe98b3280c4899f245d0eb4d1c6, type: 3}
+  - {fileID: -926530063, guid: fe01afe98b3280c4899f245d0eb4d1c6, type: 3}
+  - {fileID: 1195666348, guid: fe01afe98b3280c4899f245d0eb4d1c6, type: 3}
   patternFaces:
   - {fileID: 2405140195196867406, guid: a51d46fd4275afc46906a0207b964ba2, type: 3}
   - {fileID: -1294820787, guid: a51d46fd4275afc46906a0207b964ba2, type: 3}
@@ -34203,6 +34216,9 @@ MonoBehaviour:
   - {fileID: -29383907, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
   - {fileID: -940059718, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
   - {fileID: -1196588495, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
+  - {fileID: 1330269641, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
+  - {fileID: -9820165, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
+  - {fileID: -1823629160, guid: 33de07cbeb0105a4d86645bdf2abac26, type: 3}
   buildSlotHighlight: {r: 0.25, g: 0.85, b: 0.45, a: 0.35}
 --- !u!114 &2130639161
 MonoBehaviour:

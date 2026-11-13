@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using NomadCity.Core.Model;
+using NomadCity.Core.Model.Enterprise;
 using NomadCity.Game;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace NomadCity.UI
@@ -86,6 +88,9 @@ namespace NomadCity.UI
         [Tooltip("事件卡面板：图鉴的事件卡页复用它配置好的卡面库（不拖则运行时自动找）")]
         [SerializeField] private EventCardPanel eventCardPanel;
 
+        [Tooltip("企业板面板：企业页点缩略图时用它打开单卡视图（不拖则运行时创建）")]
+        [SerializeField] private EnterpriseBoardPanel enterprisePanel;
+
         private GameObject root;
         private RectTransform windowRect;
         private RectTransform contentRect;
@@ -109,7 +114,17 @@ namespace NomadCity.UI
         private Image previewImage;
         private TMP_Text previewLabel;
 
+        // 放大查看层（整窗看图，滚轮缩放 + 拖动平移）
+        private GameObject zoomRoot;
+        private RectTransform zoomContent;
+        private Image zoomImage;
+        private TMP_Text zoomLabel;
+        private ZoomSurface zoomSurface;
+
         public bool IsOpen => built && root != null && root.activeSelf;
+
+        /// <summary>操作区「图鉴」按钮的矩形（强制流程给遮罩开洞时用；没接线时为 null）。</summary>
+        public RectTransform ToggleRect => toggleButton != null ? toggleButton.transform as RectTransform : null;
 
         private void Awake()
         {
@@ -151,6 +166,13 @@ namespace NomadCity.UI
             }
 
             if (root.activeSelf != open) root.SetActive(open);
+            if (!open)
+            {
+                ClosePreview();
+                CloseZoom();
+                if (enterprisePanel != null) enterprisePanel.Close();
+            }
+
             UiButtonTint.SetLit(toggleButton, open);
         }
 
@@ -208,6 +230,7 @@ namespace NomadCity.UI
             BuildTabs(windowRect);
             BuildPages();
             BuildPreview(windowRect);
+            BuildZoom(windowRect);
 
             SetPage(Page.Rules);
             built = true;
@@ -275,16 +298,18 @@ namespace NomadCity.UI
             }
 
             ClosePreview();
+            CloseZoom();
         }
 
         // —— 规则书 / 速查表（同一套翻页浏览） ——
 
         private GameObject BuildRulesPage()
         {
-            RectTransform page = BuildImagePager("Page_Rules", NextRulePage,
-                out ruleImage, out rulePageLabel, out Button prev, out Button next);
+            RectTransform page = BuildImagePager("Page_Rules",
+                out ruleImage, out rulePageLabel, out Button prev, out Button next, out Button zoom);
             prev.onClick.AddListener(() => StepRulePage(-1));
             next.onClick.AddListener(() => StepRulePage(1));
+            zoom.onClick.AddListener(() => OpenZoom(ruleImage, $"规则书 · 第 {rulePageIndex + 1} 页"));
 
             RefreshRulePage();
             return page.gameObject;
@@ -302,14 +327,13 @@ namespace NomadCity.UI
             RefreshRulePage();
         }
 
-        private void NextRulePage() => StepRulePage(1);
-
         private GameObject BuildQuickRefPage()
         {
-            RectTransform page = BuildImagePager("Page_QuickRef", NextQuickRef,
-                out quickImage, out quickPageLabel, out Button prev, out Button next);
+            RectTransform page = BuildImagePager("Page_QuickRef",
+                out quickImage, out quickPageLabel, out Button prev, out Button next, out Button zoom);
             prev.onClick.AddListener(() => StepQuickRef(-1));
             next.onClick.AddListener(() => StepQuickRef(1));
+            zoom.onClick.AddListener(() => OpenZoom(quickImage, $"速查表 · 第 {quickPageIndex + 1} 张"));
 
             RefreshQuickRef();
             return page.gameObject;
@@ -327,11 +351,14 @@ namespace NomadCity.UI
             RefreshQuickRef();
         }
 
-        private void NextQuickRef() => StepQuickRef(1);
-
-        /// <summary>一页一张图 + 底部「上一页 / 下一页」+ 页码，点图片也能翻到下一张。</summary>
-        private RectTransform BuildImagePager(string name, Action onImageClick, out Image image,
-            out TMP_Text pageLabel, out Button prev, out Button next)
+        /// <summary>
+        /// 一页一张图 + 底部「上一页 / 下一页 / 放大」+ 页码。
+        ///
+        /// 图片本身**不再**接收点击：以前点图片任意位置就翻到下一张，想凑近看细节时经常误翻页。
+        /// 翻页只走左右两个按钮；图上的小字看不清就点「放大」，进整窗查看（滚轮缩放 + 拖动平移）。
+        /// </summary>
+        private RectTransform BuildImagePager(string name, out Image image,
+            out TMP_Text pageLabel, out Button prev, out Button next, out Button zoom)
         {
             RectTransform page = CreatePage(name);
 
@@ -342,12 +369,7 @@ namespace NomadCity.UI
             imageRect.offsetMin = new Vector2(14f, 56f);
             imageRect.offsetMax = new Vector2(-14f, -14f);
             image.preserveAspect = true;
-            image.raycastTarget = true;
-
-            Button imageButton = image.gameObject.AddComponent<Button>();
-            imageButton.transition = Selectable.Transition.None;
-            imageButton.targetGraphic = image;
-            imageButton.onClick.AddListener(() => onImageClick?.Invoke());
+            image.raycastTarget = false;
 
             prev = CreateButton("Prev", page, "上一页", 18f, out _);
             SetRect(prev.GetComponent<RectTransform>(), new Vector2(0f, 0f), new Vector2(0f, 0f),
@@ -356,6 +378,10 @@ namespace NomadCity.UI
             next = CreateButton("Next", page, "下一页", 18f, out _);
             SetRect(next.GetComponent<RectTransform>(), new Vector2(1f, 0f), new Vector2(1f, 0f),
                 new Vector2(-14f, 10f), new Vector2(90f, 36f), new Vector2(1f, 0f));
+
+            zoom = CreateButton("Zoom", page, "放大", 18f, out _);
+            SetRect(zoom.GetComponent<RectTransform>(), new Vector2(1f, 0f), new Vector2(1f, 0f),
+                new Vector2(-112f, 10f), new Vector2(90f, 36f), new Vector2(1f, 0f));
 
             pageLabel = CreateText("PageLabel", page, string.Empty, 18f, TextAlignmentOptions.Center);
             SetRect(pageLabel.rectTransform, new Vector2(0f, 0f), new Vector2(1f, 0f),
@@ -470,43 +496,70 @@ namespace NomadCity.UI
         private GameObject BuildEnterprisePage()
         {
             RectTransform page = CreatePage("Page_Enterprise");
-            BuildTextScroll(page, EnterpriseText());
+
+            RectTransform viewport = CreateRect("Viewport", page);
+            Stretch(viewport);
+            viewport.offsetMin = new Vector2(8f, 8f);
+            viewport.offsetMax = new Vector2(-8f, -8f);
+
+            Image viewportImage = viewport.gameObject.AddComponent<Image>();
+            viewportImage.color = new Color(0f, 0f, 0f, 0.01f);
+            viewportImage.raycastTarget = true;
+            viewport.gameObject.AddComponent<RectMask2D>();
+
+            RectTransform gridRect = CreateRect("Content", viewport);
+            gridRect.anchorMin = new Vector2(0f, 1f);
+            gridRect.anchorMax = new Vector2(1f, 1f);
+            gridRect.pivot = new Vector2(0.5f, 1f);
+            gridRect.anchoredPosition = Vector2.zero;
+            gridRect.sizeDelta = Vector2.zero;
+
+            GridLayoutGroup grid = gridRect.gameObject.AddComponent<GridLayoutGroup>();
+            // 企业板是 650 × 1850 的窄长卡，缩略图按同一比例排成一行。
+            grid.cellSize = new Vector2(96f, 273f);
+            grid.spacing = new Vector2(10f, 10f);
+            grid.padding = new RectOffset(10, 10, 10, 10);
+            grid.childAlignment = TextAnchor.UpperLeft;
+            grid.constraint = GridLayoutGroup.Constraint.Flexible;
+
+            ContentSizeFitter fitter = gridRect.gameObject.AddComponent<ContentSizeFitter>();
+            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            ScrollRect scroll = page.gameObject.AddComponent<ScrollRect>();
+            scroll.content = gridRect;
+            scroll.viewport = viewport;
+            scroll.horizontal = false;
+            scroll.vertical = true;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.inertia = true;
+            scroll.decelerationRate = 0.135f;
+            scroll.scrollSensitivity = 30f;
+
+            for (int boardId = 0; boardId < EnterpriseCatalog.BoardCount; boardId++)
+            {
+                int id = boardId;
+                EnterpriseBoardDef def = EnterpriseCatalog.Board(id);
+                Sprite face = EnterpriseCardArt.BoardSprite(id);
+                string label = def != null ? def.Name : $"企业板 {id}";
+                BuildTile(gridRect, face, label, () => OpenEnterpriseBoard(id));
+            }
+
             return page.gameObject;
         }
 
-        private static string EnterpriseText()
+        /// <summary>
+        /// 图鉴里点企业板缩略图：打开单卡视图，再点左侧等级方块即可放大该级效果。
+        /// 图鉴在标题界面也能打开，因此不传对局状态（单卡视图不需要）。
+        /// </summary>
+        private void OpenEnterpriseBoard(int boardId)
         {
-            return
-                "<b>企业合作（企业扩展）</b>\n" +
-                "开局选定初始企业后，企业合作等级会随游戏推进提升；达到指定等级即可触发该企业的特效。\n" +
-                "以下按规则书已展开的牌面整理，未列出的等级以实体合作企业板为准。\n\n" +
-                "<b>黑钢国际（BS BLACKSTEEL）</b>\n" +
-                "泰拉规模最大的安全顾问企业，接受从私人安保到武力干涉在内的多种类安保委托。\n" +
-                "· 4 级：移除 2 个影响力，或放置 2 个影响力，也可以移除 1 个 + 放置 1 个，执行顺序自定。\n\n" +
-                "<b>海德兄弟（HD）</b>\n" +
-                "来自堡巫山的建材业寡头，在哥伦比亚多个城市的建材市场拥有垄断地位。\n" +
-                "· 4 级：把设施供应区全部 6 张牌洗回牌堆并重抽 6 张；之后可免费建设其中 1 张。\n\n" +
-                "<b>雷神工业（RAYTHEAN）</b>\n" +
-                "富有创新精神的制造业领军者，业务囊括城市建设的方方面面。\n" +
-                "· 3 / 5 级：可进行不占用主要行动的建设，一回合内次数不限；由企业特效建出的「企业办事处」可再次触发。\n" +
-                "· 5 级：若无法建造任意设施，必须洗混设施牌堆并结束本次结算。\n\n" +
-                "<b>雷姆必拓（ARIM SOLUTIONS）</b>\n" +
-                "由多家矿业企业组成的联合集团，矿区管理与开采技术首屈一指。\n" +
-                "· 4 级：立刻按当前局面结算一次单人采集；行动阶段结束后仍可正常进行采集阶段。\n\n" +
-                "<b>富森银行</b>\n" +
-                "老牌金融企业，根据建设规模与信用评级提供大额金券借贷。\n" +
-                "· 3 级：自己先获得 20 金券，其余玩家各获得 4 金券。\n\n" +
-                "<b>约翰老妈（MAMA JOHN'S）</b>\n" +
-                "从提卡伦多发展起来的本土综合性企业，涉及食品、制造业与金融。\n" +
-                "· 3 级：可解锁企业特效（可获得 1 分）；具体效果以实体企业板为准。\n\n" +
-                "<b>莱茵生命</b>\n" +
-                "哥伦比亚本土科技巨头，研究范围囊括源石技艺、新型材料与实验性武装。\n" +
-                "· 2–5 级奖励在标记移上去时一次性生效；附带 3 张科室板，同时只能激活 1 张，可用企业特效替换。\n\n" +
-                "<b>罗德岛制药</b>\n" +
-                "具备应对源石感染专业能力的制药企业，干员可提供多方面战术支持。\n" +
-                "· 3 / 5 级「干员特派」：抽 2 张干员牌，选 1 张加入手牌（未选的洗回，且须从手牌 / 弃牌区选 1 张角色牌展示后放回游戏盒）；或全部洗回并得 1 分。\n" +
-                "· 4 级：先从角色牌弃牌区回收 1 张并展示，之后除它以外所有手牌面朝上进入弃牌区（弃牌区为空则不能用）。\n\n" +
-                "<i>注：部分等级效果规则书未展开，以实体合作企业板为准。</i>";
+            Canvas canvas = GetComponentInParent<Canvas>();
+            if (canvas == null) return;
+
+            if (enterprisePanel == null)
+                enterprisePanel = EnterpriseBoardPanel.Create(canvas.transform, font);
+
+            enterprisePanel.OpenSingle(null, boardId);
         }
 
         // —— 企业家决策 ——
@@ -621,10 +674,21 @@ namespace NomadCity.UI
 
             Button back = CreateButton("Back", preview, "返回", 20f, out _);
             SetRect(back.GetComponent<RectTransform>(), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-                new Vector2(0f, 24f), new Vector2(110f, 40f), new Vector2(0.5f, 0f));
+                new Vector2(-66f, 24f), new Vector2(110f, 40f), new Vector2(0.5f, 0f));
             back.onClick.AddListener(ClosePreview);
 
+            Button enlarge = CreateButton("Zoom", preview, "放大", 20f, out _);
+            SetRect(enlarge.GetComponent<RectTransform>(), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(66f, 24f), new Vector2(110f, 40f), new Vector2(0.5f, 0f));
+            enlarge.onClick.AddListener(OpenPreviewZoom);
+
             previewRoot.SetActive(false);
+        }
+
+        private void OpenPreviewZoom()
+        {
+            if (previewImage == null) return;
+            OpenZoom(previewImage.sprite, previewLabel != null ? previewLabel.text : null);
         }
 
         private void ShowPreview(Sprite face, string label)
@@ -648,6 +712,179 @@ namespace NomadCity.UI
             if (previewRoot != null && previewRoot.activeSelf) previewRoot.SetActive(false);
         }
 
+        // —— 放大查看层 ——
+
+        /// <summary>
+        /// 整窗看图：图先按「塞满窗口」显示（等于图鉴弹窗全屏），再支持滚轮缩放与拖动平移，
+        /// 让速查表 / 规则书 / 卡面上那些小字能真的看清。
+        /// </summary>
+        private void BuildZoom(RectTransform windowRect)
+        {
+            RectTransform zoom = CreateRect("Zoom", windowRect);
+            Stretch(zoom);
+            zoomRoot = zoom.gameObject;
+
+            Image dim = CreateImage("Dim", zoom, new Color(0f, 0f, 0f, 0.97f));
+            Stretch(dim.rectTransform);
+            dim.raycastTarget = true;
+            Button dimButton = dim.gameObject.AddComponent<Button>();
+            dimButton.transition = Selectable.Transition.None;
+            dimButton.targetGraphic = dim;
+            dimButton.onClick.AddListener(CloseZoom);
+
+            RectTransform viewport = CreateRect("Viewport", zoom);
+            Stretch(viewport);
+            viewport.offsetMin = new Vector2(24f, 80f);
+            viewport.offsetMax = new Vector2(-24f, -66f);
+
+            Image viewportImage = viewport.gameObject.AddComponent<Image>();
+            viewportImage.color = new Color(0f, 0f, 0f, 0.01f);
+            viewportImage.raycastTarget = true;
+            viewport.gameObject.AddComponent<RectMask2D>();
+
+            zoomContent = CreateRect("Content", viewport);
+            Stretch(zoomContent);
+
+            zoomImage = CreateImage("Face", zoomContent, Color.white);
+            Stretch(zoomImage.rectTransform);
+            zoomImage.preserveAspect = true;
+            zoomImage.raycastTarget = false;
+
+            zoomSurface = viewport.gameObject.AddComponent<ZoomSurface>();
+            zoomSurface.content = zoomContent;
+            zoomSurface.viewport = viewport;
+
+            zoomLabel = CreateText("Name", zoom, string.Empty, 24f, TextAlignmentOptions.Left);
+            SetRect(zoomLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(24f, -16f), new Vector2(760f, 42f), new Vector2(0f, 1f));
+
+            TMP_Text hint = CreateText("Hint", zoom, "滚轮缩放 · 按住拖动平移", 18f, TextAlignmentOptions.Right);
+            SetRect(hint.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-24f, -16f), new Vector2(420f, 42f), new Vector2(1f, 1f));
+
+            Button back = CreateButton("Back", zoom, "返回", 20f, out _);
+            SetRect(back.GetComponent<RectTransform>(), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(0f, 24f), new Vector2(120f, 40f), new Vector2(0.5f, 0f));
+            back.onClick.AddListener(CloseZoom);
+
+            zoomRoot.SetActive(false);
+        }
+
+        private void OpenZoom(Image source, string label)
+        {
+            if (source == null) return;
+            OpenZoom(source.sprite, label);
+        }
+
+        private void OpenZoom(Sprite sprite, string label)
+        {
+            if (zoomRoot == null || sprite == null) return;
+
+            zoomRoot.SetActive(true);
+            zoomRoot.transform.SetAsLastSibling();
+
+            if (zoomImage != null)
+            {
+                zoomImage.sprite = sprite;
+                zoomImage.enabled = true;
+            }
+
+            if (zoomLabel != null) zoomLabel.text = label ?? string.Empty;
+            if (zoomSurface != null) zoomSurface.ResetView();
+        }
+
+        private void CloseZoom()
+        {
+            if (zoomRoot != null && zoomRoot.activeSelf) zoomRoot.SetActive(false);
+        }
+
+        /// <summary>
+        /// 放大层的手势：滚轮以指针为中心缩放，按住拖动平移；缩到比视口小就自动回到居中。
+        /// 交互手感和地图一致（<see cref="MapCameraController"/> 也是滚轮缩放 + 拖动）。
+        /// </summary>
+        private sealed class ZoomSurface : MonoBehaviour, IScrollHandler, IDragHandler
+        {
+            public RectTransform content;
+            public RectTransform viewport;
+
+            /// <summary>
+            /// 最小缩放 = 1：打开时「整图铺满窗口」就是最小视野，和地图一样只能放大、不能再缩小
+            /// （<see cref="MapCameraController"/> 的 zoomOutLimit 也是开局取景）。
+            /// </summary>
+            private const float MinScale = 1f;
+
+            /// <summary>最大缩放：再大就只剩马赛克，没有意义。</summary>
+            private const float MaxScale = 8f;
+
+            /// <summary>
+            /// 每一格滚轮的缩放倍数。1.12 = 每格放大 12%（约 6 格翻倍），比之前一档 15.5% 更容易停到想要的倍率。
+            /// </summary>
+            private const float ScalePerNotch = 1.12f;
+
+            private float scale = 1f;
+
+            public void ResetView()
+            {
+                scale = 1f;
+                if (content == null) return;
+
+                content.localScale = Vector3.one;
+                content.anchoredPosition = Vector2.zero;
+            }
+
+            public void OnScroll(PointerEventData eventData)
+            {
+                if (content == null || viewport == null) return;
+
+                // 高分辨率滚轮一次会送 ±0.1 这种小数、部分设备又会一次送好几点：
+                // 统一折算成「几格」，再限制单次最多一格，避免一下跳很远。
+                float wheel = Mathf.Clamp(eventData.scrollDelta.y, -1f, 1f);
+                if (Mathf.Approximately(wheel, 0f)) return;
+
+                float previous = scale;
+                scale = Mathf.Clamp(scale * Mathf.Pow(ScalePerNotch, wheel), MinScale, MaxScale);
+                if (Mathf.Approximately(previous, scale)) return;
+
+                // 以指针为锚点：缩放前后把指针底下那一点钉住，看起来就是「在鼠标位置放大」。
+                if (RectTransformUtility.ScreenPointToLocalPointInRectangle(viewport, eventData.position,
+                        eventData.pressEventCamera, out Vector2 pointer))
+                {
+                    Vector2 offset = pointer - content.anchoredPosition;
+                    content.anchoredPosition = pointer - offset * (scale / previous);
+                }
+
+                content.localScale = new Vector3(scale, scale, 1f);
+                ClampPosition();
+            }
+
+            public void OnDrag(PointerEventData eventData)
+            {
+                if (content == null) return;
+
+                Canvas canvas = GetComponentInParent<Canvas>();
+                float factor = canvas != null && canvas.scaleFactor > 0.0001f ? canvas.scaleFactor : 1f;
+                content.anchoredPosition += eventData.delta / factor;
+                ClampPosition();
+            }
+
+            /// <summary>内容比视口大时不许把边缘拖进视口里；比视口小就居中。</summary>
+            private void ClampPosition()
+            {
+                if (content == null || viewport == null) return;
+
+                Vector2 view = viewport.rect.size;
+                Vector2 scaled = content.rect.size * scale;
+                Vector2 position = content.anchoredPosition;
+
+                float limitX = Mathf.Max(0f, (scaled.x - view.x) * 0.5f);
+                float limitY = Mathf.Max(0f, (scaled.y - view.y) * 0.5f);
+
+                position.x = Mathf.Clamp(position.x, -limitX, limitX);
+                position.y = Mathf.Clamp(position.y, -limitY, limitY);
+                content.anchoredPosition = position;
+            }
+        }
+
         // —— 卡牌数据 ——
 
         private static List<int> FacilityIds()
@@ -656,6 +893,7 @@ namespace NomadCity.UI
             for (int i = 0; i < CardCounts.StandardFacilities; i++) ids.Add(CardIds.FacilityBase + i);
             for (int i = 0; i < CardCounts.CoreCommandTowers; i++) ids.Add(CardIds.CoreCommandTowerBase + i);
             for (int i = 0; i < CardCounts.ExtensionHubs; i++) ids.Add(CardIds.ExtensionHubBase + i);
+            for (int i = 0; i < CardCounts.FacilityEnterprise; i++) ids.Add(CardIds.FacilityEnterpriseBase + i);
             return ids;
         }
 
@@ -669,9 +907,11 @@ namespace NomadCity.UI
 
         private static List<int> CharacterIds()
         {
-            // 20 张 = 4 色 × 5 名，同名角色四色效果相同、卡面也共用：图鉴每种只放一张。
+            // 28 张 = 4 色 × 7 名，同名角色四色效果相同、卡面也共用：图鉴每种只放一张。
             var ids = new List<int>();
             for (int i = 0; i < CardCounts.CharacterRoles; i++) ids.Add(CardIds.CharacterBase + i);
+            for (int i = 0; i < CardCounts.CharacterExtensionRoles; i++)
+                ids.Add(CardIds.CharacterExtensionBase + i);
             return ids;
         }
 
@@ -737,47 +977,6 @@ namespace NomadCity.UI
             EventCardDef card = PlaceholderCardCatalog.Default.Event(cardId);
             if (card == null) return $"事件牌 {cardId}";
             return card.IsEnterpriseCard ? $"{card.Name}（企业扩展）" : card.Name;
-        }
-
-        // —— 文本滚动页 ——
-
-        private TMP_Text BuildTextScroll(RectTransform page, string content)
-        {
-            RectTransform viewport = CreateRect("Viewport", page);
-            Stretch(viewport);
-            viewport.offsetMin = new Vector2(8f, 8f);
-            viewport.offsetMax = new Vector2(-8f, -8f);
-
-            Image viewportImage = viewport.gameObject.AddComponent<Image>();
-            viewportImage.color = new Color(0f, 0f, 0f, 0.01f);
-            viewportImage.raycastTarget = true;
-            viewport.gameObject.AddComponent<RectMask2D>();
-
-            TMP_Text text = CreateText("Text", viewport, content, 18f, TextAlignmentOptions.TopLeft);
-            text.richText = true;
-            text.textWrappingMode = TextWrappingModes.Normal;
-            text.lineSpacing = 5f;
-            text.margin = new Vector4(14f, 12f, 14f, 12f);
-            RectTransform textRect = text.rectTransform;
-            textRect.anchorMin = new Vector2(0f, 1f);
-            textRect.anchorMax = new Vector2(1f, 1f);
-            textRect.pivot = new Vector2(0.5f, 1f);
-            textRect.anchoredPosition = Vector2.zero;
-            textRect.sizeDelta = Vector2.zero;
-
-            ContentSizeFitter fitter = text.gameObject.AddComponent<ContentSizeFitter>();
-            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-            ScrollRect scroll = page.gameObject.AddComponent<ScrollRect>();
-            scroll.content = textRect;
-            scroll.viewport = viewport;
-            scroll.horizontal = false;
-            scroll.vertical = true;
-            scroll.movementType = ScrollRect.MovementType.Clamped;
-            scroll.inertia = true;
-            scroll.decelerationRate = 0.135f;
-            scroll.scrollSensitivity = 30f;
-            return text;
         }
 
         // —— 小工具 ——

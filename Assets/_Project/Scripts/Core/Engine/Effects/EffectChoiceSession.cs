@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using NomadCity.Core.Model;
+using NomadCity.Core.Model.Enterprise;
 
 namespace NomadCity.Core.Engine
 {
@@ -208,8 +209,99 @@ namespace NomadCity.Core.Engine
             return pick < 0 ? -1 : candidates[pick];
         }
 
+        public int ChooseRoute(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates)
+        {
+            var labels = new List<string>(candidates.Count);
+            foreach (int id in candidates) labels.Add($"航道 {state.Map.RouteLabel(id)}");
+            int pick = Take(candidates.Count, "选择 1 条航道", labels, true);
+            return pick < 0 ? -1 : candidates[pick];
+        }
+
+        public int ChooseEnterpriseBoard(int seat, RewardOp op, GameState state,
+            IReadOnlyList<int> candidates)
+        {
+            var labels = new List<string>(candidates.Count);
+            foreach (int id in candidates)
+            {
+                EnterpriseBoardDef board = EnterpriseCatalog.Board(id);
+                labels.Add(board != null ? board.Name : $"企业 {id}");
+            }
+            int pick = Take(candidates.Count, "选择 1 家合作企业", labels, true);
+            return pick < 0 ? -1 : candidates[pick];
+        }
+
+        public int ChooseEnterpriseEffectLevel(int seat, RewardOp op, GameState state, int boardId,
+            IReadOnlyList<int> candidates)
+        {
+            EnterpriseBoardDef board = EnterpriseCatalog.Board(boardId);
+            var labels = new List<string>(candidates.Count);
+            foreach (int level in candidates)
+            {
+                EnterpriseLevel entry = board?.Level(level);
+                labels.Add(entry != null ? $"{level} 级：{entry.Text}" : $"{level} 级");
+            }
+            int pick = Take(candidates.Count, $"触发「{board?.Name}」的哪个企业特效", labels, true);
+            return pick < 0 ? -1 : candidates[pick];
+        }
+
+        public int ChooseRhineDepartment(int seat, RewardOp op, GameState state,
+            IReadOnlyList<int> candidates)
+        {
+            var labels = new List<string>(candidates.Count);
+            foreach (int id in candidates)
+            {
+                RhineDepartmentDef department = EnterpriseCatalog.Department(id);
+                labels.Add(department != null ? department.Name : $"科室板 {id + 1}");
+            }
+
+            int pick = Take(candidates.Count, "选择要切换到的科室板", labels, true);
+            return pick < 0 ? -1 : candidates[pick];
+        }
+
+        public int ChooseOpponent(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates)
+        {
+            var labels = new List<string>(candidates.Count);
+            foreach (int other in candidates) labels.Add($"玩家{other + 1}");
+
+            int pick = Take(candidates.Count, "选择 1 位对手失去分数", labels, true);
+            return pick < 0 ? -1 : candidates[pick];
+        }
+
+        public int ChooseDiscardedCharacterCard(int seat, RewardOp op, GameState state,
+            IReadOnlyList<int> candidates)
+        {
+            var labels = new List<string>(candidates.Count);
+            foreach (int id in candidates)
+                labels.Add($"《{state.Catalog.Character(id)?.Name ?? $"角色牌 {id}"}》");
+            int pick = Take(candidates.Count, "从角色牌弃牌区选择 1 张加入手牌", labels, true);
+            return pick < 0 ? -1 : candidates[pick];
+        }
+
+        public int ChooseOperatorCard(int seat, RewardOp op, GameState state,
+            IReadOnlyList<int> candidates)
+        {
+            var labels = new List<string>(candidates.Count + 1);
+            foreach (int id in candidates)
+                labels.Add($"《{state.Catalog.Character(id)?.Name ?? $"干员牌 {id}"}》");
+            labels.Add("全部洗回牌堆，获得 1 分");
+
+            int pick = Take(candidates.Count + 1,
+                "选择 1 张干员牌加入手牌（也可以全部洗回换 1 分）", labels, false);
+            return pick >= 0 && pick < candidates.Count ? candidates[pick] : -1;
+        }
+
+        public int ChooseCharacterCardIntoBox(int seat, RewardOp op, GameState state,
+            IReadOnlyList<int> candidates)
+        {
+            var labels = new List<string>(candidates.Count);
+            foreach (int id in candidates)
+                labels.Add($"《{state.Catalog.Character(id)?.Name ?? $"角色牌 {id}"}》");
+            int pick = Take(candidates.Count, "选择 1 张角色牌放回游戏盒（不能保留）", labels, false);
+            return pick < 0 ? -1 : candidates[pick];
+        }
+
         public BuildChoice? ChooseBuild(int seat, RewardOp op, GameState state,
-            IReadOnlyList<int> facilityIds, IReadOnlyList<int> panelSlots)
+            IReadOnlyList<int> facilityIds, IReadOnlyList<int> panelSlots, bool freeOnly = false)
         {
             var facilityLabels = new List<string>(facilityIds.Count);
             foreach (int id in facilityIds) facilityLabels.Add($"《{FacilityLabel(state, id)}》");
@@ -222,6 +314,9 @@ namespace NomadCity.Core.Engine
 
             int p = Take(panelSlots.Count, "选择要放到城市面板哪一格", slotLabels, true);
             if (p < 0) return null;
+
+            // 卡牌给的免费建造不问付费方式（问了也不付），直接免单。
+            if (freeOnly) return new BuildChoice(facilityIds[f], panelSlots[p], FacilityPayment.None);
 
             List<FacilityPayment> pays = PaymentOptions(state.Catalog.Facility(facilityIds[f]));
             var payLabels = new List<string>(pays.Count);

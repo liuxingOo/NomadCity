@@ -366,10 +366,35 @@ namespace NomadCity.Tests
             public int ChooseNode(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates) =>
                 candidates.Count > 0 ? candidates[0] : -1;
 
+            public int ChooseRoute(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates) =>
+                candidates.Count > 0 ? candidates[0] : -1;
+
+            public int ChooseEnterpriseBoard(int seat, RewardOp op, GameState state,
+                IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
+
+            public int ChooseEnterpriseEffectLevel(int seat, RewardOp op, GameState state, int boardId,
+                IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
+
+            public int ChooseRhineDepartment(int seat, RewardOp op, GameState state,
+                IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
+
+            public int ChooseOpponent(int seat, RewardOp op, GameState state,
+                IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
+
+            public int ChooseDiscardedCharacterCard(int seat, RewardOp op, GameState state,
+                IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
+
+            public int ChooseOperatorCard(int seat, RewardOp op, GameState state,
+                IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
+
+            public int ChooseCharacterCardIntoBox(int seat, RewardOp op, GameState state,
+                IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
+
             public BuildChoice? ChooseBuild(int seat, RewardOp op, GameState state,
-                IReadOnlyList<int> facilityIds, IReadOnlyList<int> panelSlots) =>
+                IReadOnlyList<int> facilityIds, IReadOnlyList<int> panelSlots, bool freeOnly = false) =>
                 facilityIds.Count > 0 && panelSlots.Count > 0
-                    ? new BuildChoice(facilityIds[0], panelSlots[0], FacilityPayment.Resources)
+                    ? new BuildChoice(facilityIds[0], panelSlots[0],
+                        freeOnly ? FacilityPayment.None : FacilityPayment.Resources)
                     : (BuildChoice?)null;
 
             public int ChooseExtensionHub(int seat, RewardOp op, GameState state,

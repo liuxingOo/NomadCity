@@ -112,29 +112,45 @@ namespace NomadCity.Core.Engine
             var results = new List<HarvestResult>(count);
             for (int seat = 0; seat < count; seat++)
             {
-                HarvestPlan plan = plans[seat];
-                PlayerState player = state.Player(seat);
-
-                if (!ActionRules.IgnoresCosts(state)) // 开发者模式：不付路费
-                {
-                    foreach (TollCalculator.Payment payment in plan.Toll.Payments)
-                    {
-                        player.Vouchers -= payment.Amount;
-                        if (payment.PayeeSeat != TollCalculator.SupplyPayee)
-                            state.Player(payment.PayeeSeat).Vouchers += payment.Amount;
-                    }
-                }
-
-                foreach (int nodeId in plan.Nodes)
-                {
-                    MapNodeState node = state.Map.Node(nodeId);
-                    player.Resources.Add(node.TokenResource, node.TokenAmount);
-                }
-
-                results.Add(new HarvestResult(seat, plan));
+                results.Add(ApplyPlan(state, plans[seat]));
             }
 
             return new HarvestReport(results);
+        }
+
+        /// <summary>
+        /// 单人立刻结算 1 次采集（企业特效「你进行 1 次采集」）：只处理这一位，
+        /// 不碰 <see cref="GameState.HarvestPending"/> / <see cref="GameState.HarvestChoices"/>，也不结算别人。
+        /// 规则与采集阶段一致：同一航道只计一次、预算取结算前手里的金券。
+        /// </summary>
+        public static HarvestResult ResolveSingle(GameState state, int seat, IReadOnlyList<int> chosenNodeIds)
+        {
+            HarvestPlan plan = Plan(state, seat, chosenNodeIds);
+            return ApplyPlan(state, plan);
+        }
+
+        /// <summary>按计划付款并发资源（<see cref="Resolve"/> 与 <see cref="ResolveSingle"/> 共用）。</summary>
+        private static HarvestResult ApplyPlan(GameState state, HarvestPlan plan)
+        {
+            PlayerState player = state.Player(plan.Seat);
+
+            if (!ActionRules.IgnoresCosts(state)) // 开发者模式：不付路费
+            {
+                foreach (TollCalculator.Payment payment in plan.Toll.Payments)
+                {
+                    player.Vouchers -= payment.Amount;
+                    if (payment.PayeeSeat != TollCalculator.SupplyPayee)
+                        state.Player(payment.PayeeSeat).Vouchers += payment.Amount;
+                }
+            }
+
+            foreach (int nodeId in plan.Nodes)
+            {
+                MapNodeState node = state.Map.Node(nodeId);
+                player.Resources.Add(node.TokenResource, node.TokenAmount);
+            }
+
+            return new HarvestResult(plan.Seat, plan);
         }
 
         /// <summary>把航道集合转成升序列表，让路费拆解（付款顺序）可复现。</summary>

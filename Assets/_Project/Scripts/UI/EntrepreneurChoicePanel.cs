@@ -35,6 +35,7 @@ namespace NomadCity.UI
 
         private void Awake()
         {
+            EnsureDim();
             if (root != null) root.SetActive(false);
 
             ValidateWiring();
@@ -47,6 +48,35 @@ namespace NomadCity.UI
                 int index = i;
                 option.Button.onClick.AddListener(() => OnOptionClicked(index));
             }
+        }
+
+        /// <summary>
+        /// 挑选企业家是必要流程：确保 Root 最底下有一张全屏半透明遮罩，
+        /// 把操作区等底层按钮挡住，避免绕过流程去点别的东西。
+        /// Root 自带的 Dim 直接复用（只把透明度和射线拦截调到位），没有才新建。
+        /// </summary>
+        private void EnsureDim()
+        {
+            if (root == null) return;
+
+            Transform existing = root.transform.Find("Dim");
+            Image dim = existing != null ? existing.GetComponent<Image>() : null;
+            if (dim == null)
+            {
+                GameObject go = new GameObject("Dim", typeof(RectTransform));
+                go.transform.SetParent(root.transform, false);
+                RectTransform rect = (RectTransform)go.transform;
+                rect.anchorMin = Vector2.zero;
+                rect.anchorMax = Vector2.one;
+                rect.offsetMin = Vector2.zero;
+                rect.offsetMax = Vector2.zero;
+                dim = go.AddComponent<Image>();
+            }
+
+            dim.color = new Color(0f, 0f, 0f, 0.55f);
+            dim.raycastTarget = true;              // 挡住底下所有按钮
+            dim.transform.SetSiblingIndex(0);      // 压在 Panel 下面，只挡外面
+            if (dim.GetComponent<DimClickHole>() == null) dim.gameObject.AddComponent<DimClickHole>();
         }
 
         /// <summary>
@@ -73,7 +103,14 @@ namespace NomadCity.UI
 
         public void Show(string title, string hint, string order)
         {
-            if (root != null) root.SetActive(true);
+            if (root != null)
+            {
+                // 操作区（OperationBar）在 Canvas 里排在企业家面板后面，会被它盖住点击。
+                // 打开时把整个面板提到最上层，Root 里的全屏 Dim 才能真正挡住所有底层按钮。
+                Transform host = root.transform.parent;
+                if (host != null) host.SetAsLastSibling();
+                root.SetActive(true);
+            }
             if (titleText != null) titleText.text = title ?? string.Empty;
             SetOrder(order);
             SetHint(hint);

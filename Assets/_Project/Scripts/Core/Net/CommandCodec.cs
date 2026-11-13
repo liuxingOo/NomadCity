@@ -240,13 +240,15 @@ namespace NomadCity.Core.Net
                         P0 = c.BoardId,
                     };
 
-                // 提升合作等级：P0 = BoardId。
+                // 提升合作等级：P0 = BoardId；P3 = 答案个数，Items = 答案（科室板奖励的点选）。
                 case AdvanceEnterpriseLevelCommand c:
                     return new CommandDto
                     {
                         Kind = CommandKind.AdvanceEnterpriseLevel,
                         Seat = c.ActorSeat,
                         P0 = c.BoardId,
+                        P3 = AnswerCount(c.EffectChoices),
+                        Items = AnswerItems(c.EffectChoices),
                     };
 
                 // 触发企业特效：P0 = BoardId；P1 = Level；P3 = 答案个数，Items = 答案。
@@ -261,9 +263,27 @@ namespace NomadCity.Core.Net
                         Items = AnswerItems(c.EffectChoices),
                     };
 
+                // 选莱茵生命科室板：P0 = DepartmentId。
+                case PickRhineDepartmentCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.PickRhineDepartment,
+                        Seat = c.ActorSeat,
+                        P0 = c.DepartmentId,
+                    };
+
+                // 开局弃 2 张角色牌：P0 = 第一张，P1 = 第二张。
+                case DiscardSetupHandCardsCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.DiscardSetupHandCards,
+                        Seat = c.ActorSeat,
+                        P0 = c.CardA,
+                        P1 = c.CardB,
+                    };
+
                 // P0 = 座位号；P1 = 选点数；Items = 本座位的选点 id（只传自己的）。
-                case SubmitHarvestChoiceCommand c:
-                {
+                case SubmitHarvestChoiceCommand c:                {
                     var dto = new CommandDto
                     {
                         Kind = CommandKind.SubmitHarvestChoice,
@@ -377,10 +397,16 @@ namespace NomadCity.Core.Net
                     return new ChooseInitialEnterpriseCommand(dto.Seat, dto.P0);
 
                 case CommandKind.AdvanceEnterpriseLevel:
-                    return new AdvanceEnterpriseLevelCommand(dto.Seat, dto.P0);
+                    return new AdvanceEnterpriseLevelCommand(dto.Seat, dto.P0, DecodeAnswers(dto));
 
                 case CommandKind.TriggerEnterpriseEffect:
                     return new TriggerEnterpriseEffectCommand(dto.Seat, dto.P0, dto.P1, DecodeAnswers(dto));
+
+                case CommandKind.DiscardSetupHandCards:
+                    return new DiscardSetupHandCardsCommand(dto.Seat, dto.P0, dto.P1);
+
+                case CommandKind.PickRhineDepartment:
+                    return new PickRhineDepartmentCommand(dto.Seat, dto.P0);
 
                 default:
                     throw new ArgumentException($"无法解码未知的命令 Kind：{dto.Kind}。", nameof(dto));

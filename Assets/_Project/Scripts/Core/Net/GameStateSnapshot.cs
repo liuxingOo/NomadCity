@@ -18,7 +18,7 @@ namespace NomadCity.Core.Net
     public sealed class GameStateSnapshot
     {
         /// <summary>当前快照格式版本；协议握手时与对方比对。</summary>
-        public const int Version = 3;
+        public const int Version = 6;
 
         public int PlayerCount;
         public ExpansionFlags Expansions;
@@ -50,18 +50,31 @@ namespace NomadCity.Core.Net
         public int EnterprisePendingAdvanceExcludeBoard = -1;
         public string EnterprisePendingAdvanceReason = string.Empty;
 
+        // —— 企业扩展：红色区域开放的可同步进度 ——
+        public bool EnterpriseRedZoneAdvanceStarted;
+        public int EnterpriseRedZoneAdvanceSeat = -1;
+        public int EnterpriseRedZoneAdvanceDoneMask;
+
         /// <summary>合作等级：按「企业板 id × 座位号」拉平，长度 = 8 × 人数。</summary>
         public int[] EnterpriseLevels = Array.Empty<int>();
 
         /// <summary>本回合已触发的企业特效位掩码：同样按「企业板 id × 座位号」拉平。</summary>
         public int[] EnterpriseUsedMasks = Array.Empty<int>();
 
-        /// <summary>各座位开局抽到的 2 张企业板，每座位固定 2 个槽位（-1 = 空）。</summary>
+        /// <summary>各座位开局抽到的企业板，按「座位 × <see cref="EnterpriseOffersPerSeat"/>」拉平（-1 = 空）。</summary>
         public int[] EnterpriseOffers = Array.Empty<int>();
 
+        /// <summary>各座位每人要选几张企业板（3／4 人局 1，2 人局 2）。</summary>
+        public int EnterprisePicksPerPlayer = 1;
+
+        /// <summary>各座位抽到的张数（= PicksPerPlayer × 2）。</summary>
+        public int EnterpriseOffersPerSeat = 2;
+
         public readonly List<int> EnterpriseDeck = new();
+        public readonly List<int> EnterpriseOperatorDeck = new();
         public readonly List<int> EnterpriseBoards = new();
         public readonly List<int> EnterpriseChosen = new();
+        public readonly List<int> EnterpriseSecondChosen = new();
         public readonly List<int> EnterpriseDepartments = new();
 
         public readonly List<PlayerSnapshot> Players = new();
@@ -137,19 +150,30 @@ namespace NomadCity.Core.Net
                 snapshot.EnterprisePendingAdvanceSeat = enterprises.PendingAdvanceSeat;
                 snapshot.EnterprisePendingAdvanceExcludeBoard = enterprises.PendingAdvanceExcludeBoard;
                 snapshot.EnterprisePendingAdvanceReason = enterprises.PendingAdvanceReason ?? string.Empty;
+                snapshot.EnterpriseRedZoneAdvanceStarted = enterprises.RedZoneAdvanceStarted;
+                snapshot.EnterpriseRedZoneAdvanceSeat = enterprises.RedZoneAdvanceSeat;
+                snapshot.EnterpriseRedZoneAdvanceDoneMask = enterprises.RedZoneAdvanceDoneMask;
 
                 snapshot.EnterpriseDeck.AddRange(enterprises.Deck);
+                snapshot.EnterpriseOperatorDeck.AddRange(enterprises.OperatorDeck);
                 snapshot.EnterpriseBoards.AddRange(enterprises.ActiveBoards);
                 snapshot.EnterpriseChosen.AddRange(enterprises.ChosenBoards);
+                snapshot.EnterpriseSecondChosen.AddRange(enterprises.SecondChosenBoards);
                 snapshot.EnterpriseDepartments.AddRange(enterprises.Departments);
 
                 int playerCount = state.Players.Count;
-                snapshot.EnterpriseOffers = new int[playerCount * 2];
+                int offersPerSeat = enterprises.OffersPerSeat < 1 ? 2 : enterprises.OffersPerSeat;
+                snapshot.EnterprisePicksPerPlayer = enterprises.PicksPerPlayer;
+                snapshot.EnterpriseOffersPerSeat = offersPerSeat;
+                snapshot.EnterpriseOffers = new int[playerCount * offersPerSeat];
                 for (int seat = 0; seat < playerCount; seat++)
                 {
                     List<int> offer = seat < enterprises.Offers.Count ? enterprises.Offers[seat] : null;
-                    snapshot.EnterpriseOffers[seat * 2] = offer != null && offer.Count > 0 ? offer[0] : -1;
-                    snapshot.EnterpriseOffers[seat * 2 + 1] = offer != null && offer.Count > 1 ? offer[1] : -1;
+                    for (int slot = 0; slot < offersPerSeat; slot++)
+                    {
+                        snapshot.EnterpriseOffers[seat * offersPerSeat + slot] =
+                            offer != null && slot < offer.Count ? offer[slot] : -1;
+                    }
                 }
 
                 snapshot.EnterpriseLevels = new int[EnterpriseCatalog.BoardCount * playerCount];
@@ -214,23 +238,35 @@ namespace NomadCity.Core.Net
 
             // —— 企业扩展 ——
             EnterpriseState enterprises = state.Enterprises;
-            enterprises.Reset(Players.Count);
+            enterprises.Reset(Players.Count, EnterprisePicksPerPlayer < 1 ? 1 : EnterprisePicksPerPlayer);
             enterprises.DraftDone = EnterpriseDraftDone;
             enterprises.PendingAdvanceSeat = EnterprisePendingAdvanceSeat;
             enterprises.PendingAdvanceExcludeBoard = EnterprisePendingAdvanceExcludeBoard;
             enterprises.PendingAdvanceReason = EnterprisePendingAdvanceReason ?? string.Empty;
+            enterprises.RedZoneAdvanceStarted = EnterpriseRedZoneAdvanceStarted;
+            enterprises.RedZoneAdvanceSeat = EnterpriseRedZoneAdvanceSeat;
+            enterprises.RedZoneAdvanceDoneMask = EnterpriseRedZoneAdvanceDoneMask;
             enterprises.Deck.AddRange(EnterpriseDeck);
+            // 老快照没有干员牌堆（长度 0）：保留 Reset 装好的 8 张，别把牌堆清空。
+            if (EnterpriseOperatorDeck.Count > 0)
+            {
+                enterprises.OperatorDeck.Clear();
+                enterprises.OperatorDeck.AddRange(EnterpriseOperatorDeck);
+            }
             enterprises.ActiveBoards.AddRange(EnterpriseBoards);
 
+            int offersPerSeat = EnterpriseOffersPerSeat < 1 ? 2 : EnterpriseOffersPerSeat;
             for (int seat = 0; seat < enterprises.ChosenBoards.Count; seat++)
             {
                 if (seat < EnterpriseChosen.Count) enterprises.ChosenBoards[seat] = EnterpriseChosen[seat];
+                if (seat < EnterpriseSecondChosen.Count)
+                    enterprises.SecondChosenBoards[seat] = EnterpriseSecondChosen[seat];
                 if (seat < EnterpriseDepartments.Count) enterprises.Departments[seat] = EnterpriseDepartments[seat];
 
                 enterprises.Offers[seat].Clear();
-                for (int slot = 0; slot < 2; slot++)
+                for (int slot = 0; slot < offersPerSeat; slot++)
                 {
-                    int index = seat * 2 + slot;
+                    int index = seat * offersPerSeat + slot;
                     if (index < EnterpriseOffers.Length && EnterpriseOffers[index] >= 0)
                         enterprises.Offers[seat].Add(EnterpriseOffers[index]);
                 }
@@ -279,6 +315,9 @@ namespace NomadCity.Core.Net
             public int ExtraMainActionsThisTurn;
             public int CharacterCardBanRound;
 
+            /// <summary>开局入场「7 选 5」是否已完成（企业扩展）。</summary>
+            public bool SetupDiscardDone = true;
+
             public static PlayerSnapshot Capture(PlayerState player)
             {
                 var snapshot = new PlayerSnapshot
@@ -302,6 +341,7 @@ namespace NomadCity.Core.Net
                     MobileCityNodeId = player.MobileCityNodeId,
                     ExtraMainActionsThisTurn = player.ExtraMainActionsThisTurn,
                     CharacterCardBanRound = player.CharacterCardBanRound,
+                    SetupDiscardDone = player.SetupDiscardDone,
                 };
 
                 snapshot.HandCharacterCards.AddRange(player.HandCharacterCards);
@@ -334,6 +374,7 @@ namespace NomadCity.Core.Net
                     MobileCityNodeId = MobileCityNodeId,
                     ExtraMainActionsThisTurn = ExtraMainActionsThisTurn,
                     CharacterCardBanRound = CharacterCardBanRound,
+                    SetupDiscardDone = SetupDiscardDone,
                 };
 
                 player.HandCharacterCards.AddRange(HandCharacterCards);
@@ -420,6 +461,9 @@ namespace NomadCity.Core.Net
             public int Capacity;
             public int[] Owners = Array.Empty<int>();
 
+            /// <summary>企业扩展：这条航道上是否已放置公路指示物。</summary>
+            public bool IsHighway;
+
             public static RouteSnapshot Capture(RouteState route)
             {
                 var owners = new int[route.Slots.Capacity];
@@ -432,12 +476,16 @@ namespace NomadCity.Core.Net
                     District = route.District,
                     Capacity = route.Slots.Capacity,
                     Owners = owners,
+                    IsHighway = route.IsHighway,
                 };
             }
 
             public RouteState Restore()
             {
-                var route = new RouteState(Id, (int[])Nodes.Clone(), District, Capacity);
+                var route = new RouteState(Id, (int[])Nodes.Clone(), District, Capacity)
+                {
+                    IsHighway = IsHighway,
+                };
                 for (int i = 0; i < Owners.Length && i < route.Slots.Capacity; i++)
                 {
                     if (Owners[i] >= 0) route.Slots.Place(i, Owners[i]);

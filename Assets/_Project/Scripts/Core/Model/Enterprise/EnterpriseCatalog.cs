@@ -39,7 +39,7 @@ namespace NomadCity.Core.Model.Enterprise
         /// <summary>选择 1 家其他企业，提升 1 级（罗德岛 1 级）。</summary>
         AdvanceOtherEnterprise = 2,
 
-        /// <summary>从弃牌区取回 1 张角色牌，其余手牌弃掉，获得 10 分（罗德岛 4 级）。</summary>
+        /// <summary>从弃牌区取回 1 张角色牌，其余手牌弃掉，获得 10 金券（罗德岛 4 级）。</summary>
         RecallDiscardAndDiscardHand = 3,
 
         /// <summary>支付源岩 → 设施供应区洗回牌堆并补满，然后免费建造 1 次（海德兄弟 4 级）。</summary>
@@ -57,13 +57,16 @@ namespace NomadCity.Core.Model.Enterprise
         /// <summary>进行 1 次不占用主要行动的建设（雷神工业 3 级、工程科 4 级）。</summary>
         BuildWithoutAction = 8,
 
-        /// <summary>立刻进行 1 次采集（雷姆必拓 4 级）。</summary>
+        /// <summary>从设施供应区免费建造 1 张金券费用不高于 <see cref="EnterpriseLevel.Amount"/> 的设施（工程科 5 级）。</summary>
+        BuildFreeFromSupply = 12,
+
+        /// <summary>进行 1 次采集，规则同采集阶段（雷姆必拓 4 级）。</summary>
         ExtraHarvest = 9,
 
         /// <summary>1 位对手失去 1 分（富森银行 4 级）。</summary>
         OpponentLoseScore = 10,
 
-        /// <summary>降低 1 级该企业的合作等级，并获得该等级的奖励（结构科 5 级，⚠️ 扫描件推断）。</summary>
+        /// <summary>降低 1 级该企业的合作等级，并获得该等级的奖励（结构科 5 级；已按卡面核对）。</summary>
         LowerLevelAndSettle = 11,
     }
 
@@ -85,14 +88,18 @@ namespace NomadCity.Core.Model.Enterprise
         /// <summary>现有奖励系统表达不了的特效。</summary>
         public readonly EnterpriseSpecial Special;
 
+        /// <summary>附加数值：目前只用于「免费建造的金券费用上限」（0 = 不限）。</summary>
+        public readonly int Amount;
+
         public EnterpriseLevel(int level, string text, bool isEffect, EventOption option = null,
-            EnterpriseSpecial special = EnterpriseSpecial.None)
+            EnterpriseSpecial special = EnterpriseSpecial.None, int amount = 0)
         {
             Level = level;
             Text = text ?? string.Empty;
             IsEffect = isEffect;
             Option = option;
             Special = special;
+            Amount = amount;
         }
 
         public override string ToString() => $"Lv{Level}：{Text}";
@@ -194,6 +201,11 @@ namespace NomadCity.Core.Model.Enterprise
         private static EnterpriseLevel UnlockSpecial(int level, string text, EnterpriseSpecial special) =>
             new(level, text, true, null, special);
 
+        /// <summary>企业特效 + 需先支付的费用（如雷姆必拓 4 级「失去 1 分」）。</summary>
+        private static EnterpriseLevel UnlockSpecialCost(int level, string text,
+            IReadOnlyList<RewardOp> cost, EnterpriseSpecial special) =>
+            new(level, text, true, new EventOption(text, cost, Array.Empty<RewardOp>()), special);
+
         private static EnterpriseLevel Instant(int level, string text, params RewardOp[] ops) =>
             new(level, text, false, new EventOption(text, ops));
 
@@ -219,7 +231,7 @@ namespace NomadCity.Core.Model.Enterprise
                             RewardOp.VouchersPerCount(CountSource.InfluenceOnRoutes, 1)),
                         UnlockSpecial(3, "干员特派。", EnterpriseSpecial.OperatorDispatch),
                         UnlockSpecial(4,
-                            "企业特效：从角色牌弃牌区选择 1 张牌加入手牌，然后把你其余的手牌放到弃牌区，获得 10 分。",
+                            "企业特效：从角色牌弃牌区选择 1 张牌加入手牌，然后把你其余的手牌放到弃牌区，获得 10 金券。",
                             EnterpriseSpecial.RecallDiscardAndDiscardHand),
                         UnlockSpecial(5, "干员特派。", EnterpriseSpecial.OperatorDispatch),
                     }),
@@ -231,8 +243,8 @@ namespace NomadCity.Core.Model.Enterprise
                     {
                         Note(0, "合作等级 0（标记起点）。"),
                         Unlock(1, "企业特效：获得 4 源岩。", RewardOp.Gain(ResourceType.Orirock, 4)),
-                        UnlockCost(2, "企业特效：支付 2 金券，获得 15 金券。",
-                            new[] { RewardOp.PayVouchers(2) }, RewardOp.Vouchers(15)),
+                        UnlockCost(2, "企业特效：支付 2 源岩，获得 15 金券。",
+                            new[] { RewardOp.Pay(ResourceType.Orirock, 2) }, RewardOp.Vouchers(15)),
                         Instant(3, "获得 1 分。", RewardOp.Score(1)),
                         UnlockCost(4,
                             "企业特效：支付 6 源岩，将设施供应区中所有设施牌洗回设施牌堆，之后补满供应区，然后你可进行 1 次免费建造。",
@@ -343,7 +355,7 @@ namespace NomadCity.Core.Model.Enterprise
                         UnlockCost(2, "企业特效：支付 4 金券，替换 1 个在资源点上的影响力。",
                             new[] { RewardOp.PayVouchers(4) }, RewardOp.ReplaceInfluence(1)),
                         Instant(3, "获得 1 分。", RewardOp.Score(1)),
-                        InstantSpecial(4, "企业特效：失去 1 分，你立刻进行 1 次采集（规则与采集阶段相同）。",
+                        UnlockSpecialCost(4, "企业特效：失去 1 分，你进行 1 次采集（其规则和采集阶段相同）。",
                             new[] { RewardOp.LoseScore(1) }, EnterpriseSpecial.ExtraHarvest),
                         Instant(5, "获得 2 分。", RewardOp.Score(2)),
                     }),
@@ -358,14 +370,14 @@ namespace NomadCity.Core.Model.Enterprise
                 new RhineDepartmentDef(0, "防御科",
                     new EnterpriseLevel(2, "获得 7 金券。", false,
                         new EventOption("获得 7 金券", new[] { RewardOp.Vouchers(7) })),
-                    new EnterpriseLevel(3, "支付 3 金券，放置 或 移动 1 个影响力。", false,
+                    new EnterpriseLevel(3, "支付 3 金券，放置 1 个影响力，或移动 2 次影响力。", false,
                         new EventOption("支付 3 金券",
                             new[] { RewardOp.PayVouchers(3) },
                             new[]
                             {
                                 RewardOp.Alternative(
                                     new EffectBranch("放置 1 个影响力", RewardOp.Influence(InfluencePlacementScope.DeployRules)),
-                                    new EffectBranch("移动 1 个影响力", RewardOp.RelocateInfluence(1))),
+                                    new EffectBranch("移动 2 次影响力", RewardOp.RelocateInfluence(2))),
                             })),
                     new EnterpriseLevel(4, "支付 12 金券，执行 2 次「放置 或 移除 1 个影响力」。", false,
                         new EventOption("支付 12 金券",
@@ -395,7 +407,7 @@ namespace NomadCity.Core.Model.Enterprise
                     new EnterpriseLevel(5, "支付 1 至纯源石，从设施供应区免费建造 1 张金券费用不高于 23 的设施。", false,
                         new EventOption("支付 1 至纯源石", new[] { RewardOp.Pay(ResourceType.OriginitePrime, 1) },
                             Array.Empty<RewardOp>()),
-                        EnterpriseSpecial.BuildWithoutAction)),
+                        EnterpriseSpecial.BuildFreeFromSupply, 23)),
 
                 // 结构科
                 new RhineDepartmentDef(2, "结构科",

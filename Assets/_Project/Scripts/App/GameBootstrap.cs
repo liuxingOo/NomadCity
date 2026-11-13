@@ -970,6 +970,11 @@ namespace NomadCity.App
         /// </summary>
         private void AutoSetupForDeveloperMode(GameState state)
         {
+            // 企业扩展：开局企业还没选完时不要自动跑开局入场 ——
+            // 初始资源点命令会被引擎拒绝，继续自动盖放会把对局推进到「没选过起点」的坏状态。
+            // 这一段留给界面逐个问玩家，正好用来测企业抽选。
+            if (state.Setup.IsEnterpriseEnabled && !state.Enterprises.DraftDone) return;
+
             int seat = state.FirstPlayerSeat;
             for (int i = 0; i < state.Players.Count; i++)
             {

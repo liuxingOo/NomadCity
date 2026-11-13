@@ -36,6 +36,10 @@ namespace NomadCity.Core.Engine
             if (!state.DeveloperMode && state.Player(seat).CharacterSecondEffectPending)
                 return CommandResult.Fail("使用两种角色牌效果之间不能插入其他行动（§10.1.2）：请先使用另一种效果或结束角色牌使用。");
 
+            // 企业扩展：开局入场「7 选 5」没做完之前不能开始行动（EnterpriseExpansion.md §4.2）。
+            if (!state.DeveloperMode && !state.Player(seat).SetupDiscardDone)
+                return CommandResult.Fail("请先把开局手牌里的 2 张放回游戏盒（企业扩展开局入场）。");
+
             return CommandResult.Success;
         }
 
@@ -125,6 +129,10 @@ namespace NomadCity.Core.Engine
             InfluenceSlots slots = state.Map.SlotsOf(slot);
             if (slot.SlotIndex < 0 || slot.SlotIndex >= slots.Capacity)
                 return CommandResult.Fail($"空格 {slot.SlotIndex} 超出该位置的容量。");
+
+            // 企业扩展「开辟商路」：公路覆盖了该航道所有影响力格，不能再放新的影响力。
+            if (slot.Kind == InfluenceSlotKind.Route && state.Map.Route(slot.TargetId).IsHighway)
+                return CommandResult.Fail("这条航道上有公路，影响力格已被覆盖，不能再放置影响力。");
 
             int occupant = Occupant(slot, state, planned);
             if (occupant >= 0) return CommandResult.Fail("该影响力空格已经被占用。");

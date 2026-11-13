@@ -42,7 +42,8 @@ namespace NomadCity.Core.Engine
             state.DeferredEffects.Clear();
             foreach (DeferredEffect deferred in queue)
             {
-                EffectResolver.Execute(state, deferred.Seat, deferred.Ops);
+                EffectResolver.Execute(state, deferred.Seat, deferred.Ops, null,
+                    EnterpriseEffectExtension.Instance);
             }
         }
 

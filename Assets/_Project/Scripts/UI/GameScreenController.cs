@@ -38,6 +38,12 @@ namespace NomadCity.UI
         /// <summary>操作区的「企业」按钮：只有开局启用了企业扩展才显示。</summary>
         [SerializeField] private Button companyButton;
 
+        /// <summary>「企业」按钮打开的企业板总览（运行时创建，和聊天 / 行动记录同一套弹窗规格）。</summary>
+        private EnterpriseBoardPanel enterpriseBrowser;
+
+        /// <summary>开发者测试弹窗（只在开发者模式下由 F2 创建 / 开关，正式流程不出现）。</summary>
+        private DeveloperTestPanel developerPanel;
+
         /// <summary>操作区的「决策」按钮：只有开局启用了感染者扩展才显示。</summary>
         [SerializeField] private Button decisionButton;
 
@@ -143,6 +149,12 @@ namespace NomadCity.UI
         private int enterpriseBoardId = -1;
         private int enterpriseLevel;
 
+        /// <summary>当前这次收集会话是不是「提升合作等级」（否则是「触发企业特效」）。</summary>
+        private bool enterpriseAdvance;
+
+        /// <summary>当前这次收集会话是不是开发者面板的「设级并结算」。</summary>
+        private bool enterpriseDeveloperSettle;
+
         // —— 采集阶段（§7）：玩家自选资源点（不再是自动结算） ——
 
         /// <summary>进入采集阶段后按「起始玩家起顺时针」排好的座位顺序。</summary>
@@ -211,6 +223,12 @@ namespace NomadCity.UI
 
         /// <summary>2 人局（§12 变体 4）：正用设施供应区面板做「盖放前弃 1 张设施牌」这一步。</summary>
         private bool supplyDiscardMode;
+
+        /// <summary>企业扩展开局入场：正在做「7 选 5」的座位；-1 = 不在这一步。</summary>
+        private int setupDiscardSeat = -1;
+
+        /// <summary>「7 选 5」已选的第 1 张牌；-1 = 还在选第 1 张。</summary>
+        private int setupDiscardFirst = -1;
 
         /// <summary>正在结算的那个选项下标；结算完回到 -1。</summary>
         private int pendingEventOption = -1;
@@ -359,14 +377,24 @@ namespace NomadCity.UI
         private void ApplyExpansionButtons()
         {
             GameSetup setup = engine != null ? engine.State.Setup : null;
-            SetButtonVisible(companyButton, setup != null && setup.IsEnterpriseEnabled);
+            bool enterpriseEnabled = setup != null && setup.IsEnterpriseEnabled;
+            SetButtonVisible(companyButton, enterpriseEnabled, makeInteractable: true);
             SetButtonVisible(decisionButton, setup != null && setup.Has(ExpansionFlags.Infected));
         }
 
-        private static void SetButtonVisible(Button button, bool visible)
+        /// <summary>
+        /// 显隐操作区里的扩展按钮。<paramref name="makeInteractable"/> 用于场景里被存成
+        /// 「不可点」的按钮（企业按钮就是），只显示不解锁的话点上去毫无反应。
+        /// </summary>
+        private static void SetButtonVisible(Button button, bool visible, bool makeInteractable = false)
         {
-            if (button != null && button.gameObject.activeSelf != visible)
+            if (button == null) return;
+
+            if (button.gameObject.activeSelf != visible)
                 button.gameObject.SetActive(visible);
+
+            if (makeInteractable && button.interactable != visible)
+                button.interactable = visible;
         }
 
         private void OnDestroy()
@@ -1257,7 +1285,7 @@ namespace NomadCity.UI
 
             eventSession = new EffectChoiceSession(state,
                 (sandbox, choices) => EffectResolver.ExecuteOption(sandbox, seat, option, acceptCost,
-                    choices, anchorNodeId: nodeId));
+                    choices, EnterpriseEffectExtension.Instance, anchorNodeId: nodeId));
             eventSession.Advance();
             ContinueEventChoices();
         }
@@ -2166,7 +2194,8 @@ namespace NomadCity.UI
             // 部分效果会连锁（二选一里再挑落点、探索翻出的事件选项、结算他牌的入场效果……），
             // 每轮都从副本重跑，所以后面几步的候选清单永远是基于前面答案的真实状态（§11）。
             buildSession = new EffectChoiceSession(state,
-                (sandbox, choices) => EffectResolver.Execute(sandbox, buildSeat, effects, choices));
+                (sandbox, choices) => EffectResolver.Execute(sandbox, buildSeat, effects, choices,
+                    EnterpriseEffectExtension.Instance));
             buildSession.Advance();
             ContinueBuildChoices();
         }
@@ -2599,8 +2628,9 @@ namespace NomadCity.UI
                 // 与命令同款：先记「当前特殊行动所在样式牌」，供 PlaceInfluencePerPatternMarkers 取计数来源。
                 int previous = sandbox.ActiveSpecialActionPatternId;
                 sandbox.ActiveSpecialActionPatternId = cardId;
-                EffectResolver.Execute(sandbox, seat, cost, choices);
-                EffectReport report = EffectResolver.Execute(sandbox, seat, effects, choices);
+                EffectResolver.Execute(sandbox, seat, cost, choices, EnterpriseEffectExtension.Instance);
+                EffectReport report = EffectResolver.Execute(sandbox, seat, effects, choices,
+                    EnterpriseEffectExtension.Instance);
                 sandbox.ActiveSpecialActionPatternId = previous;
                 return report;
             });
@@ -2722,7 +2752,112 @@ namespace NomadCity.UI
             if (state.TurnNumber == 1 && ChooseStartNodeCommand.CurrentOperator(state) >= 0) return false;
             // 2 人局变体：弃设施牌完成前不能盖放（§12 变体 4）。
             if (state.SupplyDiscardRemaining > 0) return false;
+            // 企业扩展：开局入场要先从 7 张手牌里选 2 张放回游戏盒。
+            if (!player.SetupDiscardDone) return false;
             return player.PlacedCharacterCard < 0;
+        }
+
+        /// <summary>
+        /// 企业扩展开局入场第一步：每名玩家先决定初始企业（EnterpriseExpansion.md §4.1）。
+        /// 时机在企业家选完、开局之后，且必须先于「决定初始资源点」与「7 选 5」。
+        /// 3／4 人局抽 2 选 1；2 人局抽 4 选 2（同一位玩家会连续弹两次）。
+        /// </summary>
+        private void TryBeginEnterpriseDraft(GameState state)
+        {
+            if (engine == null) return;
+            if (state.Setup == null || !state.Setup.IsEnterpriseEnabled) return;
+            if (state.TurnNumber != 1 || state.Phase != TurnPhase.CharacterPlacement) return;
+
+            EnterpriseState enterprises = state.Enterprises;
+            if (enterprises.DraftDone) return;
+            if (pendingEventNodeId >= 0) return;   // 事件卡开着时让位
+            if (onlineSubmitPending) return;       // 联机：上一条命令还在等主机回放
+
+            int seat = FindSeatNeedingEnterprisePick();
+            if (seat < 0) return;
+
+            // 已经替这位玩家把牌摆出来了：别每次刷新都重开一遍（会把正在放大的那张合上）。
+            if (enterpriseBrowser != null && enterpriseBrowser.IsOpen
+                && enterpriseBrowser.CurrentMode == EnterpriseBoardPanel.Mode.Draft
+                && enterpriseBrowser.Seat == seat)
+            {
+                return;
+            }
+
+            BeginEnterprisePick(seat);
+        }
+
+        /// <summary>
+        /// 企业扩展开局入场：每名玩家从 7 张手牌里选 2 张放回游戏盒（EnterpriseExpansion.md §4.2）。
+        /// 开局入场（选点 + 结算事件牌）走完后，用选择弹窗连问两次；完成后才能盖放角色牌。
+        /// </summary>
+        private void TryBeginSetupDiscard(GameState state)
+        {
+            if (engine == null || choicePopup == null) return;
+            if (!state.Setup.IsEnterpriseEnabled) return;
+            if (state.TurnNumber != 1 || state.Phase != TurnPhase.CharacterPlacement) return;
+            if (!state.Enterprises.DraftDone) return;                       // 先决定初始企业
+            if (ChooseStartNodeCommand.CurrentOperator(state) >= 0) return; // 开局入场还没走完
+            if (pendingEventNodeId >= 0) return;                             // 事件卡开着时让位
+            if (choicePopup.IsVisible) return;                               // 已有别的选择
+
+            int seat = ViewSeat(state);
+            if (seat < 0 || seat >= state.Players.Count) return;
+            if (!CanOperateSeat(seat)) return;
+
+            PlayerState player = state.Players[seat];
+            if (player.SetupDiscardDone)
+            {
+                setupDiscardSeat = -1;
+                setupDiscardFirst = -1;
+                return;
+            }
+            if (player.HandCharacterCards.Count < 2) return;
+
+            if (setupDiscardSeat != seat)
+            {
+                setupDiscardSeat = seat;
+                setupDiscardFirst = -1;
+            }
+
+            ShowSetupDiscardPrompt(state, player, seat);
+        }
+
+        /// <summary>「7 选 5」的一次选择：先选第 1 张，再选第 2 张，然后下发命令。</summary>
+        private void ShowSetupDiscardPrompt(GameState state, PlayerState player, int seat)
+        {
+            var ids = new List<int>();
+            var labels = new List<string>();
+            foreach (int cardId in player.HandCharacterCards)
+            {
+                if (cardId == setupDiscardFirst) continue; // 第 2 次选择时排除已选的第 1 张
+                ids.Add(cardId);
+                CharacterCardDef def = state.Catalog.Character(cardId);
+                labels.Add(def != null ? def.Name : $"角色牌 {cardId}");
+            }
+
+            if (ids.Count == 0) return;
+
+            string title = $"{SeatLabel(seat)}：从手牌选 2 张放回游戏盒（{(setupDiscardFirst < 0 ? "1/2" : "2/2")}）。";
+            choicePopup.Show(title, labels, choice =>
+            {
+                if (choice < 0 || choice >= ids.Count) return;
+                int cardId = ids[choice];
+
+                if (setupDiscardFirst < 0)
+                {
+                    setupDiscardFirst = cardId;
+                    ShowSetupDiscardPrompt(state, player, seat);
+                    return;
+                }
+
+                var command = new DiscardSetupHandCardsCommand(seat, setupDiscardFirst, cardId);
+                if (!Dispatch(command)) return;
+
+                setupDiscardSeat = -1;
+                setupDiscardFirst = -1;
+                SetStatus($"{SeatLabel(seat)} 已把 2 张角色牌放回游戏盒，可以盖放角色牌了。");
+            }, allowCancel: false);
         }
 
         /// <summary>盖放阶段点手牌里的第 index 张：把它盖放到本机玩家面前（§10.1.1）。</summary>
@@ -2912,7 +3047,8 @@ namespace NomadCity.UI
             }
 
             characterSession = new EffectChoiceSession(state,
-                (sandbox, choices) => EffectResolver.Execute(sandbox, characterSeat, ops, choices));
+                (sandbox, choices) => EffectResolver.Execute(sandbox, characterSeat, ops, choices,
+                    EnterpriseEffectExtension.Instance));
             characterSession.Advance();
             ContinueCharacterChoices();
         }
@@ -3260,6 +3396,13 @@ namespace NomadCity.UI
                 // 第 2 回合起没有开局入场，盖放阶段直接开始；所有人盖放完由引擎自动进入玩家行动。
                 if (mode == ActionMode.None && state.Phase == TurnPhase.CharacterPlacement)
                 {
+                    // 企业扩展：红区开放回合先让每名玩家提升 1 级，再开始盖放（§3.2）。
+                    if (state.Enterprises != null && state.Enterprises.RedZoneAdvanceSeat >= 0)
+                    {
+                        SetHint($"{SeatLabel(state.Enterprises.RedZoneAdvanceSeat)} 红色区域已开放：点「企业」按钮，选择 1 家企业把自己的合作等级提升 1 级。");
+                        return;
+                    }
+
                     if (state.SupplyDiscardRemaining > 0)
                     {
                         SetHint($"2 人局：轮到 {SeatLabel(state.SupplyDiscardSeat)} 从设施供应区弃 1 张设施牌，然后开始盖放。");
@@ -3712,6 +3855,14 @@ namespace NomadCity.UI
         /// </summary>
         private void Update()
         {
+            // 开发者测试弹窗：只在开发者模式里响应，正式对局完全无感。
+            if (engine != null && engine.State != null && engine.State.DeveloperMode
+                && Input.GetKeyDown(KeyCode.F2))
+            {
+                DeveloperTestPanel devPanel = EnsureDeveloperPanel();
+                if (devPanel != null) devPanel.Toggle(engine.State, DevTestSeat(engine.State));
+            }
+
             if (!onlineClient || !onlineSubmitPending) return;
             if (Time.unscaledTime < onlineSubmitDeadline) return;
 
@@ -3751,7 +3902,8 @@ namespace NomadCity.UI
 
         /// <summary>
         /// 操作区的「企业」按钮：按当前进度依次处理
-        /// ①开局「抽 2 选 1」→ ②待提升合作等级（牌面要求选 1 家其他企业）→ ③触发本回合的企业特效。
+        /// ①开局企业抽选（3／4 人抽 2 选 1，2 人抽 4 选 2）→ ②待提升合作等级（牌面要求选 1 家其他企业）
+        /// → ③打开企业板总览（总览里再进「触发企业特效」）。
         /// 规则判断仍全部交给引擎，这里只负责把可选内容摆出来。
         /// </summary>
         private void OnCompanyButtonClicked()
@@ -3798,7 +3950,355 @@ namespace NomadCity.UI
                 return;
             }
 
-            BeginEnterpriseEffectMenu(lockToLocalSeat ? localSeat : state.ActiveSeat);
+            // 开局抽选已完成：打开企业板总览（所有场上企业 + 各玩家的合作等级标记）。
+            OpenEnterpriseBrowser();
+        }
+
+        /// <summary>
+        /// 操作区的「企业」按钮：开局抽选完成后打开企业板总览；
+        /// 总览里的「触发企业特效」再转给 <see cref="BeginEnterpriseEffectMenu"/>。
+        /// </summary>
+        private void OpenEnterpriseBrowser()
+        {
+            if (engine == null) return;
+
+            EnterpriseBoardPanel browser = EnsureEnterprisePanel();
+            if (browser == null)
+            {
+                SetStatus("找不到 Canvas，企业板总览打不开。");
+                return;
+            }
+
+            browser.OpenView(engine.State);
+        }
+
+        /// <summary>
+        /// 拿到（首次则创建）企业板面板。控制器挂在哪一层不一定，所以按「自己 → 行动面板 → HUD → 场景里的 Canvas」
+        /// 依次往上找，全都找不到才放弃 —— 找不到 Canvas 就等于弹窗建不出来，只能退回状态行提示。
+        /// </summary>
+        private EnterpriseBoardPanel EnsureEnterprisePanel()
+        {
+            if (enterpriseBrowser != null) return enterpriseBrowser;
+
+            Canvas canvas = GetComponentInParent<Canvas>();
+            if (canvas == null && panel != null) canvas = panel.GetComponentInParent<Canvas>();
+            if (canvas == null && hud != null) canvas = hud.GetComponentInParent<Canvas>();
+            if (canvas == null) canvas = FindAnyObjectByType<Canvas>();
+            if (canvas == null) return null;
+
+            enterpriseBrowser = EnterpriseBoardPanel.Create(canvas.transform, hud != null ? hud.UiFont : null);
+            enterpriseBrowser.BoardPicked = OnEnterpriseBoardPicked;
+            enterpriseBrowser.AdvancePicked = OnEnterpriseAdvancePicked;
+            enterpriseBrowser.RhineDepartmentPicked = OnRhineDepartmentPicked;
+            return enterpriseBrowser;
+        }
+
+        /// <summary>开发者测试弹窗：只有开发者模式下才会被创建。</summary>
+        private DeveloperTestPanel EnsureDeveloperPanel()
+        {
+            if (developerPanel != null) return developerPanel;
+
+            Canvas canvas = GetComponentInParent<Canvas>();
+            if (canvas == null && panel != null) canvas = panel.GetComponentInParent<Canvas>();
+            if (canvas == null && hud != null) canvas = hud.GetComponentInParent<Canvas>();
+            if (canvas == null) canvas = FindAnyObjectByType<Canvas>();
+            if (canvas == null) return null;
+
+            developerPanel = DeveloperTestPanel.Create(canvas.transform, hud != null ? hud.UiFont : null);
+            developerPanel.EnterpriseLevelPicked = OnDeveloperEnterpriseLevelPicked;
+            return developerPanel;
+        }
+
+        /// <summary>
+        /// 开发者面板点了「某块企业板 × 某一级」：先把合作等级直接写成该级（测试后门），
+        /// 再走正式触发流程（含 4 级的选牌、3/5 级的干员特派等全部交互）。
+        /// </summary>
+        private void OnDeveloperEnterpriseLevelPicked(int boardId, int level)
+        {
+            if (engine == null) return;
+
+            GameState state = engine.State;
+            if (!state.DeveloperMode)
+            {
+                SetStatus("开发者测试面板只在开发者模式下可用。");
+                return;
+            }
+
+            int seat = DevTestSeat(state);
+            if (!CanOperateSeat(seat))
+            {
+                SetStatus("当前不是可以由本机操作该玩家的时机。");
+                return;
+            }
+
+            EnterpriseBoardDef devBoard = EnterpriseCatalog.Board(boardId);
+            EnterpriseLevel devEntry = devBoard?.Level(level);
+
+            // 即时奖励（不是企业特效）：直接「设为该级 + 结算这一级」，科室板奖励也能在开发者面板里测。
+            if (devEntry != null && !devEntry.IsEffect)
+            {
+                BeginDeveloperSettle(seat, boardId, level);
+                return;
+            }
+
+            Dispatch(new DeveloperSetEnterpriseLevelCommand(seat, boardId, level));
+            if (state.Phase != TurnPhase.PlayerActions)
+            {
+                SetStatus($"已把企业等级设为 {level} 级；触发特效需要在该玩家的行动阶段。");
+                return;
+            }
+
+            if (devEntry == null)
+            {
+                SetStatus($"已把「{(devBoard != null ? devBoard.Name : boardId.ToString())}」设为 {level} 级。");
+                return;
+            }
+
+            BeginEnterpriseTrigger(seat, boardId, level);
+        }
+
+        /// <summary>
+        /// 开发者测试：把等级设到指定值并结算该级的即时奖励（含莱茵生命科室板奖励的点选）。
+        /// 与升级命令一样先走收集会话，保证界面点的与执行的是同一串答案。
+        /// </summary>
+        private void BeginDeveloperSettle(int seat, int boardId, int level)
+        {
+            if (engine == null) return;
+
+            enterpriseSeat = seat;
+            enterpriseBoardId = boardId;
+            enterpriseLevel = level;
+            enterpriseAdvance = false;
+            enterpriseDeveloperSettle = true;
+
+            if (choicePopup == null)
+            {
+                DispatchDeveloperSettle(Array.Empty<int>(), level);
+                return;
+            }
+
+            if (panel != null) panel.SetLocked(true);
+
+            enterpriseSession = new EffectChoiceSession(engine.State, (sandbox, choices) =>
+            {
+                var command = new DeveloperSetEnterpriseLevelCommand(seat, boardId, level, choices, true);
+                command.Apply(sandbox);
+                return command.Report;
+            });
+            enterpriseSession.Advance();
+            ContinueEnterpriseChoices();
+        }
+
+        /// <summary>照收集到的答案派发「开发者：设级并结算」命令。</summary>
+        private void DispatchDeveloperSettle(IReadOnlyList<int> answers, int level)
+        {
+            enterpriseAdvance = false;
+            enterpriseDeveloperSettle = false;
+            if (engine == null) return;
+
+            int boardId = enterpriseBoardId;
+            var command = new DeveloperSetEnterpriseLevelCommand(enterpriseSeat, boardId, level,
+                new RecordedChoices(answers, strict: false), true);
+
+            bool dispatched = Dispatch(command);
+            enterpriseSession = null;
+            if (panel != null) panel.SetLocked(false);
+
+            if (!dispatched)
+            {
+                enterpriseSeat = -1;
+                return;
+            }
+
+            EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
+            string suffix = command.Report != null && !string.IsNullOrEmpty(command.Report.Note)
+                ? $"；效果：{command.Report.Describe()}"
+                : string.Empty;
+            SetStatus($"已把「{(def != null ? def.Name : boardId.ToString())}」设为 {level} 级{suffix}");
+
+            enterpriseSeat = -1;
+        }
+
+        /// <summary>开发者测试用座位：优先当前行动玩家，否则本机座位。</summary>
+        private int DevTestSeat(GameState state)
+        {
+            int seat = state.ActiveSeat;
+            if (seat < 0 || seat >= state.Players.Count) seat = localSeat;
+            return seat;
+        }
+
+        /// <summary>抽选里确认了某块企业板：派发命令，并把下一位（2 人局是同一位的第 2 张）接着摆出来。</summary>
+        private void OnEnterpriseBoardPicked(int boardId)
+        {
+            if (engine == null || enterpriseBrowser == null) return;
+
+            int seat = enterpriseBrowser.Seat;
+            if (seat < 0) return;
+
+            EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
+            string boardName = def != null ? def.Name : boardId.ToString();
+
+            if (!Dispatch(new ChooseInitialEnterpriseCommand(seat, boardId))) return;
+
+            // 莱茵生命：派发完选板命令后，立刻弹三张科室板让玩家挑一张。
+            // 等玩家选完（OnRhineDepartmentPicked）再回到正常 Draft 流程（继续选第 2 张 或 下一位）。
+            if (boardId == (int)EnterpriseId.RhineLab)
+            {
+                BeginRhineDepartmentPick(seat);
+                return;
+            }
+
+            ContinueEnterpriseDraftFlow(seat, boardName);
+        }
+
+        /// <summary>派发完选板命令后，继续走正常的 Draft 流程（下一位 或 2 人局第 2 张）。</summary>
+        private void ContinueEnterpriseDraftFlow(int seat, string boardName)
+        {
+            EnterpriseState enterprises = engine.State.Enterprises;
+
+            if (!enterprises.SeatDraftDone(seat))
+            {
+                SetStatus($"{SeatLabel(seat)} 选择了「{boardName}」，还要再选 1 张。");
+                BeginEnterprisePick(seat);
+                return;
+            }
+
+            if (!enterprises.DraftDone)
+            {
+                SetStatus($"{SeatLabel(seat)} 选择了「{boardName}」。请继续把「企业」按钮交给下一位玩家选择。");
+                int next = FindSeatNeedingEnterprisePick();
+                if (next >= 0) BeginEnterprisePick(next);
+                else enterpriseBrowser.Close();
+                return;
+            }
+
+            enterpriseBrowser.Close();
+            SetStatus($"{SeatLabel(seat)} 选择了「{boardName}」。全部玩家已选定企业，接着决定初始资源点。");
+        }
+
+        /// <summary>莱茵生命选完企业后，弹三张科室板让玩家挑一张初始科室板。</summary>
+        private void BeginRhineDepartmentPick(int seat)
+        {
+            if (engine == null) return;
+            EnterpriseBoardPanel browser = EnsureEnterprisePanel();
+            if (browser == null) return;
+            browser.OpenRhineDepartment(engine.State, seat,
+                $"{SeatLabel(seat)}：莱茵生命选一张科室板",
+                "3 张里挑 1 张作为你的初始科室板。选好后企业板 L2–L5 的效果就按这块科室板结算。");
+        }
+
+        /// <summary>玩家在三张科室板里点了一张：派发命令，然后回到正常 Draft 流程。</summary>
+        private void OnRhineDepartmentPicked(int depId)
+        {
+            if (engine == null || enterpriseBrowser == null) return;
+
+            int seat = enterpriseBrowser.Seat;
+            if (seat < 0) return;
+
+            string depName = EnterpriseCatalog.Department(depId)?.Name ?? $"科室板 {depId + 1}";
+
+            if (!Dispatch(new PickRhineDepartmentCommand(seat, depId))) return;
+
+            SetStatus($"{SeatLabel(seat)} 为莱茵生命选择了「{depName}」科室板。");
+            enterpriseBrowser.Close();
+
+            // 回到正常 Draft 流程
+            EnterpriseState enterprises = engine.State.Enterprises;
+            if (!enterprises.SeatDraftDone(seat))
+            {
+                SetStatus($"{SeatLabel(seat)} 为莱茵生命选好科室板，还要再选 1 张企业板。");
+                BeginEnterprisePick(seat);
+                return;
+            }
+
+            if (!enterprises.DraftDone)
+            {
+                int next = FindSeatNeedingEnterprisePick();
+                if (next >= 0) BeginEnterprisePick(next);
+            }
+            else
+            {
+                SetStatus($"{SeatLabel(seat)} 选择了莱茵生命（{depName}）。全部玩家已选定企业，接着决定初始资源点。");
+            }
+        }
+
+        /// <summary>提升等级里确认了某块企业板。</summary>
+        private void OnEnterpriseAdvancePicked(int boardId)
+        {
+            if (engine == null || enterpriseBrowser == null) return;
+
+            int seat = enterpriseBrowser.Seat;
+            if (seat < 0) return;
+
+            enterpriseBrowser.Close();
+            BeginEnterpriseAdvanceSettle(seat, boardId);
+        }
+
+        /// <summary>
+        /// 提升某块企业板的合作等级：先走点选收集会话（莱茵生命的科室板奖励可能要选影响力 / 建造），
+        /// 收集完再派发命令 —— 界面点的与主机执行的是同一串答案。
+        /// </summary>
+        private void BeginEnterpriseAdvanceSettle(int seat, int boardId)
+        {
+            if (engine == null) return;
+
+            enterpriseSeat = seat;
+            enterpriseBoardId = boardId;
+            enterpriseLevel = -1;
+            enterpriseAdvance = true;
+
+            if (choicePopup == null)
+            {
+                DispatchEnterpriseAdvance(Array.Empty<int>());
+                return;
+            }
+
+            if (panel != null) panel.SetLocked(true);
+
+            enterpriseSession = new EffectChoiceSession(engine.State, (sandbox, choices) =>
+            {
+                var command = new AdvanceEnterpriseLevelCommand(seat, boardId, choices);
+                command.Apply(sandbox);
+                return command.Report;
+            });
+            enterpriseSession.Advance();
+            ContinueEnterpriseChoices();
+        }
+
+        /// <summary>照收集到的答案派发「提升企业合作等级」命令。</summary>
+        private void DispatchEnterpriseAdvance(IReadOnlyList<int> answers)
+        {
+            enterpriseAdvance = false;
+            if (engine == null) return;
+
+            int boardId = enterpriseBoardId;
+            var command = new AdvanceEnterpriseLevelCommand(enterpriseSeat, boardId,
+                new RecordedChoices(answers, strict: false));
+
+            bool dispatched = Dispatch(command);
+            enterpriseSession = null;
+            if (panel != null) panel.SetLocked(false);
+
+            if (!dispatched)
+            {
+                enterpriseSeat = -1;
+                return;
+            }
+
+            EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
+            int level = engine.State.Enterprises.LevelOf(boardId, enterpriseSeat);
+            string suffix = command.Report != null && !string.IsNullOrEmpty(command.Report.Note)
+                ? $"；效果：{command.Report.Describe()}"
+                : string.Empty;
+            SetStatus($"{SeatLabel(enterpriseSeat)} 把「{(def != null ? def.Name : boardId.ToString())}」提升到 {level} 级{suffix}");
+
+            // 红区开放：一位选完，紧接着把下一位的「选企业提升」窗口接上。
+            EnterpriseState redZone = engine.State.Enterprises;
+            if (redZone.RedZoneAdvanceStarted && redZone.RedZoneAdvanceSeat >= 0
+                && CanOperateSeat(redZone.RedZoneAdvanceSeat))
+                BeginEnterpriseAdvance(redZone.RedZoneAdvanceSeat);
+
+            enterpriseSeat = -1;
         }
 
         /// <summary>这个座位现在能不能由本机操作（联机只看本机座位；单机热座都能操作）。</summary>
@@ -3808,15 +4308,50 @@ namespace NomadCity.UI
             return !lockToLocalSeat || seat == localSeat;
         }
 
-        /// <summary>找出下一位还没选企业、且本机可以替他操作的座位；-1 = 都选完了。</summary>
+        /// <summary>
+        /// 开局企业抽选里「下一位还没选满」的座位（不看本机权限，用于单机热座切换界面）。
+        /// 顺序从起始玩家起顺时针；2 人局同一位玩家会连续返回两次。
+        /// </summary>
+        private static int FirstSeatNeedingEnterpriseDraft(GameState state)
+        {
+            if (state == null || state.Setup == null || !state.Setup.IsEnterpriseEnabled) return -1;
+
+            EnterpriseState enterprises = state.Enterprises;
+            int count = enterprises.ChosenBoards.Count;
+            if (count <= 0) return -1;
+
+            int start = state.FirstPlayerSeat;
+            if (start < 0 || start >= count) start = 0;
+
+            for (int i = 0; i < count; i++)
+            {
+                int seat = (start + i) % count;
+                if (!enterprises.SeatDraftDone(seat) && enterprises.Offers[seat].Count > 0) return seat;
+            }
+
+            return -1;
+        }
+
+        /// <summary>
+        /// 找出下一位还没选满企业板、且本机可以替他操作的座位；-1 = 都选完了。
+        /// 顺序从起始玩家起顺时针（2 人局每人要选 2 张，同一个人会被返回两次）。
+        /// </summary>
         private int FindSeatNeedingEnterprisePick()
         {
             if (engine == null) return -1;
 
-            EnterpriseState enterprises = engine.State.Enterprises;
-            for (int seat = 0; seat < enterprises.ChosenBoards.Count; seat++)
+            GameState state = engine.State;
+            EnterpriseState enterprises = state.Enterprises;
+            int count = enterprises.ChosenBoards.Count;
+            if (count <= 0) return -1;
+
+            int start = state.FirstPlayerSeat;
+            if (start < 0 || start >= count) start = 0;
+
+            for (int i = 0; i < count; i++)
             {
-                if (enterprises.ChosenBoards[seat] >= 0) continue;
+                int seat = (start + i) % count;
+                if (enterprises.SeatDraftDone(seat)) continue;
                 if (enterprises.Offers[seat].Count == 0) continue;
                 if (!CanOperateSeat(seat)) continue;
                 return seat;
@@ -3825,14 +4360,13 @@ namespace NomadCity.UI
             return -1;
         }
 
-        /// <summary>开局：把这名玩家抽到的 2 张企业板摆出来，选 1 张（§ 企业扩展设置）。</summary>
+        /// <summary>
+        /// 开局：把这位玩家抽到的企业板卡面摆出来选 1 张（§ 企业扩展设置）。
+        /// 3／4 人局抽 2 选 1；2 人局抽 4 选 2（连续选两次）。
+        /// </summary>
         private void BeginEnterprisePick(int seat)
         {
-            if (engine == null || choicePopup == null)
-            {
-                SetStatus("没接小选择弹窗，暂时没法选企业板。");
-                return;
-            }
+            if (engine == null) return;
 
             EnterpriseState enterprises = engine.State.Enterprises;
             List<int> offers = enterprises.Offers[seat];
@@ -3842,77 +4376,51 @@ namespace NomadCity.UI
                 return;
             }
 
-            var boardIds = new List<int>(offers);
-            var labels = new List<string>(offers.Count);
-            foreach (int boardId in boardIds)
+            EnterpriseBoardPanel browser = EnsureEnterprisePanel();
+            if (browser == null)
             {
-                EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
-                labels.Add(def != null ? $"{def.Name}（{def.Subtitle}）" : $"企业板 {boardId}");
+                SetStatus("找不到 Canvas，企业板选不了。");
+                return;
             }
 
-            string title = $"{SeatLabel(seat)}：从抽到的 {labels.Count} 张合作企业板中选 1 张（选完立即 +1 级）。";
-            choicePopup.Show(title, labels, choice =>
-            {
-                if (choice < 0 || choice >= boardIds.Count) return;
+            int pickIndex = enterprises.ChosenCount(seat) + 1;
+            string progress = enterprises.PicksPerPlayer > 1
+                ? $"（第 {pickIndex}/{enterprises.PicksPerPlayer} 张）"
+                : string.Empty;
 
-                int boardId = boardIds[choice];
-                var command = new ChooseInitialEnterpriseCommand(seat, boardId);
-                if (!Dispatch(command)) return;
-
-                EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
-                SetStatus($"{SeatLabel(seat)} 选择了「{(def != null ? def.Name : boardId.ToString())}」。" +
-                          (engine.State.Enterprises.DraftDone
-                              ? "全部玩家已选定企业，接着决定初始资源点。"
-                              : "请继续把「企业」按钮交给下一位玩家选择。"));
-            }, allowCancel: false);
+            browser.OpenDraft(engine.State, seat,
+                $"{SeatLabel(seat)}：选 1 张合作企业板{progress}",
+                $"抽到 {offers.Count} 张。点一张放大看牌面，确认后立即 +1 级。");
         }
 
-        /// <summary>牌面要求「选择 1 家其他企业提升 1 级」时，把合法的企业板摆出来。</summary>
+        /// <summary>牌面要求「选择 1 家其他企业提升 1 级」时，把合法的企业板卡面摆出来。</summary>
         private void BeginEnterpriseAdvance(int seat)
         {
             if (engine == null) return;
 
             EnterpriseState enterprises = engine.State.Enterprises;
-            var boardIds = new List<int>();
-            var labels = new List<string>();
+            List<int> boardIds = EnterpriseBoardPanel.AdvanceCandidates(engine.State, seat);
 
-            foreach (int boardId in enterprises.ActiveBoards)
-            {
-                if (boardId == enterprises.PendingAdvanceExcludeBoard) continue;
-                int level = enterprises.LevelOf(boardId, seat);
-                if (level < 0 || level >= 5) continue;
-
-                EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
-                boardIds.Add(boardId);
-                labels.Add($"{(def != null ? def.Name : boardId.ToString())}：合作等级 {level} → {level + 1}");
-            }
-
-            if (labels.Count == 0)
+            if (boardIds.Count == 0)
             {
                 SetStatus("场上没有还能提升合作等级的企业板。");
                 return;
             }
 
-            if (choicePopup == null)
+            EnterpriseBoardPanel browser = EnsureEnterprisePanel();
+            if (browser == null)
             {
-                SetStatus("没接小选择弹窗，暂时没法选择要提升的企业板。");
+                SetStatus("找不到 Canvas，企业板选不了。");
                 return;
             }
 
             string reason = string.IsNullOrEmpty(enterprises.PendingAdvanceReason)
                 ? "选择 1 家企业提升 1 级合作等级。"
                 : enterprises.PendingAdvanceReason;
-            choicePopup.Show($"{SeatLabel(seat)}：{reason}", labels, choice =>
-            {
-                if (choice < 0 || choice >= boardIds.Count) return;
 
-                int boardId = boardIds[choice];
-                if (!Dispatch(new AdvanceEnterpriseLevelCommand(seat, boardId))) return;
-
-                EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
-                int level = engine.State.Enterprises.LevelOf(boardId, seat);
-                SetStatus($"{SeatLabel(seat)} 把「{(def != null ? def.Name : boardId.ToString())}」提升到 {level} 级。");
-            }, allowCancel: false);
+            browser.OpenAdvance(engine.State, seat,
+                $"{SeatLabel(seat)}：{reason}",
+                "点一张放大看牌面，确认后合作等级 +1。");
         }
 
         /// <summary>把这名玩家当前可触发（已解锁、本回合没用过）的企业特效列出来。</summary>
@@ -3994,8 +4502,12 @@ namespace NomadCity.UI
             enterpriseSeat = seat;
             enterpriseBoardId = boardId;
             enterpriseLevel = level;
+            enterpriseAdvance = false;
+            enterpriseDeveloperSettle = false;
 
-            if (entry.Option == null || choicePopup == null)
+            // 一律走收集会话：即使这一级没有可执行的效果段，会话也会立刻「跑完」再派发命令；
+            // 而带点选的特效（如罗德岛 4 级从弃牌区选牌）只有试跑同一条结算路径才会弹出选择窗。
+            if (choicePopup == null)
             {
                 DispatchEnterpriseEffect(Array.Empty<int>());
                 return;
@@ -4004,7 +4516,8 @@ namespace NomadCity.UI
             if (panel != null) panel.SetLocked(true);
 
             enterpriseSession = new EffectChoiceSession(engine.State,
-                (sandbox, choices) => EffectResolver.ExecuteOption(sandbox, seat, entry.Option, true, choices));
+                (sandbox, choices) =>
+                    EnterpriseEffectResolver.Resolve(sandbox, seat, boardId, level, choices));
             enterpriseSession.Advance();
             ContinueEnterpriseChoices();
         }
@@ -4018,7 +4531,9 @@ namespace NomadCity.UI
             {
                 IReadOnlyList<int> answers = enterpriseSession.Answers;
                 enterpriseSession = null;
-                DispatchEnterpriseEffect(answers);
+                if (enterpriseDeveloperSettle) DispatchDeveloperSettle(answers, enterpriseLevel);
+                else if (enterpriseAdvance) DispatchEnterpriseAdvance(answers);
+                else DispatchEnterpriseEffect(answers);
                 return;
             }
 
@@ -4105,6 +4620,8 @@ namespace NomadCity.UI
         {
             enterpriseSession = null;
             enterpriseSeat = -1;
+            enterpriseAdvance = false;
+            enterpriseDeveloperSettle = false;
             if (panel != null) panel.SetLocked(false);
             if (!string.IsNullOrEmpty(status)) SetStatus(status);
             UpdateHint();
@@ -4131,6 +4648,10 @@ namespace NomadCity.UI
 
             // 「看别人城市」的弹窗开着时跟着状态刷新（没开就什么都不做）。
             if (playerCityPopup != null) playerCityPopup.Refresh(engine != null ? engine.State : null);
+
+            // 企业板总览开着时跟着状态刷新（标记位置 / 场上企业可能被命令改变）。
+            if (enterpriseBrowser != null && enterpriseBrowser.IsOpen && engine != null)
+                enterpriseBrowser.Refresh(engine.State);
 
             // 引导文字也跟着状态走：开局选点轮次、本局结束这些都不经过 SetMode，
             // 只靠命令/阶段事件刷新，所以并在这里一起更新。
@@ -4162,8 +4683,13 @@ namespace NomadCity.UI
             // 开局入场整个走完再弹，否则遮罩会挡住开局选点的地图点击。
             //（命令与阶段事件都会走到 RefreshAll），避免散落的开关时机。
             bool setupDone = ChooseStartNodeCommand.CurrentOperator(state) < 0;
+            // 企业扩展：所有玩家先完成「7 选 5」，2 人局的弃设施牌窗才打开。
+            // 没启用企业扩展时这条不适用（弃设施牌是 2 人局的基础变体规则）。
+            bool enterprisesReady = state.Setup == null || !state.Setup.IsEnterpriseEnabled
+                                    || state.Enterprises.DraftDone;
+            bool allSetupDiscardDone = enterprisesReady && FirstSeatNeedingSetupDiscard(state) < 0;
             bool discard = state.Phase == TurnPhase.CharacterPlacement
-                           && state.SupplyDiscardRemaining > 0 && setupDone
+                           && state.SupplyDiscardRemaining > 0 && setupDone && allSetupDiscardDone
                            && pendingEventNodeId < 0 // 事件卡还开着时先让位，免得遮罩挡住卡面
                            // 联机：弃牌也由本人操作，别人的回合不打开这块面板
                            && (!lockToLocalSeat || state.SupplyDiscardSeat == localSeat);
@@ -4206,6 +4732,33 @@ namespace NomadCity.UI
                 handPanel.SetAvailable(hasCards);
                 handPanel.Refresh(state, handSeat, canPlaceNow);
             }
+
+            // 企业扩展：开局入场第一步是「决定初始企业」（企业家已经选完）。
+            TryBeginEnterpriseDraft(state);
+
+            // 企业扩展：开局入场走完后，逐位把「7 选 5」问完才能盖放。
+            TryBeginSetupDiscard(state);
+        }
+
+        /// <summary>
+        /// 企业扩展开局入场：从起始玩家起顺时针找第一个还没做「7 选 5」的人；不需要这一步时返回 -1。
+        /// </summary>
+        private static int FirstSeatNeedingSetupDiscard(GameState state)
+        {
+            if (state == null || !state.Setup.IsEnterpriseEnabled) return -1;
+            if (state.TurnNumber != 1 || state.Phase != TurnPhase.CharacterPlacement) return -1;
+            if (!state.Enterprises.DraftDone) return -1;                     // 先决定初始企业
+            if (ChooseStartNodeCommand.CurrentOperator(state) >= 0) return -1; // 开局入场还没走完
+
+            int count = state.Players.Count;
+            int start = state.FirstPlayerSeat;
+            if (start < 0 || start >= count) start = 0;
+            for (int i = 0; i < count; i++)
+            {
+                int seat = (start + i) % count;
+                if (!state.Players[seat].SetupDiscardDone) return seat;
+            }
+            return -1;
         }
 
         /// <summary>
@@ -4231,10 +4784,18 @@ namespace NomadCity.UI
             // 谁还没盖放就把界面切给谁，否则盖完 1 号以后 2–4 号永远轮不到。
             if (state.Phase == TurnPhase.CharacterPlacement)
             {
+                // 企业扩展：开局决定初始企业在选点之前，界面先切给正在选企业的那位。
+                int draftSeat = FirstSeatNeedingEnterpriseDraft(state);
+                if (draftSeat >= 0) return draftSeat;
+
                 // 第 1 回合的「开局入场」：选初始资源点与结算事件牌都算同一个人的操作，
                 // 事件没结算完之前不要把界面切给下一位（否则玩家 1 还在选奖励，顶栏已经变成玩家 2）。
                 int chooser = ChooseStartNodeCommand.CurrentOperator(state);
                 if (chooser >= 0) return chooser;
+
+                // 企业扩展：开局入场后先做「7 选 5」，显示还没弃牌的那位。
+                int discardSeat = FirstSeatNeedingSetupDiscard(state);
+                if (discardSeat >= 0) return discardSeat;
 
                 // 2 人局变体：先弃设施牌，显示正在弃牌的那位。
                 if (state.SupplyDiscardRemaining > 0

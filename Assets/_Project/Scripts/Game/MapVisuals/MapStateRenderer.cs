@@ -58,6 +58,14 @@ namespace NomadCity.Game
                  "留空则退回色盘圆片占位。地图上的影响力、计分轨、城市样式牌都用同一套标记。")]
         [SerializeField] private Sprite[] playerMarkerSprites = new Sprite[4];
 
+        [Header("公路素材（企业扩展 · 山 / 开辟商路）")]
+        [Tooltip("航道上盖公路用的长条素材（Assets/_Project/Art/Icons/highway.jpg）。" +
+                 "留空时在编辑器里会自动按路径加载；再取不到就退回原来的实心圆盘占位。")]
+        [SerializeField] private Sprite highwaySprite;
+
+        [Tooltip("公路这条长条的宽度（世界单位）。长度按航道实际跨度自动拉伸。")]
+        [SerializeField, Min(0.01f)] private float highwayWidth = 0.42f;
+
         [Header("计分轨（底图外圈 -2 ~ 50 的格子）")]
         [Tooltip("是否在计分轨上画每名玩家的分数标记（§ 计分轨：每人一个标记停在当前分数格）。")]
         [SerializeField] private bool showScoreMarkers = true;
@@ -386,6 +394,13 @@ namespace NomadCity.Game
             Vector3 origin = view.transform.position;
             bool highlighted = highlightedRoutes.Contains(route.Id);
 
+            // 企业扩展「开辟商路」：公路根据航道方向把长条素材盖上去，同时这条航道不再提供落点。
+            if (route.IsHighway)
+            {
+                DrawHighway(route, view);
+                return;
+            }
+
             for (int slot = 0; slot < route.Slots.Capacity; slot++)
             {
                 Vector3 world = origin + view.SlotWorldOffset(slot);
@@ -411,6 +426,111 @@ namespace NomadCity.Game
                     AddTarget(world, slotRingSize * 0.6f, PriorityEmptySlot, MapHitKind.RouteSlot, slotRef, -1);
                 }
             }
+        }
+
+        /// <summary>
+        /// 公路：把长条素材按航道方向铺上去。
+        /// 两端航道直接铺一整条；三／四端航道以航道节点为中心，向每个端点各铺一条（覆盖所有分支）。
+        /// 素材缺失时退回原来的实心圆盘占位。
+        /// </summary>
+        private void DrawHighway(RouteState route, MapRouteView view)
+        {
+            Sprite sprite = ResolveHighwaySprite();
+            IReadOnlyList<MapNodeView> ends = view.Ends;
+
+            if (sprite == null || ends == null || ends.Count < 2)
+            {
+                for (int slot = 0; slot < route.Slots.Capacity; slot++)
+                {
+                    Vector3 world = view.transform.position + view.SlotWorldOffset(slot);
+                    Spawn(MapSpriteFactory.Disc(), world, slotRingSize * 1.35f, MapPalette.Highway, SortSlot,
+                        $"Highway_{route.Id}_{slot}");
+                }
+                return;
+            }
+
+            if (ends.Count == 2)
+            {
+                SpawnHighwayStrip(sprite, ends[0].transform.position, ends[1].transform.position,
+                    $"Highway_{route.Id}");
+                return;
+            }
+
+            // 多端航道：先找出最长的两端铺主路，其余端点从航道中心补铺。
+            Vector3 a = ends[0].transform.position;
+            Vector3 b = ends[1].transform.position;
+            float best = (b - a).sqrMagnitude;
+            for (int i = 0; i < ends.Count; i++)
+            {
+                for (int j = i + 1; j < ends.Count; j++)
+                {
+                    float sqr = (ends[j].transform.position - ends[i].transform.position).sqrMagnitude;
+                    if (sqr <= best) continue;
+                    best = sqr;
+                    a = ends[i].transform.position;
+                    b = ends[j].transform.position;
+                }
+            }
+
+            SpawnHighwayStrip(sprite, a, b, $"Highway_{route.Id}_main");
+
+            for (int i = 0; i < ends.Count; i++)
+            {
+                Vector3 p = ends[i].transform.position;
+                if ((p - a).sqrMagnitude < 1e-4f || (p - b).sqrMagnitude < 1e-4f) continue;
+                SpawnHighwayStrip(sprite, view.transform.position, p, $"Highway_{route.Id}_branch{i}");
+            }
+        }
+
+        /// <summary>在 from → to 之间铺一条宽 <see cref="highwayWidth"/> 的公路素材（长度自动拉伸）。</summary>
+        private void SpawnHighwayStrip(Sprite sprite, Vector3 from, Vector3 to, string name)
+        {
+            Vector3 delta = to - from;
+            float length = delta.magnitude;
+            if (length < 1e-3f) return;
+
+            var go = new GameObject(name);
+            go.transform.SetParent(markersRoot, false);
+            go.transform.localPosition = markersRoot.InverseTransformPoint((from + to) * 0.5f);
+            go.transform.localRotation = Quaternion.Euler(0f, 0f,
+                Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg);
+
+            // 素材自带 PPU：先按它的宽高归一，再拉伸到「航道长度 × 公路宽度」。
+            float spriteWidth = sprite.bounds.size.x > 1e-4f ? sprite.bounds.size.x : 1f;
+            float spriteHeight = sprite.bounds.size.y > 1e-4f ? sprite.bounds.size.y : 1f;
+            go.transform.localScale = new Vector3(
+                (length + highwayWidth * 0.35f) / spriteWidth,
+                highwayWidth / spriteHeight,
+                1f);
+
+            var spriteRenderer = go.AddComponent<SpriteRenderer>();
+            spriteRenderer.sprite = sprite;
+            spriteRenderer.color = Color.white;
+            spriteRenderer.sortingOrder = SortSlot;
+        }
+
+        /// <summary>取公路素材：Inspector 接了就用接的；没接时在编辑器里按固定路径自动加载一次。</summary>
+        private Sprite ResolveHighwaySprite()
+        {
+            if (highwaySprite != null) return highwaySprite;
+
+#if UNITY_EDITOR
+            UnityEngine.Object[] assets =
+                UnityEditor.AssetDatabase.LoadAllAssetsAtPath("Assets/_Project/Art/Icons/highway.jpg");
+            if (assets != null)
+            {
+                foreach (UnityEngine.Object asset in assets)
+                {
+                    if (asset is Sprite sprite)
+                    {
+                        highwaySprite = sprite;
+                        break;
+                    }
+                }
+            }
+#endif
+
+            return highwaySprite;
         }
 
         /// <summary>

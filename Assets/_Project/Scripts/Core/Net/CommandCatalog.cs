@@ -37,6 +37,8 @@ namespace NomadCity.Core.Net
             { typeof(ChooseInitialEnterpriseCommand), CommandKind.ChooseInitialEnterprise },
             { typeof(AdvanceEnterpriseLevelCommand), CommandKind.AdvanceEnterpriseLevel },
             { typeof(TriggerEnterpriseEffectCommand), CommandKind.TriggerEnterpriseEffect },
+            { typeof(DiscardSetupHandCardsCommand), CommandKind.DiscardSetupHandCards },
+            { typeof(PickRhineDepartmentCommand), CommandKind.PickRhineDepartment },
         };
 
         /// <summary>查命令类型对应的 Kind；未登记时抛出异常（有意为之，逼新增命令登记）。</summary>

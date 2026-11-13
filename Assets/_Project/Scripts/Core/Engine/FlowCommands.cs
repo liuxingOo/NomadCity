@@ -311,7 +311,7 @@ namespace NomadCity.Core.Engine
                 EventCardDef card = state.Catalog.Event(node.EventCardId);
                 EventOption option = card.Options[OptionIndex];
                 Report = EffectResolver.ExecuteOption(state, ActorSeat, option, AcceptCost, Choices,
-                    anchorNodeId: NodeId);
+                    EnterpriseEffectExtension.Instance, anchorNodeId: NodeId);
             }
 
             // 含主动放弃 / 条件不足，都算这个资源点结算过了（不接受反复重试领奖励）。

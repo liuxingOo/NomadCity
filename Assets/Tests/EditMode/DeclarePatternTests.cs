@@ -221,12 +221,12 @@ namespace NomadCity.Tests
 
             public IReadOnlyList<int> CharacterCardIds(PlayerColor color) => fallback.CharacterCardIds(color);
 
-            public IReadOnlyList<int> FacilityDeckIds() => fallback.FacilityDeckIds();
+            public IReadOnlyList<int> FacilityDeckIds(bool enterpriseEnabled) => fallback.FacilityDeckIds(enterpriseEnabled);
 
             public IReadOnlyList<int> EventDeckIds(NodeColor backColor, bool enterpriseEnabled) =>
                 fallback.EventDeckIds(backColor, enterpriseEnabled);
 
-            public IReadOnlyList<int> CityPatternIds() => fallback.CityPatternIds();
+            public IReadOnlyList<int> CityPatternIds(bool enterpriseEnabled) => fallback.CityPatternIds(enterpriseEnabled);
 
             public int CoreCommandTowerId(PlayerColor color) => fallback.CoreCommandTowerId(color);
 

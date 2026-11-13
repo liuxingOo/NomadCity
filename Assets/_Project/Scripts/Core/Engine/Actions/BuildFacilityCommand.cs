@@ -32,14 +32,22 @@ namespace NomadCity.Core.Engine
         /// <summary>入场效果里需要玩家点选时由它回答；不传则用「总是取第一个合法项」的自动结算。</summary>
         private readonly IEffectChoices choices;
 
+        /// <summary>卡牌给的免费建造：跳过全部费用（企业特效 / 事件奖励里的「免费建造 1 次」）。</summary>
+        private readonly bool freeBuild;
+
+        /// <summary>卡牌给的建造不占主要行动：跳过「本回合主要行动次数」校验（雷神工业 3 级等）。</summary>
+        private readonly bool ignoreActionBudget;
+
         public BuildFacilityCommand(int seat, int facilityId, int panelSlot, FacilityPayment payment,
-            IEffectChoices choices = null)
+            IEffectChoices choices = null, bool freeBuild = false, bool ignoreActionBudget = false)
         {
             ActorSeat = seat;
             FacilityId = facilityId;
             PanelSlot = panelSlot;
             Payment = payment;
             this.choices = choices;
+            this.freeBuild = freeBuild;
+            this.ignoreActionBudget = ignoreActionBudget;
         }
 
         public int ActorSeat { get; }
@@ -51,11 +59,15 @@ namespace NomadCity.Core.Engine
 
         public CommandResult Validate(GameState state)
         {
-            CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
-            if (!turn.Ok) return turn;
+            // 卡牌给的建造不要求「正好在自己行动阶段」：事件牌也会给出免费建造。
+            if (!ignoreActionBudget)
+            {
+                CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
+                if (!turn.Ok) return turn;
+            }
 
             CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat);
-            if (!quota.Ok) return quota;
+            if (!quota.Ok && !ignoreActionBudget) return quota;
 
             PlayerState player = state.Player(ActorSeat);
 
@@ -97,7 +109,8 @@ namespace NomadCity.Core.Engine
 
             Pay(state, player, card);          // 步 1
             PlaceOnPanel(state, player, card); // 步 2
-            Report = EffectResolver.Execute(state, ActorSeat, card.EntryEffects, choices); // 步 3
+            Report = EffectResolver.Execute(state, ActorSeat, card.EntryEffects, choices,
+                EnterpriseEffectExtension.Instance); // 步 3
         }
 
         /// <summary>
@@ -117,7 +130,7 @@ namespace NomadCity.Core.Engine
         /// <summary>步 1 校验：免建的牌直接过；其余必须明确选一种费用、并且付得起。</summary>
         private CommandResult ValidatePayment(GameState state, FacilityCardDef card, PlayerState player)
         {
-            if (IsFreeToBuild(card)) return CommandResult.Success;
+            if (freeBuild || IsFreeToBuild(card)) return CommandResult.Success;
             if (ActionRules.IgnoresCosts(state)) return CommandResult.Success; // 开发者模式：不查费用
 
             switch (Payment)
@@ -173,7 +186,7 @@ namespace NomadCity.Core.Engine
 
         private void Pay(GameState state, PlayerState player, FacilityCardDef card)
         {
-            if (IsFreeToBuild(card)) return;
+            if (freeBuild || IsFreeToBuild(card)) return;
             if (ActionRules.IgnoresCosts(state)) return; // 开发者模式：不扣费
 
             if (Payment == FacilityPayment.Resources)

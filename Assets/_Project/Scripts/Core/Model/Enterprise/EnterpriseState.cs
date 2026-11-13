@@ -7,7 +7,7 @@ namespace NomadCity.Core.Model.Enterprise
     /// 企业扩展的运行时状态（联机快照的一部分）。
     ///
     /// 术语：
-    /// - **企业牌堆**：8 张合作企业板，背面朝上。开局每名玩家抽 2 张，选 1 张。
+    /// - **企业牌堆**：8 张合作企业板，背面朝上。3／4 人局每人抽 2 选 1；2 人局每人抽 4 选 2。
     /// - **场上企业板**：本局实际使用的 4 块（4 人局 = 4 名玩家各 1 张；2／3 人局补足到 4 块）。
     /// - **合作等级**：每名玩家在每块场上企业板上各有一个 0–5 级的等级。
     ///   等级只升不降（结构科 5 级特效除外）。
@@ -19,14 +19,26 @@ namespace NomadCity.Core.Model.Enterprise
         /// <summary>企业牌堆（企业板 id，背面朝上）。</summary>
         public readonly List<int> Deck = new();
 
+        /// <summary>干员牌堆（8 张干员角色牌 id）；罗德岛 3 / 5 级【干员特派】从这里抽牌。</summary>
+        public readonly List<int> OperatorDeck = new();
+
         /// <summary>本局场上的企业板 id（按上场顺序）。</summary>
         public readonly List<int> ActiveBoards = new();
 
-        /// <summary>各座位开局抽到的 2 张企业板 id（选完即空）。</summary>
+        /// <summary>开局每人要选几张企业板：3／4 人局「抽 2 选 1」= 1；2 人局「抽 4 选 2」= 2。</summary>
+        public int PicksPerPlayer = 1;
+
+        /// <summary>各座位开局抽到的张数（= <see cref="PicksPerPlayer"/> × 2）。</summary>
+        public int OffersPerSeat = 2;
+
+        /// <summary>各座位开局抽到的企业板 id（选完即空）。</summary>
         public readonly List<List<int>> Offers = new();
 
         /// <summary>各座位最终选择的企业板 id；-1 = 还没选。</summary>
         public readonly List<int> ChosenBoards = new();
+
+        /// <summary>各座位选择的第 2 张企业板 id（只有 2 人局会用到）；-1 = 还没选。</summary>
+        public readonly List<int> SecondChosenBoards = new();
 
         /// <summary>各座位当前的莱茵生命科室板 id；-1 = 没有（不是莱茵生命）。</summary>
         public readonly List<int> Departments = new();
@@ -37,7 +49,7 @@ namespace NomadCity.Core.Model.Enterprise
         /// <summary>企业特效使用记录：位掩码，第 level 位 = 本回合该级特效已用过。</summary>
         private int[][] usedMasks = Array.Empty<int[]>();
 
-        /// <summary>开局「抽 2 选 1」是否已经全部完成。</summary>
+        /// <summary>开局企业抽选（3／4 人局抽 2 选 1、2 人局抽 4 选 2）是否已经全部完成。</summary>
         public bool DraftDone;
 
         /// <summary>正等着谁来提升 1 级合作等级；-1 = 没有待处理的提升。</summary>
@@ -49,6 +61,15 @@ namespace NomadCity.Core.Model.Enterprise
         /// <summary>待提升的原因（状态行文案用）。</summary>
         public string PendingAdvanceReason = string.Empty;
 
+        /// <summary>红色区域开放：本轮「每人选 1 家企业提升 1 级」是否已经开始。</summary>
+        public bool RedZoneAdvanceStarted;
+
+        /// <summary>红色区域开放：正在等哪一位玩家提升；-1 = 当前没有红区提升。</summary>
+        public int RedZoneAdvanceSeat = -1;
+
+        /// <summary>红色区域开放：已经处理过的座位位掩码（完成或没有可提升的板）。</summary>
+        public int RedZoneAdvanceDoneMask;
+
         /// <summary>本回合是否有企业特效被触发过（收尾阶段复位）。</summary>
         public void ResetTurnEffects()
         {
@@ -57,13 +78,20 @@ namespace NomadCity.Core.Model.Enterprise
                     masks[seat] = 0;
         }
 
-        /// <summary>重置成「还没开局」的状态：只保留座位数量。</summary>
-        public void Reset(int playerCount)
+        /// <summary>重置成「还没开局」的状态：只保留座位数量与每人要选的张数。</summary>
+        public void Reset(int playerCount, int picksPerPlayer = 1)
         {
+            PicksPerPlayer = picksPerPlayer < 1 ? 1 : picksPerPlayer > 2 ? 2 : picksPerPlayer;
+            OffersPerSeat = PicksPerPlayer * 2;
+
             Deck.Clear();
+            OperatorDeck.Clear();
+            for (int id = 0; id < CardCounts.OperatorCards; id++)
+                OperatorDeck.Add(CardIds.OperatorCharacterBase + id);
             ActiveBoards.Clear();
             Offers.Clear();
             ChosenBoards.Clear();
+            SecondChosenBoards.Clear();
             Departments.Clear();
 
             levels = new int[EnterpriseCatalog.BoardCount][];
@@ -77,8 +105,9 @@ namespace NomadCity.Core.Model.Enterprise
 
             for (int seat = 0; seat < playerCount; seat++)
             {
-                Offers.Add(new List<int>(2));
+                Offers.Add(new List<int>(OffersPerSeat));
                 ChosenBoards.Add(-1);
+                SecondChosenBoards.Add(-1);
                 Departments.Add(-1);
             }
 
@@ -86,6 +115,29 @@ namespace NomadCity.Core.Model.Enterprise
             PendingAdvanceSeat = -1;
             PendingAdvanceExcludeBoard = -1;
             PendingAdvanceReason = string.Empty;
+            RedZoneAdvanceStarted = false;
+            RedZoneAdvanceSeat = -1;
+            RedZoneAdvanceDoneMask = 0;
+        }
+
+        /// <summary>某座位已经选定的企业板张数。</summary>
+        public int ChosenCount(int seat)
+        {
+            if (seat < 0 || seat >= ChosenBoards.Count) return 0;
+            int count = ChosenBoards[seat] >= 0 ? 1 : 0;
+            if (seat < SecondChosenBoards.Count && SecondChosenBoards[seat] >= 0) count++;
+            return count;
+        }
+
+        /// <summary>某座位的开局企业抽选是否已完成（2 人局要选满 2 张）。</summary>
+        public bool SeatDraftDone(int seat) => ChosenCount(seat) >= PicksPerPlayer;
+
+        /// <summary>某座位是否已经选过这张企业板。</summary>
+        public bool HasChosen(int seat, int boardId)
+        {
+            if (seat < 0 || seat >= ChosenBoards.Count) return false;
+            if (ChosenBoards[seat] == boardId) return true;
+            return seat < SecondChosenBoards.Count && SecondChosenBoards[seat] == boardId;
         }
 
         public bool IsActive(int boardId) => ActiveBoards.Contains(boardId);
@@ -178,13 +230,17 @@ namespace NomadCity.Core.Model.Enterprise
         public EnterpriseState Clone()
         {
             var copy = new EnterpriseState { DraftDone = DraftDone,
+                PicksPerPlayer = PicksPerPlayer,
+                OffersPerSeat = OffersPerSeat,
                 PendingAdvanceSeat = PendingAdvanceSeat,
                 PendingAdvanceExcludeBoard = PendingAdvanceExcludeBoard,
                 PendingAdvanceReason = PendingAdvanceReason };
 
             copy.Deck.AddRange(Deck);
+            copy.OperatorDeck.AddRange(OperatorDeck);
             copy.ActiveBoards.AddRange(ActiveBoards);
             copy.ChosenBoards.AddRange(ChosenBoards);
+            copy.SecondChosenBoards.AddRange(SecondChosenBoards);
             copy.Departments.AddRange(Departments);
             foreach (List<int> offer in Offers) copy.Offers.Add(new List<int>(offer));
 
