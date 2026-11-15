@@ -217,6 +217,22 @@ namespace NomadCity.Core.Engine
             return pick < 0 ? -1 : candidates[pick];
         }
 
+        public int ChooseAmount(int seat, RewardOp op, GameState state, int min, int max)
+        {
+            if (max <= 0) return -1;
+            if (max <= min) return max;
+
+            var labels = new List<string>(max - min + 1);
+            int count = 0;
+            for (int value = min; value <= max; value++)
+            {
+                labels.Add($"{value}");
+                count++;
+            }
+            int pick = Take(count, $"选择数量（{min}–{max}）", labels, true);
+            return pick < 0 ? -1 : min + pick;
+        }
+
         public int ChooseEnterpriseBoard(int seat, RewardOp op, GameState state,
             IReadOnlyList<int> candidates)
         {
@@ -264,6 +280,16 @@ namespace NomadCity.Core.Engine
             foreach (int other in candidates) labels.Add($"玩家{other + 1}");
 
             int pick = Take(candidates.Count, "选择 1 位对手失去分数", labels, true);
+            return pick < 0 ? -1 : candidates[pick];
+        }
+
+        public int ChoosePlayer(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates)
+        {
+            var labels = new List<string>(candidates.Count);
+            foreach (int other in candidates)
+                labels.Add(other == seat ? $"玩家{other + 1}（你自己）" : $"玩家{other + 1}");
+
+            int pick = Take(candidates.Count, "选择 1 位玩家", labels, true);
             return pick < 0 ? -1 : candidates[pick];
         }
 
@@ -395,7 +421,12 @@ namespace NomadCity.Core.Engine
             var labels = new List<string>(candidates.Count);
             foreach (int id in candidates) labels.Add($"《{FacilityLabel(state, id)}》");
 
-            int pick = Take(candidates.Count, "选 1 张设施供应区的牌放回设施牌堆底部", labels, true);
+            string prompt = op.Kind == RewardKind.OperatorSupplyToBox
+                ? "选 1 张设施供应区的牌放回游戏盒（名称不能重复）"
+                : op.Kind == RewardKind.AttachSupplyFacilitiesUnderPersistentTactic
+                    ? "选 1 张设施供应区的牌压在「工程订购」牌下（名称不能重复）"
+                    : "选 1 张设施供应区的牌放回设施牌堆底部";
+            int pick = Take(candidates.Count, prompt, labels, true);
             return pick < 0 ? -1 : candidates[pick];
         }
 

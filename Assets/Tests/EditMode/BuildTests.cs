@@ -14,7 +14,8 @@ namespace NomadCity.Tests
     /// </summary>
     public sealed class BuildTests
     {
-        private static GameEngine NewBuildGame(int playerCount = 4, int firstSeat = 0)
+        private static GameEngine NewBuildGame(int playerCount = 4, int firstSeat = 0,
+            ICardCatalog catalog = null)
         {
             var map = new MapState();
             map.Nodes.Add(new MapNodeState(0, "A-01", District.A, NodeColor.Green, false, 2));
@@ -22,7 +23,7 @@ namespace NomadCity.Tests
             map.Routes.Add(new RouteState(0, new[] { 0, 1 }, District.A, 1));
 
             var engine = GameEngine.Create(new GameSetup(playerCount), firstSeat, map,
-                PlaceholderCardCatalog.Default, new Random(1));
+                catalog ?? PlaceholderCardCatalog.Default, new Random(1));
             engine.Dispatch(new StartGameCommand(firstSeat)); // 回合 1，盖放阶段
             engine.Dispatch(new AdvancePhaseCommand());       // → 玩家行动阶段
             return engine;
@@ -365,6 +366,94 @@ namespace NomadCity.Tests
                 new BuildFacilityCommand(0, outside, FreeSlot(engine.State), FacilityPayment.None));
 
             Assert.IsFalse(result.Ok);
+        }
+
+        // ————————————————————— 速查表关键词（唯一 / 免费） —————————————————————
+
+        [Test]
+        public void 建设_唯一关键词_同名设施已建时不能再建()
+        {
+            GameEngine engine = NewBuildGame();
+            GameState state = engine.State;
+            PlayerState player = state.Players[0];
+            int first = CardIds.FacilityBase;      // 城邦行政区
+            int second = CardIds.FacilityBase + 1; // 同名另一份
+            state.FacilitySupply.Clear();
+            state.FacilitySupply.Add(first);
+            state.FacilitySupply.Add(second);
+            foreach (ResourceType type in ResourceTypes.Basics) player.Resources.Add(type, 50);
+            player.Vouchers += 50;
+
+            Assert.IsTrue(engine.Dispatch(new BuildFacilityCommand(
+                0, first, FreeSlot(state), FacilityPayment.Resources)).Ok);
+
+            // 直接验证「唯一」这道闸门，不额外借一次主要行动名额。
+            state.MainActionTakenThisRound = false;
+            CommandResult again = engine.Dispatch(new BuildFacilityCommand(
+                0, second, FreeSlot(state), FacilityPayment.Resources));
+
+            Assert.IsFalse(again.Ok, "同名设施已经在自己面板上，带「唯一」的牌不能再建。");
+            StringAssert.Contains("唯一", again.Error);
+        }
+
+        [Test]
+        public void 建设_免费关键词_跳过全部支付()
+        {
+            int card = CardIds.FacilityBase + 20;
+            GameEngine engine = NewBuildGame(4, 0, new FreeFacilityCatalog(card));
+            GameState state = engine.State;
+            PlayerState player = state.Players[0];
+            state.FacilitySupply.Clear();
+            state.FacilitySupply.Add(card);
+
+            // 牌面写了资源费用与金券费用，但带「免费」关键词：一分不付也能建。
+            int orirock = player.Resources.Orirock;
+            int vouchers = player.Vouchers;
+
+            CommandResult result = engine.Dispatch(new BuildFacilityCommand(
+                0, card, FreeSlot(state), FacilityPayment.Resources));
+
+            Assert.IsTrue(result.Ok, result.Error);
+            Assert.AreEqual(orirock, player.Resources.Orirock, "「免费」跳过资源费用。");
+            Assert.AreEqual(vouchers, player.Vouchers, "「免费」跳过金券费用。");
+            CollectionAssert.Contains(player.BuiltFacilities, card);
+        }
+
+        /// <summary>把指定 id 的设施替换成「带免费关键词、仍有费用」的测试牌，其余查询转发给占位目录。</summary>
+        private sealed class FreeFacilityCatalog : ICardCatalog
+        {
+            private readonly FacilityCardDef free;
+            private readonly ICardCatalog fallback = PlaceholderCardCatalog.Default;
+
+            public FreeFacilityCatalog(int id)
+            {
+                free = new FacilityCardDef(id, FacilityKind.Standard, "测试·免费设施",
+                    FacilityColor.Green, 0,
+                    new[] { RewardOp.Pay(ResourceType.Orirock, 3) }, 10, FacilityKeyword.Free);
+            }
+
+            public CharacterCardDef Character(int id) => fallback.Character(id);
+
+            public FacilityCardDef Facility(int id) => id == free.Id ? free : fallback.Facility(id);
+
+            public EventCardDef Event(int id) => fallback.Event(id);
+
+            public CityPatternCardDef CityPattern(int id) => fallback.CityPattern(id);
+
+            public IReadOnlyList<int> CharacterCardIds(PlayerColor color) => fallback.CharacterCardIds(color);
+
+            public IReadOnlyList<int> FacilityDeckIds(bool enterpriseEnabled) =>
+                fallback.FacilityDeckIds(enterpriseEnabled);
+
+            public IReadOnlyList<int> EventDeckIds(NodeColor backColor, bool enterpriseEnabled) =>
+                fallback.EventDeckIds(backColor, enterpriseEnabled);
+
+            public IReadOnlyList<int> CityPatternIds(bool enterpriseEnabled) =>
+                fallback.CityPatternIds(enterpriseEnabled);
+
+            public int CoreCommandTowerId(PlayerColor color) => fallback.CoreCommandTowerId(color);
+
+            public IReadOnlyList<int> ExtensionHubIds() => fallback.ExtensionHubIds();
         }
 
         [Test]

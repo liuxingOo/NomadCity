@@ -40,8 +40,11 @@ namespace NomadCity.Core.Model.Enterprise
         /// <summary>各座位选择的第 2 张企业板 id（只有 2 人局会用到）；-1 = 还没选。</summary>
         public readonly List<int> SecondChosenBoards = new();
 
-        /// <summary>各座位当前的莱茵生命科室板 id；-1 = 没有（不是莱茵生命）。</summary>
-        public readonly List<int> Departments = new();
+        /// <summary>
+        /// 莱茵生命的**板级**激活科室板 id（同一块企业板所有玩家共用一张）；-1 = 还没选定。
+        /// 莱茵生命 1 级【切换科室板】会改写它，L2–L5 的奖励都按它结算。
+        /// </summary>
+        public int RhineDepartment = -1;
 
         /// <summary>合作等级：第一维是企业板 id，第二维是座位号；-1 = 该玩家不在这块板上。</summary>
         private int[][] levels = Array.Empty<int[]>();
@@ -92,7 +95,7 @@ namespace NomadCity.Core.Model.Enterprise
             Offers.Clear();
             ChosenBoards.Clear();
             SecondChosenBoards.Clear();
-            Departments.Clear();
+            RhineDepartment = -1;
 
             levels = new int[EnterpriseCatalog.BoardCount][];
             usedMasks = new int[EnterpriseCatalog.BoardCount][];
@@ -108,7 +111,6 @@ namespace NomadCity.Core.Model.Enterprise
                 Offers.Add(new List<int>(OffersPerSeat));
                 ChosenBoards.Add(-1);
                 SecondChosenBoards.Add(-1);
-                Departments.Add(-1);
             }
 
             DraftDone = false;
@@ -234,14 +236,14 @@ namespace NomadCity.Core.Model.Enterprise
                 OffersPerSeat = OffersPerSeat,
                 PendingAdvanceSeat = PendingAdvanceSeat,
                 PendingAdvanceExcludeBoard = PendingAdvanceExcludeBoard,
-                PendingAdvanceReason = PendingAdvanceReason };
+                PendingAdvanceReason = PendingAdvanceReason,
+                RhineDepartment = RhineDepartment };
 
             copy.Deck.AddRange(Deck);
             copy.OperatorDeck.AddRange(OperatorDeck);
             copy.ActiveBoards.AddRange(ActiveBoards);
             copy.ChosenBoards.AddRange(ChosenBoards);
             copy.SecondChosenBoards.AddRange(SecondChosenBoards);
-            copy.Departments.AddRange(Departments);
             foreach (List<int> offer in Offers) copy.Offers.Add(new List<int>(offer));
 
             copy.levels = new int[levels.Length][];

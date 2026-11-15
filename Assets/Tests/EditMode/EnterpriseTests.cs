@@ -44,6 +44,51 @@ namespace NomadCity.Tests
             }
         }
 
+        [Test]
+        public void 企业合作等级上限是五级()
+        {
+            foreach (EnterpriseBoardDef board in EnterpriseCatalog.Boards)
+                Assert.AreEqual(5, board.MaxLevel, $"{board.Name} 的等级上限应为 5 级。");
+
+            var enterprises = new EnterpriseState();
+            enterprises.Reset(4);
+            int boardId = (int)EnterpriseId.FusenBank;
+            enterprises.Activate(boardId);
+            for (int i = 0; i < 8; i++) enterprises.Advance(boardId, 0);
+
+            Assert.AreEqual(5, enterprises.LevelOf(boardId, 0), "反复提升也只能停在 5 级。");
+        }
+
+        [Test]
+        public void 莱茵生命科室板_开局按随机种子抽定()
+        {
+            var seen = new HashSet<int>();
+            for (int seed = 1; seed <= 12; seed++)
+            {
+                GameEngine engine = NewEnterpriseGame(4, seed);
+                int department = engine.State.Enterprises.RhineDepartment;
+                Assert.That(department, Is.InRange(0, EnterpriseCatalog.DepartmentCount - 1),
+                    $"种子 {seed}：科室板应当在 0–{EnterpriseCatalog.DepartmentCount - 1} 之间。");
+                seen.Add(department);
+            }
+
+            Assert.Greater(seen.Count, 1, "12 颗不同种子应当抽出不止一种科室板，而不是固定取模。");
+        }
+
+        [Test]
+        public void 同一随机种子_科室板与开局抽牌可复现()
+        {
+            GameEngine first = NewEnterpriseGame(4, 424242);
+            GameEngine second = NewEnterpriseGame(4, 424242);
+
+            Assert.AreEqual(first.State.Enterprises.RhineDepartment,
+                second.State.Enterprises.RhineDepartment, "同一颗种子必须抽出同一张科室板。");
+            CollectionAssert.AreEqual(first.State.Enterprises.Deck, second.State.Enterprises.Deck);
+            for (int seat = 0; seat < 4; seat++)
+                CollectionAssert.AreEqual(first.State.Enterprises.Offers[seat],
+                    second.State.Enterprises.Offers[seat]);
+        }
+
         private static void AssertUniqueIds()
         {
             var seen = new HashSet<int>();
@@ -296,8 +341,8 @@ namespace NomadCity.Tests
             route.Slots.Place(0, 0); // 发动者自己的影响力
             route.Slots.Place(1, 1); // 对手的影响力
 
-            int actorVouchers = state.Players[0].Vouchers;
-            int opponentVouchers = state.Players[1].Vouchers;
+            int actorScore = state.Players[0].Score;
+            int opponentScore = state.Players[1].Score;
             int actorMarkers = state.Players[0].MarkersInSupply;
             int opponentMarkers = state.Players[1].MarkersInSupply;
 
@@ -310,8 +355,8 @@ namespace NomadCity.Tests
             Assert.AreEqual(actorMarkers + 1, state.Players[0].MarkersInSupply);
             Assert.AreEqual(opponentMarkers + 1, state.Players[1].MarkersInSupply);
 
-            Assert.AreEqual(actorVouchers + 2, state.Players[0].Vouchers, "受影响 +1，发动者额外再 +1。");
-            Assert.AreEqual(opponentVouchers + 1, state.Players[1].Vouchers);
+            Assert.AreEqual(actorScore + 2, state.Players[0].Score, "受影响 +1，发动者额外再 +1。");
+            Assert.AreEqual(opponentScore + 1, state.Players[1].Score);
 
             // 公路对所有玩家免路费（§5.1），哪怕上面已经没有自己的影响力。
             Assert.AreEqual(0, TollCalculator.RouteCost(state, 0, 0));
@@ -446,6 +491,222 @@ namespace NomadCity.Tests
             Assert.IsTrue(RunExtension(state, 0, RewardOp.TriggerEnterpriseEffectOnce()).AnyApplied);
             Assert.IsFalse(RunExtension(state, 0, RewardOp.TriggerEnterpriseEffectOnce()).AnyApplied,
                 "同一特效本回合已经触发过了。");
+        }
+
+        [Test]
+        public void 海德四级_洗回供应区补满后免费建造一次()
+        {
+            GameEngine engine = NewExpansionGameAtActions();
+            GameState state = engine.State;
+            int boardId = (int)EnterpriseId.Hyde;
+            state.Enterprises.Activate(boardId);
+            for (int i = 0; i < 4; i++) state.Enterprises.Advance(boardId, 0);
+
+            PlayerState player = state.Players[0];
+            player.Resources.Add(ResourceType.Orirock, 6);
+            int built = player.BuiltFacilities.Count;
+            int supply = state.FacilitySupply.Count;
+
+            var command = new TriggerEnterpriseEffectCommand(0, boardId, 4, FirstAvailableChoices.Default);
+            CommandResult check = command.Validate(state);
+            Assert.IsTrue(check.Ok, check.Error);
+            command.Apply(state);
+
+            Assert.AreEqual(supply, state.FacilitySupply.Count, "供应区洗回后要重新补满。");
+            Assert.AreEqual(built + 1, player.BuiltFacilities.Count, "免费建造 1 次。");
+        }
+
+        [Test]
+        public void 雷神工业三级_一回合内可以重复触发()
+        {
+            GameEngine engine = NewExpansionGameAtActions();
+            GameState state = engine.State;
+            int boardId = (int)EnterpriseId.Raythean;
+            state.Enterprises.Activate(boardId);
+            for (int i = 0; i < 3; i++) state.Enterprises.Advance(boardId, 0);
+            state.Players[0].Resources.Add(ResourceType.Originium, 10);
+
+            var first = new TriggerEnterpriseEffectCommand(0, boardId, 3, FirstAvailableChoices.Default);
+            Assert.IsTrue(first.Validate(state).Ok);
+            first.Apply(state);
+
+            var second = new TriggerEnterpriseEffectCommand(0, boardId, 3, FirstAvailableChoices.Default);
+            Assert.IsTrue(second.Validate(state).Ok, "雷神工业 3 级的企业特效一回合内不限次数。");
+        }
+
+        [Test]
+        public void 雷姆必拓二级_只能替换资源点上的影响力()
+        {
+            GameEngine engine = NewExpansionGameAtActions(3);
+            GameState state = engine.State;
+            MapNodeState node = state.Map.Node(0);
+            node.HasResourceToken = true;
+            node.Slots.Place(0, 1);
+            state.Map.Route(0).Slots.Place(0, 2);
+            state.Players[0].Vouchers = 10;
+
+            Assert.IsTrue(RunExtension(state, 0,
+                RewardOp.PayVouchers(4), RewardOp.ReplaceResourceNodeInfluence(1)).AnyApplied);
+
+            Assert.AreEqual(0, node.Slots.OwnerOf(0), "资源点上的影响力被替换成自己的。");
+            Assert.AreEqual(2, state.Map.Route(0).Slots.OwnerOf(0), "航道上的影响力不能被选作替换目标。");
+        }
+
+        // ———————————————— 干员牌效果（Doc/EnterpriseExpansion.md §9.6） ————————————————
+
+        private static int InfluenceCount(GameState state, int seat)
+        {
+            int count = 0;
+            foreach (MapNodeState node in state.Map.Nodes)
+                for (int i = 0; i < node.Slots.Capacity; i++)
+                    if (node.Slots.OwnerOf(i) == seat) count++;
+            foreach (RouteState route in state.Map.Routes)
+                for (int i = 0; i < route.Slots.Capacity; i++)
+                    if (route.Slots.OwnerOf(i) == seat) count++;
+            return count;
+        }
+
+        [Test]
+        public void 商业手腕_目标玩家按四金券卖光所选资源()
+        {
+            GameEngine engine = NewExpansionGameAtActions(2);
+            GameState state = engine.State;
+            PlayerState actor = state.Players[0];
+            actor.Resources.Add(ResourceType.Orirock, 3);
+            int vouchers = actor.Vouchers;
+            int score = actor.Score;
+
+            Assert.IsTrue(RunExtension(state, 0,
+                RewardOp.OperatorSellToPlayer(4), RewardOp.Score(1)).AnyApplied);
+
+            Assert.AreEqual(0, actor.Resources.Get(ResourceType.Orirock));
+            Assert.AreEqual(vouchers + 12, actor.Vouchers);
+            Assert.AreEqual(score + 1, actor.Score);
+        }
+
+        [Test]
+        public void 制衡战略_所有玩家各移除一个影响力()
+        {
+            GameEngine engine = NewExpansionGameAtActions(2);
+            GameState state = engine.State;
+            state.Map.Route(0).Slots.Place(0, 0);
+            state.Map.Route(0).Slots.Place(1, 1);
+            int markers = state.Players[1].MarkersInSupply;
+
+            Assert.IsTrue(RunExtension(state, 0, RewardOp.OperatorBalanceInfluence()).AnyApplied);
+
+            Assert.AreEqual(0, InfluenceCount(state, 0));
+            Assert.AreEqual(0, InfluenceCount(state, 1));
+            Assert.AreEqual(markers + 1, state.Players[1].MarkersInSupply);
+        }
+
+        [Test]
+        public void 源岩DIY_支付一源岩后消耗掉()
+        {
+            GameEngine engine = NewExpansionGameAtActions(2);
+            GameState state = engine.State;
+            PlayerState actor = state.Players[0];
+
+            Assert.IsFalse(RunExtension(state, 0, RewardOp.OperatorPayAndBuild()).AnyApplied,
+                "没有源岩时不执行这条效果。");
+
+            actor.Resources.Add(ResourceType.Orirock, 1);
+            RunExtension(state, 0, RewardOp.OperatorPayAndBuild());
+            Assert.AreEqual(0, actor.Resources.Get(ResourceType.Orirock));
+        }
+
+        [Test]
+        public void 暴躁铁皮_两张不同名设施放回游戏盒并补满供应区()
+        {
+            GameEngine engine = NewExpansionGameAtActions(2);
+            GameState state = engine.State;
+            var before = new List<int>(state.FacilitySupply);
+            int oriron = state.Players[0].Resources.Oriron;
+
+            Assert.IsTrue(RunExtension(state, 0,
+                RewardOp.OperatorSupplyToBox(2), RewardOp.Gain(ResourceType.Oriron, 3)).AnyApplied);
+
+            Assert.AreEqual(BoardSetup.FacilitySupplySize, state.FacilitySupply.Count, "取走后要立刻补牌。");
+            int removed = 0;
+            foreach (int id in before)
+                if (!state.FacilitySupply.Contains(id)) removed++;
+            Assert.GreaterOrEqual(removed, 1);
+            Assert.AreEqual(oriron + 3, state.Players[0].Resources.Oriron);
+        }
+
+        [Test]
+        public void 掌控全局_触发该企业每项已解锁特效()
+        {
+            GameEngine engine = NewExpansionGameAtActions(2);
+            GameState state = engine.State;
+            EnterpriseState enterprises = state.Enterprises;
+            int boardId = (int)EnterpriseId.Hyde;
+            enterprises.Activate(boardId);
+            enterprises.Advance(boardId, 0);
+            enterprises.Advance(boardId, 0);
+
+            PlayerState actor = state.Players[0];
+            actor.Vouchers = 20;
+            int orirock = actor.Resources.Orirock;
+            int vouchers = actor.Vouchers;
+
+            Assert.IsTrue(RunExtension(state, 0, RewardOp.TriggerAllEnterpriseEffects()).AnyApplied);
+
+            Assert.AreEqual(orirock + 4 - 2, actor.Resources.Orirock, "1 级得 4 源岩，2 级再付 2 源岩。");
+            Assert.AreEqual(vouchers + 15, actor.Vouchers, "2 级：支付 2 源岩获得 15 金券。");
+        }
+
+        [Test]
+        public void 致命攻势_两名对手各被替换一个影响力()
+        {
+            GameEngine engine = NewExpansionGameAtActions(3);
+            GameState state = engine.State;
+            state.Map.Route(0).Slots.Place(0, 1);
+            state.Map.Route(1).Slots.Place(0, 2);
+            int markers = state.Players[0].MarkersInSupply;
+
+            Assert.IsTrue(RunExtension(state, 0, RewardOp.OperatorReplaceTwoOpponents()).AnyApplied);
+
+            Assert.AreEqual(0, InfluenceCount(state, 1));
+            Assert.AreEqual(0, InfluenceCount(state, 2));
+            Assert.AreEqual(2, InfluenceCount(state, 0));
+            Assert.AreEqual(markers - 2, state.Players[0].MarkersInSupply);
+        }
+
+        [Test]
+        public void 沁礁黑市_从对手取至多四个资源且双方各得一分()
+        {
+            GameEngine engine = NewExpansionGameAtActions(2);
+            GameState state = engine.State;
+            PlayerState actor = state.Players[0];
+            PlayerState target = state.Players[1];
+            target.Resources.Add(ResourceType.Orirock, 6);
+            int actorScore = actor.Score;
+            int targetScore = target.Score;
+
+            Assert.IsTrue(RunExtension(state, 0, RewardOp.OperatorTakeOpponentResources(4)).AnyApplied);
+
+            Assert.AreEqual(4, actor.Resources.Get(ResourceType.Orirock));
+            Assert.AreEqual(2, target.Resources.Get(ResourceType.Orirock));
+            Assert.AreEqual(actorScore + 1, actor.Score);
+            Assert.AreEqual(targetScore + 1, target.Score);
+        }
+
+        [Test]
+        public void 我寻思能行_免费移动城市改为移动对手影响力()
+        {
+            GameEngine engine = NewExpansionGameAtActions(2);
+            GameState state = engine.State;
+            PlayerState actor = state.Players[0];
+            actor.MobileCityNodeId = 0;
+            state.Map.Route(0).Slots.Place(0, 1);
+            int markers = state.Players[1].MarkersInSupply;
+
+            Assert.IsTrue(RunExtension(state, 0, RewardOp.OperatorRelocateInsteadOfRemove()).AnyApplied);
+            Assert.IsTrue(RunExtension(state, 0, RewardOp.FreeCityMove()).AnyApplied);
+
+            Assert.AreEqual(markers, state.Players[1].MarkersInSupply, "影响力应当被移动，而不是退回供应堆。");
+            Assert.AreEqual(1, InfluenceCount(state, 1));
         }
 
         [Test]

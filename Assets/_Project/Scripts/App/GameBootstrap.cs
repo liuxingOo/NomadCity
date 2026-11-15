@@ -67,12 +67,6 @@ namespace NomadCity.App
         [Tooltip("把点击/按钮与引擎连起来的状态机")]
         [SerializeField] private GameScreenController screenController;
 
-        [Header("调试")]
-        [Tooltip("开发者模式（仅调试用）：放开「轮次 / 阶段 / 红色区域开放」等流程闸门，" +
-                 "让任何玩家在任何阶段都能直接执行行动，方便单独测各个按钮。正式游戏请务必取消勾选。" +
-                 "注意：它只放开流程限制，不改变规则效果（金券 / 资源 / 标记照常扣除）。")]
-        [SerializeField] private bool developerMode;
-
         [Header("联机（阶段 3）")]
         private NetworkGameSession onlineSession;
 
@@ -160,13 +154,6 @@ namespace NomadCity.App
                 localSeat = 0;
                 host.RosterChanged += OnHostRosterChanged;
                 SetupOnlineControls();
-            }
-
-            // 开发者模式：跳过企业家挑选直接按座位默认颜色开局，免得每次调试都要先挑企业家。
-            if (role == OnlineRole.None && developerMode)
-            {
-                CreateAndStartGame(DefaultColors(playerCount), turnOrder);
-                return;
             }
 
             if (role == OnlineRole.None) BeginOfflineDraft(playerCount);
@@ -457,8 +444,8 @@ namespace NomadCity.App
             int firstSeat = order != null && order.Length > 0 ? order[0] : 0;
 
             Engine = GameEngine.Create(session.ToGameSetup(), firstSeat, mapState, null, null, seatColors, order);
-            // 联机强制关闭开发者模式；单机时按 Inspector 的调试开关。
-            Engine.State.DeveloperMode = role == OnlineRole.None && developerMode;
+            // 联机强制关闭开发者模式；单机时读主菜单写入的「以开发者模式启动」开关。
+            Engine.State.DeveloperMode = role == OnlineRole.None && session.DeveloperMode;
             ApplyDistrictScores(Engine.State, mapData);
 
             // 企业家已经全部挑定、牌局正式建好：房主的名单刷新降频到 5 秒一次
@@ -478,10 +465,6 @@ namespace NomadCity.App
                 Debug.LogError($"[开局] 无法开始游戏：{start.Error}", this);
                 return;
             }
-
-            // 开发者模式：把开局设置自动跑完（认领初始资源点 → 结算绿色事件牌 → 进入玩家行动阶段），
-            // 这样一进游戏就有移动城市可用，各行动按钮可以立刻点起来测。
-            if (role == OnlineRole.None && developerMode) AutoSetupForDeveloperMode(Engine.State);
 
             // 主机：开局快照发给所有已接入的客户端；之后才接入的由 PeerJoined 自动补发。
             if (onlineSession != null && onlineSession.IsHost) onlineSession.BroadcastSnapshot();
@@ -961,62 +944,6 @@ namespace NomadCity.App
             {
                 state.DistrictScores[(int)entry.District] = entry.Score;
             }
-        }
-
-        /// <summary>
-        /// 开发者模式专用：自动把开局设置跑完 —— 每名玩家依次认领一个绿色资源点、把翻出的绿色事件标记为
-        /// 「已结算」（但**不发放选项奖励**，保持开局资源 / 金券可预测），然后推进到玩家行动阶段。
-        /// 全部走命令通道，不直接改状态。4 名玩家各占一个绿色资源点后，其余资源点仍可正常探索，够测试用。
-        /// </summary>
-        private void AutoSetupForDeveloperMode(GameState state)
-        {
-            // 企业扩展：开局企业还没选完时不要自动跑开局入场 ——
-            // 初始资源点命令会被引擎拒绝，继续自动盖放会把对局推进到「没选过起点」的坏状态。
-            // 这一段留给界面逐个问玩家，正好用来测企业抽选。
-            if (state.Setup.IsEnterpriseEnabled && !state.Enterprises.DraftDone) return;
-
-            int seat = state.FirstPlayerSeat;
-            for (int i = 0; i < state.Players.Count; i++)
-            {
-                int nodeId = FindFreeGreenNode(state, seat);
-                if (nodeId >= 0)
-                {
-                    CommandResult pick = Engine.Dispatch(new ChooseStartNodeCommand(seat, nodeId));
-                    if (pick.Ok)
-                        // grantRewards: false —— 只标记事件已结算，不替玩家白拿绿色事件选项奖励。
-                        Engine.Dispatch(new ResolveEventOptionCommand(seat, nodeId, 0, acceptCost: true,
-                            grantRewards: false));
-                    else
-                        Debug.LogWarning($"[开发者模式] 座位 {seat + 1} 自动选初始资源点失败：{pick.Error}", this);
-                }
-
-                seat = state.NextSeat(seat);
-            }
-
-            // 角色牌盖放也要跑完 —— 否则开发者模式一进游戏就没盖放牌，「使用角色牌」按钮点不动（§6.3a）。
-            // 每人盖放自己手牌里的第一张，让任意座位都能直接测策略 / 计谋。
-            // 最后一张盖放落地后，引擎会自动进入玩家行动阶段（TurnFlow.TryAutoAdvance），这里不需要再手动推进。
-            for (int i = 0; i < state.Players.Count; i++)
-            {
-                PlayerState player = state.Players[i];
-                if (player.PlacedCharacterCard < 0 && player.HandCharacterCards.Count > 0)
-                    Engine.Dispatch(new PlaceCharacterCardCommand(i, player.HandCharacterCards[0]));
-            }
-        }
-
-        /// <summary>
-        /// 找一个还没有停靠别人移动城市的绿色资源点（开发者模式自动开局用）。
-        /// 刻意跳过 <c>B-01</c>：选它会按规则白送 2/2/2 资源，会让开发者模式的开局状态显得「莫名多资源」。
-        /// </summary>
-        private static int FindFreeGreenNode(GameState state, int seat)
-        {
-            foreach (MapNodeState node in state.Map.Nodes)
-            {
-                if (node.Color == NodeColor.Green && node.Code != "B-01"
-                    && !ActionRules.HasOpponentCity(state, node.Id, seat))
-                    return node.Id;
-            }
-            return -1;
         }
     }
 }

@@ -39,6 +39,15 @@ namespace NomadCity.Core.Net
             { typeof(TriggerEnterpriseEffectCommand), CommandKind.TriggerEnterpriseEffect },
             { typeof(DiscardSetupHandCardsCommand), CommandKind.DiscardSetupHandCards },
             { typeof(PickRhineDepartmentCommand), CommandKind.PickRhineDepartment },
+            { typeof(DeveloperSetEnterpriseLevelCommand), CommandKind.DeveloperSetEnterpriseLevel },
+            { typeof(UsePersistentTacticCleanupCommand), CommandKind.UsePersistentTacticCleanup },
+            { typeof(DeveloperSetTurnCommand), CommandKind.DeveloperSetTurn },
+            { typeof(DeveloperSetPlayerStatCommand), CommandKind.DeveloperSetPlayerStat },
+            { typeof(DeveloperBuildFacilityCommand), CommandKind.DeveloperBuildFacility },
+            { typeof(DeveloperRemoveFacilityCommand), CommandKind.DeveloperRemoveFacility },
+            { typeof(DeveloperResetPanelUseCommand), CommandKind.DeveloperResetPanelUse },
+            { typeof(DeveloperDeclareCityPatternCommand), CommandKind.DeveloperDeclareCityPattern },
+            { typeof(DeveloperUseCharacterCardCommand), CommandKind.DeveloperUseCharacterCard },
         };
 
         /// <summary>查命令类型对应的 Kind；未登记时抛出异常（有意为之，逼新增命令登记）。</summary>

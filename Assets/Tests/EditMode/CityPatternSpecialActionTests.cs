@@ -194,14 +194,19 @@ namespace NomadCity.Tests
 
             Assert.IsTrue(result.Ok, result.Error);
             Assert.AreEqual(4, player.Vouchers, "6 金券付掉。");
-            Assert.AreEqual(1, player.ExtraMainActionsThisTurn, "用完特殊行动后还余 1 次额外主要行动。");
+            // 特殊行动本身不是主要行动，不会消耗追加的 2 次额外主要行动。
+            Assert.AreEqual(2, player.ExtraMainActionsThisTurn, "追加的 2 次额外主要行动都还在。");
             Assert.AreEqual(0, state.ActiveSeat, "还有额外行动 → 保持当前座位，不推给下一位。");
 
             TurnFlow.CompletePlayerAction(state); // 额外主要行动 1
+            Assert.AreEqual(1, player.ExtraMainActionsThisTurn);
+            Assert.AreEqual(0, state.ActiveSeat);
+
+            TurnFlow.CompletePlayerAction(state); // 额外主要行动 2 → 额外次数用尽，但仍欠本回合的常规主要行动
             Assert.AreEqual(0, player.ExtraMainActionsThisTurn);
             Assert.AreEqual(0, state.ActiveSeat);
 
-            TurnFlow.CompletePlayerAction(state); // 额外主要行动 2 → 用尽后恢复正常推进
+            TurnFlow.CompletePlayerAction(state); // 常规主要行动用完 → 才推给下一位
             Assert.AreEqual(1, state.ActiveSeat);
         }
 
@@ -397,6 +402,9 @@ namespace NomadCity.Tests
             public int ChooseOpponent(int seat, RewardOp op, GameState state,
                 IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
 
+            public int ChoosePlayer(int seat, RewardOp op, GameState state,
+                IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
+
             public int ChooseDiscardedCharacterCard(int seat, RewardOp op, GameState state,
                 IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
 
@@ -432,6 +440,9 @@ namespace NomadCity.Tests
 
             public int ChooseSupplyFacility(int seat, RewardOp op, GameState state,
                 IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
+
+            public int ChooseAmount(int seat, RewardOp op, GameState state, int min, int max) =>
+                max <= 0 ? -1 : max;
 
             public int ChooseOptionalStep(int seat, RewardOp op, GameState state, int stepIndex, string label) => 0;
         }

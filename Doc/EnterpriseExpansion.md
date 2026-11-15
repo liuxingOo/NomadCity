@@ -274,14 +274,14 @@
 
 | # | 缺项 |
 |---|---|
-| 1 | 企业合作的初始等级标记位——每张企业板从 0 级到 5 级各格的奖励内容（规则书只展开了部分等级） |
-| 2 | **约翰老妈**的全部企业特效 |
-| 3 | **莱茵生命** 3 张科室板的具体效果 |
+| 1 | ~~企业合作的初始等级标记位——每张企业板从 0 级到 5 级各格的奖励内容~~ —— **已按卡面录入**，见 `Core/Model/Enterprise/EnterpriseCatalog.cs` |
+| 2 | ~~**约翰老妈**的全部企业特效~~ —— **已按卡面录入** |
+| 3 | ~~**莱茵生命** 3 张科室板的具体效果~~ —— **已按卡面录入** |
 | 4 | ~~2 张扩展事件牌（`洞穴遗迹`、`采集平台残骸`）的替换后内容~~ —— **已录入**，见 `EventCards.md` §6 |
 | 5 | ~~3 张扩展设施牌的牌面（费用 / 分数 / 入场效果）~~ —— **已录入**，见 `FacilityCards.md` §6.3（id 600–602，`CardCatalog.BuildEnterpriseFacilities`） |
-| 6 | 6 张扩展城市样式牌（I 级 4 张、II 级 2 张）的宣告条件与奖励 |
+| 6 | ~~6 张扩展城市样式牌（I 级 4 张、II 级 2 张）的宣告条件与奖励~~ —— **已录入**（id 550–555，`CardCatalog.BuildEnterpriseCityPatterns`） |
 | 7 | ~~山、玛恩纳的**卡面完整文案**~~ —— **已录入**，见 §3.2 / §4.2 与本文件 9.2 |
-| 8 | 「企业办事处」「干员特派」等设施的入场效果原文 |
+| 8 | ~~「企业办事处」「干员特派」等设施的入场效果原文~~ —— **已核实**（2026-11-15）：企业办事处卡面（`card_facility.jpg` 切片 49–51）入场效果就是「选择 1 家企业」+「触发已解锁企业特效」图标，与现有实现一致；干员特派见 §2 罗德岛 3 / 5 级 |
 
 > **补录建议**：合作企业板、科室板、扩展事件牌、扩展设施牌、扩展城市样式牌需要整批扫描后逐张录入。
 
@@ -354,13 +354,258 @@
 | 雷神工业 5 级：从设施牌堆选 1 张建设（正常付费、不占主要行动），随后洗混设施牌堆；牌堆顺序由「回合 / 行动座位 / 牌堆内容」派生的固定种子重排，主机与各端、复盘结果一致 | `EnterpriseEffectResolver.BuildFromDeckAndShuffle`、`ShuffleFacilityDeck` |
 | 富森银行 4 级：对手由玩家点选（放弃选择时退回分数最高的对手） | `EnterpriseRules.LetOneOpponentLoseScore`、`IEffectChoices.ChooseOpponent` |
 | 雷姆必拓 4 级：失去 1 分后立刻进行 1 次采集，逐点询问「采哪个点 / 是否继续」，路费与资格判定复用采集阶段 | `EnterpriseEffectResolver.ExtraHarvest`、`HarvestResolver.ResolveSingle` |
-| 开发者测试弹窗（仅 `GameState.DeveloperMode` 下按 F2 打开）：按企业板逐级列出测试按钮，点了先把合作等级直接写成该级（`DeveloperSetEnterpriseLevelCommand`），再走与正式流程完全相同的触发界面；该级若是**即时奖励**（如莱茵生命科室板奖励）则改为「设级并结算」，同样会弹点选窗。正式界面**不**提供无条件触发按钮 | `UI/DeveloperTestPanel.cs`、`UI/GameScreenController.cs`（`EnsureDeveloperPanel` / `OnDeveloperEnterpriseLevelPicked` / `BeginDeveloperSettle`）、`Core/Engine/Actions/EnterpriseCommands.cs`（`DeveloperSetEnterpriseLevelCommand`） |
+| 开发者模式面板（仅从主菜单「以开发者模式启动」进入后显示）：选中玩家后，给全部企业板列出等级「+ / -」直接设级（未上场会自动上场，`DeveloperSetEnterpriseLevelCommand`），并对已经解锁的黑色特效等级显示「触发 Lx」，点了直接走正式触发结算；正式界面**不**提供无条件触发按钮 | `UI/DeveloperPanel.cs`、`UI/GameScreenController.cs`（`EnsureDeveloperButton` / `SubmitDeveloperCommand`）、`Core/Engine/Actions/EnterpriseCommands.cs`（`DeveloperSetEnterpriseLevelCommand`、`TriggerEnterpriseEffectCommand`） |
 | 企业合作图标（`RewardKind.ChooseEnterprise`）= 在全场所有企业里挑 1 个**已解锁、本回合未用过**的企业特效触发（先选企业板 → 再选该板的特效等级 → 走正式触发结算）；企业办事处入场效果与 2 张扩展事件牌的「选择 1 家企业」都按这条结算 | `Core/Engine/Effects/EnterpriseEffectExtension.cs`（`TryTriggerEffect`）、`CardDefinitions.cs`（`RewardKind.ChooseEnterprise`） |
 | 卡牌带出来的企业效果现在都会转交企业扩展：事件牌选项、设施入场效果、城市样式特殊行动、企业等级奖励、延迟结算 | `FlowCommands.cs`、`BuildFacilityCommand.cs`、`UsePatternSpecialActionCommand.cs`、`EnterpriseRules.cs`、`CleanupResolver.cs` |
 | 卡牌给出的触发时机不受「玩家行动阶段 / 自己行动」限制（事件牌在事件阶段触发也合法）；只有从企业板界面主动触发才做时机校验 | `TriggerEnterpriseEffectCommand(ignoreTiming)` |
 | 效果日志在「成功且有说明」时也显示说明：罗德岛 2 级会写明「按 N 个计数单位结算，获得 N 金券」，干员特派 / 4 级取回牌也会显示抽到 / 取回了什么 | `Core/Engine/Effects/EffectResolver.cs`（`EffectLogEntry.ToString`、`EffectReport.Describe`、`GainVouchersPerCount`） |
 
-**尚未接入**：8 张干员牌里需要新机制的 12 个效果 —— 银灰（商业手腕 / 制衡战略）、泥岩（源岩D.I.Y / 泥岩小队）、森蚺（我寻思能行 / "暴躁铁皮"）、可露希尔·工程订购、凯尔希·掌控全局、W·致命攻势、多萝西·为了大家、异客（沁礁黑市 / 隐蔽仓库）。其中 4 个持续性计谋与森蚺的被动修正需要「角色牌持续留在场上 / 资源支付替代」子系统。
+**当时的未接入清单**：8 张干员牌里需要新机制的 12 个效果（已被 §9.6 部分取代）。
+
+## 9.6 落码（第六阶段：干员牌效果 · 第一/二批）
+
+| 已实现 | 位置 |
+|---|---|
+| 新增干员专属效果类型 `OperatorSellToPlayer` / `OperatorBalanceInfluence` / `OperatorPayResourceBuild` / `OperatorRelocateInsteadOfRemove` / `OperatorSupplyToBox` / `TriggerAllEnterpriseEffects` / `OperatorReplaceTwoOpponents` / `OperatorTakeOpponentResources`（枚举值 41–48），统一由企业扩展效果入口处理 | `Core/Model/Cards/CardDefinitions.cs`、`Core/Engine/Effects/EnterpriseEffectExtension.cs` |
+| 银灰·策略「商业手腕」：选 1 种基础资源 + 1 位玩家（**可以是自己**），该玩家按 4 金券 / 个卖光该资源；发动者得 1 分 | `CardCatalog.BuildOperatorStrategyOps`、`IEffectChoices.ChoosePlayer`（新增） |
+| 银灰·计谋「制衡战略」：所有玩家（含自己）各移除 1 个自己的影响力 | `EnterpriseEffectExtension.TryBalanceInfluence` |
+| 泥岩·策略「源岩D.I.Y」：支付 1 源岩后建造 1 次；付不起时整条效果不执行（不会白送建造） | `EnterpriseEffectExtension.TryPayResourceBuild` |
+| 森蚺·策略「我寻思能行」：本回合免费的移动城市本应移除对手影响力时，改为把这些影响力按各自所有者的部署规则移到别的合法空格（找不到落点才退回供应堆） | `PlayerState.FreeMoveRelocatesInfluenceThisTurn`、`EffectResolver.RelocateOthersInfluence` |
+| 森蚺·计谋「暴躁铁皮」：从设施供应区选至多 2 张名称不同的设施牌放回游戏盒，每张后立刻补牌；获得 3 异铁 | `EnterpriseEffectExtension.TrySupplyToBox` |
+| 凯尔希·计谋「掌控全局」：选 1 家企业，按等级从低到高触发其每项已解锁、本回合未用过的企业特效（逐级重新校验费用，低等级给的资源可用于支付高等级费用） | `EnterpriseEffectExtension.TryTriggerAllEffects` |
+| W·计谋「致命攻势」：支付 4 金券 → 选 2 名不同对手，各用你的 1 个影响力替换其 1 个 | `EnterpriseEffectExtension.TryReplaceTwoOpponents` |
+| 异客·策略「沁礁黑市」：选 1 种基础资源 + 1 位对手，从该对手处取得至多 4 个；发动者与该对手各得 1 分 | `EnterpriseEffectExtension.TryTakeOpponentResources` |
+| 联机：`DeveloperSetEnterpriseLevelCommand` 补登记 `CommandKind` / `CommandCatalog` / `CommandCodec`（Flags bit2 = 是否结算）；`FreeMoveRelocatesInfluenceThisTurn` 进快照（版本升到 7，`NetProtocol` 升到 5） | `Core/Net/*` |
+
+**~~尚未接入~~（已被 §9.9 取代）**：4 张「持续留在场上（∞）」的计谋 —— 泥岩·泥岩小队、可露希尔·工程订购、多萝西·为了大家、异客·隐蔽仓库，已于 §9.9 连同 `PersistentTacticState` / `PersistentTacticRules` 一并接入。因此 8 张干员牌 × 2 个效果 = 16 个效果已全部落码。
+
+## 9.7 企业板全等级复核（2026-11-14）
+
+逐条把 8 块企业板（0–5 级）与 3 张科室板（2–5 级）的卡面文字和实际结算对照后，修正了 3 处缺口：
+
+| 问题 | 原状 | 修正 |
+|---|---|---|
+| 海德兄弟 4 级 | 只写了支付 6 源岩，**没有挂上**「洗回供应区 + 补满 + 免费建造」特殊结算，付了资源什么都不会发生 | 改用 `UnlockSpecialCost(..., SupplyReshuffleAndFreeBuild)` |
+| 雷神工业 3 / 5 级 | 卡面写明「一回合内没有使用次数限制」，但被通用的「同一特效一回合一次」拦住 | `EnterpriseLevel.UnlimitedPerTurn`（3 / 5 级为 true），`Validate` 与 `TriggerableLevels` 放行 |
+| 雷姆必拓 2 级 | 「替换 1 个**在资源点上**的影响力」实际可以选择航道或任意节点 | 新增 `RewardKind.ReplaceResourceNodeInfluence`，候选只限带资源指示物的节点 |
+
+其余等级与科室板逐条核对无误；测试补了 3 条对应用例（总计 286 条全绿）。
+
+## 9.8 全量代码审计（2026-11-14）
+
+按「不采信文档、只以代码为准」把此前声称完成的项目逐条读码复核，结论如下。
+
+**已核实为真（代码里确有实现）**
+
+| 项目 | 代码证据 |
+|---|---|
+| 开局整合（7 张手牌、+5 券、设施 41→44、事件 2 张替换、城市样式 4+2） | `BoardSetup.cs`、`CardCatalog.FacilityDeckIds/EventDeckIds/CityPatternIds(bool)` |
+| 2 / 3 / 4 人企业抽选（2 人抽 4 选 2、3 人补第 4 块、升 1 级结算） | `EnterpriseRules.Prepare`、`ChooseInitialEnterpriseCommand.Apply` |
+| 红区全体提升（盖放阶段前，起始玩家顺时针，满级跳过，进度进快照） | `EnterpriseRules.BeginRedZoneAdvance/ContinueRedZoneAdvance`，`TurnFlow` 调用 |
+| 山 / 玛恩纳 4 个效果与公路（禁止放置 / 移动影响力、探索采集免路费、渲染） | `EnterpriseEffectExtension`、`ActionRules.CanPlaceInfluence`、`TollCalculator`、`MapStateRenderer.DrawHighway` |
+| 干员牌堆（8 张 700–707、抽 2 / 2 人局抽 3、洗回、加入手牌、进快照） | `EnterpriseState.OperatorDeck`、`DispatchOperators`、`OperatorCardArt` |
+| 干员 12 / 16 个效果 | `CardCatalog.BuildOperatorStrategyOps/TacticsOps` + `EnterpriseEffectExtension` 41–48 |
+| 企业特效每回合使用掩码、重置 | `EnterpriseState.MarkEffectUsed/HasUsedEffectThisTurn`、收尾重置 |
+| 界面选择请求 | 各会话统一按 `ChoiceRequest` 的选项 / 地图点选渲染，新增选择类型无需单独分支 |
+| 快照 / 编解码 | 报价、场上板、各座位等级、科室板、已用掩码、干员牌堆、`FreeMoveRelocatesInfluenceThisTurn` 均在 `GameStateSnapshot(.Codec)` |
+
+**审计中修正的 2 处偏差**
+
+| 问题 | 原状 | 修正 |
+|---|---|---|
+| 雷神工业 5 级「无法满足建造条件时必须洗混设施牌堆」 | 无空位、牌堆无可建设施、选中后校验失败三条路径都直接返回，**没有洗牌** | 三条路径都补 `ShuffleFacilityDeck` |
+| 莱茵生命科室板被当成「每座位一份」 | 非莱茵玩家因「所有玩家提升 1 级」被带到莱茵生命时，`Departments[seat] < 0` 被写成 0，拿到的是固定第 1 张面板 | 新增 `ActiveDepartmentId`：本人无记录时取选择莱茵生命那位的激活面板；切换科室板也写回该座位 |
+
+**仍未完成 / 仍存疑（不是已完成）**
+
+| # | 项 | 状态 |
+|---|---|---|
+| 1 | 泥岩小队、工程订购、为了大家、隐蔽仓库 4 张 ∞ 计谋 | **本轮已接入**（见 §9.9），打出后留在场上、收尾阶段暂停并可发动 |
+| 2 | 3 人局随机抽到莱茵生命时「随机激活 1 张科室板」 | **已改为真随机**（2026-11-15）：`EnterpriseRules.Prepare` 用开局同一颗 `Random` 抽定科室板（同种子可复现、联机一致）；`PickInitialRhineDepartmentIfNeeded` 只作为旧存档 / 测试绕过开局时的兜底 |
+| 3 | 黑钢国际 1 级「移除 1 个影响力」的归属 | **已确认**：按速查表，未写明「自己的」影响力的图标一律可移除其他玩家的影响力；代码现实现（候选含任意玩家的影响力）正确，无需改动 |
+| 4 | 扩展城市样式 554 / 555 的阵型 | **已确认**：按工程内 `Art/Cards/CityPattern/card_cp_lv2.jpg` 逐格核对，554 与 504 同阵、555 与 505 同阵（同行列颜色一致），代码无需改动 |
+| 5 | 快照不含延迟结算队列 | **已补**：`GameStateSnapshot.DeferredEffects` 递归携带 `RewardOp`（含分支 / 内嵌 ops / 可分配资源），快照版本 9、`NetProtocol` 7 |
+
+> 验证口径：`AllCompileCheck` 编译 0 警告 0 错误；EditMode 313 / 313 通过。**未在 Unity Play 模式实测**界面表现。
+
+## 9.9 本轮收尾（2026-11-14）
+
+审计里剩下的四块按「引擎 + 测试，界面只做最小提示」补齐：
+
+**1. 红色 · 一次性计谋「用后放回游戏盒」**
+
+`CharacterCardDef` 新增 `StrategyReturnsToBox / TacticsReturnsToBox`，`UseCharacterCardCommand` 用后置
+`PlayerState.PlacedCardReturnsToBox`，`DiscardPlacedCard` 据此跳过弃牌区。覆盖 3 张：银灰「制衡战略」、
+凯尔希、W「致命攻势」。普通策略 / 计谋照常进弃牌区。
+
+**2. 莱茵生命科室板改为板级**
+
+`EnterpriseState.Departments[seat]` 改为 `int RhineDepartment`（-1 = 未选）。`SettleDepartment` /
+`SwitchDepartment` / `ActiveDepartmentId` 全部读写这一字段，任何座位结算的都是同一张科室板。
+
+**3. 6 张企业城市样式牌的特殊行动（550–555）**
+
+| 牌 | 费用 | 效果 |
+|---|---|---|
+| 550 城建开拓区 | 失去 1 分 | 从设施牌堆选 1 张并直接建设（`RewardKind.BuildFromFacilityDeck`） |
+| 551 拓荒者据点 | — | 在移动城市所在资源点放 2 个影响力；再按牌上标记数移动自己的影响力（`PlaceInfluenceAtCityNode` / `RelocateInfluencePerPatternMarkers`） |
+| 552 核心商业区 | — | 四选一（`ChooseTwoOfThree` 之外的 `Alternative` 分支）+ 1 次「特殊行动以外」的主要行动（`ExtraMainActionsExcludingSpecial`） |
+| 553 大型企业园 | — | 同一企业板连续触发 2 个已解锁特效（`TriggerEnterpriseEffectTwice`） |
+| 554 警备队辖区 | — | 三选二（①支付 2 源岩 + 1 异铁替换 1 个影响力；②放置 1 个影响力得 1 源石；③移除 1 个影响力得 2 异铁）+ 本轮禁用角色牌 |
+| 555 拓荒指挥中枢 | — | 1 次「特殊行动以外」的主要行动 + 本轮可连发同一张角色牌的两种效果（`BothCharacterEffectsThisRound`） |
+
+> 554 的费用与三条奖励已按工程内卡面（`Art/Cards/CityPattern/card_cp_lv2.jpg`）逐项核对：
+> 图标颜色与速查表图例对应为——金券=金色纸券、源岩=褐色六棱石、源石=深红尖晶、异铁=蓝色尖晶；
+> ②的绿色向下箭头是「放置影响力」，③的红色向上箭头是「移除影响力」，①箭头后的双箭头方块是「替换影响力」。
+> 若以后实体卡数值调整，只需改 `CardCatalog.BuildEnterpriseCityPatterns` 的三个 `EffectBranch` 与
+> `EnterpriseEffectExtension.ExecutePoliceOption`。
+
+「额外主要行动（不含特殊行动）」由 `ActionRules.ValidateMainActionAvailable(..., specialAction: true)`
+拦住城市样式特殊行动，避免把这份额度拿去用特殊行动；`EndTurnCommand` 与 `TurnFlow` 负责消费。
+
+**4. 四张 ∞ 持续计谋**
+
+新增 `PersistentTacticState`（卡 id / 座位 / 类型 / 压在牌下的设施 / 标记 / 本回合是否已用）与
+`PersistentTacticRules`：
+
+| 计谋 | 打出 | 收尾能力 | 其它 |
+|---|---|---|---|
+| 泥岩小队 | 留在场上 | 支付 2 源岩，放置 1 个影响力 | — |
+| 工程订购 | 从设施供应区压 2 张异名设施到牌下 | — | 建造时可从牌下取牌；牌下空了进弃牌区 |
+| 为了大家 | 放至多 4 个标记 | 移除 2 个标记，放置 1 个影响力 | 自己的影响力被移除时，可选择放到这张牌上（标记 +1） |
+| 隐蔽仓库 | 放至多 5 个标记 | — | 支付资源时可用标记代替（每次至多 2 个），用完进弃牌区 |
+
+- 收尾阶段：`CleanupResolver` 先 `ResetCleanupUsage`；`TurnFlow.TryAutoAdvance` 在
+  `PersistentTacticRules.HasCleanupActionsAvailable` 为真时**停在 `TurnPhase.Cleanup`**，
+  玩家用 `UsePersistentTacticCleanupCommand` 发动，或发 `AdvancePhaseCommand` 跳过。
+- 界面：`GameScreenController.TryBeginPersistentCleanup` 在收尾阶段弹出选择窗，列出可发动的持续计谋 + 「跳过收尾」；
+  选定后的落点等选择与建设 / 角色牌 / 特殊行动同一套 —— `EffectChoiceSession` 试跑收集答案，
+  可点地图或弹窗作答，取消键逐层回退（回退到底则回到「选哪张计谋」）。
+- 线路：`CommandKind.UsePersistentTacticCleanup`、`GameStateSnapshot.Version = 9`、`NetProtocol.Version = 7`。
+- 快照：延迟结算队列（含递归分支 / 内嵌效果）已纳入 `GameStateSnapshot`，不再在队列非空时拒绝抓快照。
+
+新增测试 `Assets/Tests/EditMode/EnterpriseRemainingFeatureTests.cs`（23 条）覆盖以上四块与快照递归往返。
+
+---
+
+## 9.10 速查表一致性核查（2026-11-14）
+
+对照工程内两张速查表（`Assets/_Project/Art/QueryTable1.jpg`、`QueryTable2.jpg`）逐条核对关键词规则，
+并补了回归测试（落在 `BuildTests` / `CharacterCardTests`）：
+
+| 规则 | 现状 | 测试 |
+|---|---|---|
+| 移除影响力可指向任意玩家（没写「自己」即包含对手） | 实现正确 | `EffectResolverTests` 拿走影响力… |
+| 替换影响力可指向任意玩家；目标是**对手移动城市所在资源点**时只能移除、不能再放 | 实现正确（`TryReplaceInfluence` 移除后再走 `CanPlaceInfluence`） | `替换影响力_该点有对手城市时只移除不放置` |
+| 唯一：自己面板已有同名牌时不能再建（按牌名判，跨颜色也算同名） | 实现正确 | 新增 `建设_唯一关键词_同名设施已建时不能再建` |
+| 免费：跳过支付 | 实现正确（`IsFreeToBuild`，费用全 0 亦视作免费） | 新增 `建设_免费关键词_跳过全部支付` |
+| 起始玩家可两种角色牌效果都发动，顺序自选 | **执行侧漏判企业放开标记，已修** | 新增 `使用_起始玩家可以先计谋后策略`、`使用_拓荒指挥中枢放开限制后非起始玩家也能连发两种效果` |
+| 起始标记争夺：本回合获得，下一回合才生效 | 实现正确（`PendingStartMarkerSeat` → `TurnFlow.NextTurn`） | `传递起始标记_下一回合由指定玩家先手` |
+| 终局结算：区块控制 + 剩余资源，平局比金券 / 至纯源石 | 实现正确 | `FinalScoringTests` |
+| 使用中的角色牌既不在手牌也不在弃牌区（∞ 牌留在场上、不占盖放位） | 实现正确 | `CharacterCardTests` 盖放 / 使用 + `EnterpriseRemainingFeatureTests` |
+| 移动城市不能停靠到对手城市所在资源点；无指示物 / 有对手城市的点不能放影响力 | 实现正确 | `ActionTests` 城市移动 / 部署 |
+
+修复点：`UseCharacterCardCommand.Apply` 原仅按 `FirstPlayerSeat` 决定是否留住牌等第二种效果，
+与 `Validate` 里 `BothCharacterEffectsThisTurn` 的放开口径不一致 —— 被放开的玩家用掉第一种后牌被直接弃掉，
+第二种效果永远用不出来。现改为两处共用同一判定。
+
+同轮还按卡面修正了 554 警备队辖区的费用与三条奖励（见 §9.9），并新增「替换任意玩家影响力」的回归测试。
+
+验证：`AllCompileCheck` 0 错误 0 警告；EditMode 313 / 313 通过。
+
+---
+
+## 9.11 全量卡面自查（2026-11-14）
+
+按工程内卡图逐张复核 22 张事件牌、41 张设施牌、20 张基础角色牌与 8 张干员牌，发现并修正 3 处偏差：
+
+| 卡牌 | 卡面 | 修正前代码 | 修正 |
+|---|---|---|---|
+| W·策略「伺机出动」 | 放置 **3** 次影响力 + 收尾移除 2 个 | 放置 2 次 | `CardCatalog.BuildOperatorStrategyOps` 改为 3 |
+| 极境·计谋「导航通讯」 | 支付 **3 异铁**（蓝色尖晶） | 3 至纯源石 | `CardCatalog.BuildRoleTacticsOps` 改为 `Oriron` |
+| 山·策略「开辟商路」 | 被移除影响力的玩家各 **1 分**，你 **1 分** | 双方各 1 金券 | `EnterpriseEffectExtension.TryPlaceHighway` 改为 `Score` |
+
+同步更新测试：`CharacterCardTests` 极境计谋改为支付异铁、`EnterpriseTests.开辟商路` 改为断言分数、
+`EnterpriseRemainingFeatureTests` 新增 `W策略_放置3个影响力并登记收尾移除2个`。
+事件 / 设施 / 城市样式 / 其余角色牌与实现一致，无需改动；山与玛恩纳当时因未找到卡图无法逐字核对（见 `CardEffects.md` §6），**已于 §9.14 补做**（卡面就在 `bas_operators.png` 的 `Mountain_exp` / `Młynar_exp` 切片里，读图核对后与代码一致）。
+
+验证：`AllCompileCheck` 0 错误 0 警告；EditMode 314 / 314 通过。
+
+---
+
+## 9.12 交互界面完善（2026-11-14）
+
+- **收尾持续计谋**：选定后不再使用引擎默认答案。`GameScreenController.BeginPersistentCleanup` 用 `EffectChoiceSession`
+  试跑收集答案，落点直接点地图、其余选择走 `ChoicePopup`；取消键逐层回退，退到底回到「选哪张计谋」。
+  引导文案由 `CleanupEffectHint` 生成，与建设 / 角色牌 / 特殊行动同规格。
+- **企业状态提示**：`ExpansionStatusHint` 把「本回合不能使用角色牌 / 还可再执行 N 次主要行动 /
+  可连发策略与计谋」附在行动提示末尾，避免玩家误以为按钮失效。
+- **终局结算窗**：`OnGameEnded` 用与确认窗相同的遮罩 + 标题 + 单选项规格弹出胜者与最终名次
+  （`BuildFinalPrompt`），只弹一次；关闭后仍可在状态栏查看摘要。
+
+---
+
+## 9.13 公路指示物与公开展示（2026-11-15）
+
+- **公路指示物不设上限**：规则书扩展配件列表下注明「在游戏过程中如有需要，玩家可以使用喜欢的指示物替代不足的公路指示物」，
+  8 个只是配件数量、不是硬上限。引擎因此只保留 `RouteState.IsHighway`，不对可铺公路数做限制。
+- **企业合作等级上限固定为 5 级**：`EnterpriseBoardDef.MaxLevel` = 5，`EnterpriseState.Advance` 在 5 级封顶，
+  `AdvanceEnterpriseLevelCommand` 对已满级拒绝提升，企业板总览按 0–5 级显示。
+- **向所有玩家展示**：罗德岛 3/5 级【干员特派】放回游戏盒的角色牌、4 级从弃牌区回收的角色牌，
+  会追加到 `GameState.PublicReveals`；`GameScreenController.ShowPendingPublicReveals` 在刷新时把最新一条
+  放大成卡面弹窗（热座下等同把牌亮给所有人看，联机各端按同一份状态各自弹出）。快照版本升到 **10**。
+- 测试：`EnterpriseRemainingFeatureTests.罗德岛干员特派_放回游戏盒的牌记入公开展示` / `罗德岛四级_回收的牌记入公开展示`。
+
+---
+
+## 9.14 全量复审与素材核对（2026-11-15）
+
+本轮改为「以代码与美术资源为准」，不再采信旧文档结论；同时修正了几处已经过期的说明。
+
+**1. 素材清点（`Assets/_Project/Art/Cards/`）**
+
+| 目录 / 文件 | 内容 | 代码接线 |
+|---|---|---|
+| `Character/bas_operators.png`（2400×1700，8 切片） | 5 张基础角色 + `bas_operators_Mountain_exp`（山）+ `bas_operators_Młynar_exp`（玛恩纳）+ 1 个空位 | `Editor/CardFaceFiller.cs` 按切片名映射：`Mountain_exp → 5`、`Młynar_exp → 6`；场景 `CharacterHandPanel.cardFaces` 已有 7 张（5 基础 + 山 + 玛恩纳） |
+| `Character/rhodes_operators_exp.png`（2400×1700，4×2） | 8 张干员牌（银灰 / 泥岩 / 森蚺 / 可露希尔 / 凯尔希 / W / 多萝西 / 异客） | `UI/OperatorCardArt.cs` 运行时按格子 `Sprite.Create`，顺序与 `CardCatalog.OperatorNames` 一致 |
+| `Character/op_back_*.png`、`rhodes_op_back_exp.png` | 四色角色牌背 + 干员牌背 | 卡背素材齐全（界面暂未使用干员牌背） |
+| `Enterprise/`、`Entrepreneur/`、`Event/`、`Facility/`、`CityPattern/` | 企业板 / 科室板 / 企业家 / 事件 / 设施 / 样式牌拼版图 | 各自的 `*CardArt` 或编辑器切片已接线 |
+
+> **纠正**：此前 §9.11 与 `CardEffects.md` §6 记的「山、玛恩纳无卡图」不成立 —— 卡图一直在 `bas_operators.png` 中，只是没有单独 PNG。
+
+**2. 山 / 玛恩纳卡面逐字核对（读切片图 vs 代码）**
+
+| 卡 | 卡面文字 | 代码 | 结论 |
+|---|---|---|---|
+| 山·策略「开辟商路」 | 选 1 条航道，移除其上所有影响力，在该航道放置 1 个公路指示物；**被移除影响力的玩家各得 1 分**，你获得 1 分 | `EnterpriseEffectExtension.TryPlaceHighway`（`Score += op.Amount`，发动者再 +1） | 一致 |
+| 山·计谋「商业网络」 | **支付 2 金券** → 选 1 家企业：提升 1 级 **并**触发 1 个已解锁特效 | `PayVouchers(2)` + `AdvanceAndTriggerEnterprise()` | 一致 |
+| 玛恩纳·策略「公事公办」 | 二选一：① 选 1 家企业，**所有玩家**提升 1 级；② 选 1 家企业，触发 1 个已解锁特效 | `Alternative(AdvanceEnterpriseAllPlayers, TriggerEnterpriseEffectOnce)` | 一致 |
+| 玛恩纳·计谋「游说赞助」 | 选 1 家企业提升 1 级；获得 1 源岩 + 1 源石 + 1 异铁 | `AdvanceOwnEnterpriseLevel(1)` + 三色资源各 1 | 一致 |
+
+**3. 代码现状复核（不采信文档）**
+
+| 项目 | 结论 | 证据 |
+|---|---|---|
+| 公路：禁止放置 / 移动影响力、探索采集免路费 | 已实现 | `ActionRules.CanPlaceInfluence`（`IsHighway` 拒绝）、`TollCalculator`（`IsHighway → 0`）、`MapStateRenderer.DrawHighway` |
+| 「所有玩家提升 1 级」结算顺序 | 发动者先、其余顺时针 | `EnterpriseEffectExtension.TryAdvanceAllPlayers` |
+| 12 种企业特殊结算 | 全部有分支 | `EnterpriseCommands`（`Apply` / `Validate` 两处 switch 齐全） |
+| 莱茵生命科室板 | 板级单张、切换/结算/降级都已接 | `EnterpriseState.RhineDepartment`、`SettleDepartment` / `SwitchDepartment`、快照 `EnterpriseRhineDepartment` |
+| 红区提升 | 引擎 + 界面接续 + 快照都齐 | `EnterpriseRules.BeginRedZoneAdvance` / `ContinueRedZoneAdvance`、`GameScreenController` 续接下一位、快照 3 个字段 |
+| 4 张 ∞ 计谋 | 已接入（§9.6 的「尚未接入」是过期描述） | `GameState.PersistentTactics`、`PersistentTacticRules`、收尾选择会话 |
+| 联机 | 5 条企业命令都进 `CommandKind` / `CommandCodec`，覆盖测试含 `PickRhineDepartment` | `CommandCodec.cs`、`CommandCodecCoverageTests` |
+| 公开展示 | 记录 + 卡面放大 + 快照版本 10 | `GameState.PublicReveals`、`GameScreenController.ShowPendingPublicReveals` |
+
+**4. 仍未做 / 仍存疑**
+
+| # | 项 | 状态 |
+|---|---|---|
+| 1 | ~~图鉴没有 8 张干员角色牌（700–707）~~ | **已补**（2026-11-15）：`CodexPanel.CharacterIds()` 追加 700–707；`CharacterSprite` 在场景卡面取不到时回退 `OperatorCardArt.SpriteFor`，8 张干员牌现在有独立格子与卡面 |
+| 2 | ~~「企业办事处」入场效果原文~~ | **已核实**（2026-11-15）：读 `card_facility.jpg` 切片 49–51，入场效果为「选择 1 家企业」+ 触发已解锁特效，现有实现正确 |
+| 3 | ~~3 人局补的第 4 块板、莱茵初始科室板~~ | **已确认 / 已改**（2026-11-15）：第 4 块板本来就是「洗牌后从牌堆顶翻」，是真随机；科室板改为开局用同一颗 `Random` 抽定（`EnterpriseRules.Prepare`），不再是确定性取模，同种子仍可复现 |
+| 4 | ~~公开展示快照往返~~ | **已补测试**（2026-11-15）：`EnterpriseRemainingFeatureTests.公开展示_快照往返保留记录` |
+| 5 | Unity Play 实机 | 未实测（企业板标记定位、公路渲染、等级放大裁图都是运行时像素逻辑） |
+
+验证口径：`AllCompileCheck` 编译 0 警告 0 错误；EditMode **327 / 327** 通过。
 
 ---
 

@@ -18,7 +18,7 @@ namespace NomadCity.Core.Net
     public sealed class GameStateSnapshot
     {
         /// <summary>当前快照格式版本；协议握手时与对方比对。</summary>
-        public const int Version = 6;
+        public const int Version = 10;
 
         public int PlayerCount;
         public ExpansionFlags Expansions;
@@ -43,6 +43,9 @@ namespace NomadCity.Core.Net
         public int PendingStartMarkerSeat = -1;
         public int LastCityMoveRouteId = -1;
         public int ActiveSpecialActionPatternId = -1;
+
+        /// <summary>向所有玩家公开展示过的牌（只追加）。</summary>
+        public readonly List<PublicRevealSnapshot> PublicReveals = new();
 
         // —— 企业扩展 ——
         public bool EnterpriseDraftDone;
@@ -75,7 +78,59 @@ namespace NomadCity.Core.Net
         public readonly List<int> EnterpriseBoards = new();
         public readonly List<int> EnterpriseChosen = new();
         public readonly List<int> EnterpriseSecondChosen = new();
-        public readonly List<int> EnterpriseDepartments = new();
+
+        /// <summary>莱茵生命板级激活科室板 id；-1 = 还没选定。</summary>
+        public int EnterpriseRhineDepartment = -1;
+
+        /// <summary>持续留在场上的干员计谋（∞ 计谋）。</summary>
+        public readonly List<PersistentTacticSnapshot> PersistentTactics = new();
+
+        /// <summary>延迟到收尾阶段结算的效果队列（按入队顺序）。</summary>
+        public readonly List<DeferredEffectSnapshot> DeferredEffects = new();
+
+        public sealed class PersistentTacticSnapshot
+        {
+            public int CardId;
+            public int Seat;
+            public int Kind;
+            public int Markers;
+            public bool UsedCleanupThisTurn;
+            public readonly List<int> AttachedFacilityIds = new();
+        }
+
+        /// <summary>一条「向所有玩家展示」的记录。</summary>
+        public sealed class PublicRevealSnapshot
+        {
+            public int Seat;
+            public int CardId;
+            public string Reason = string.Empty;
+        }
+
+        /// <summary>延迟结算队列里的一条：谁的、要执行哪串效果。</summary>
+        public sealed class DeferredEffectSnapshot
+        {
+            public int Seat;
+            public readonly List<RewardOpSnapshot> Ops = new();
+        }
+
+        /// <summary>RewardOp 的纯数据镜像，支持递归（分支与延迟内嵌 ops）。</summary>
+        public sealed class RewardOpSnapshot
+        {
+            public int Kind;
+            public int Resource;
+            public int Amount;
+            public int Scope;
+            public int Count;
+            public readonly List<int> SpreadOptions = new();
+            public readonly List<EffectBranchSnapshot> Branches = new();
+            public readonly List<RewardOpSnapshot> Ops = new();
+        }
+
+        public sealed class EffectBranchSnapshot
+        {
+            public string Label = string.Empty;
+            public readonly List<RewardOpSnapshot> Ops = new();
+        }
 
         public readonly List<PlayerSnapshot> Players = new();
         public readonly List<NodeSnapshot> Nodes = new();
@@ -99,10 +154,6 @@ namespace NomadCity.Core.Net
         public static GameStateSnapshot Capture(GameState state)
         {
             if (state == null) throw new ArgumentNullException(nameof(state));
-            if (state.DeferredEffects.Count > 0)
-                throw new NotSupportedException(
-                    $"快照暂不支持非空的延迟结算队列（当前 {state.DeferredEffects.Count} 项）。" +
-                    "请在延迟效果入队前抓快照（开局同步即满足该条件）。");
 
             var snapshot = new GameStateSnapshot
             {
@@ -142,6 +193,16 @@ namespace NomadCity.Core.Net
             foreach (CityPatternState pattern in state.CityPatternStates)
                 snapshot.CityPatternStates.Add(PatternSnapshot.Capture(pattern));
 
+            foreach (PublicReveal reveal in state.PublicReveals)
+            {
+                snapshot.PublicReveals.Add(new PublicRevealSnapshot
+                {
+                    Seat = reveal.Seat,
+                    CardId = reveal.CardId,
+                    Reason = reveal.Reason,
+                });
+            }
+
             // —— 企业扩展 ——
             EnterpriseState enterprises = state.Enterprises;
             if (enterprises != null)
@@ -159,8 +220,7 @@ namespace NomadCity.Core.Net
                 snapshot.EnterpriseBoards.AddRange(enterprises.ActiveBoards);
                 snapshot.EnterpriseChosen.AddRange(enterprises.ChosenBoards);
                 snapshot.EnterpriseSecondChosen.AddRange(enterprises.SecondChosenBoards);
-                snapshot.EnterpriseDepartments.AddRange(enterprises.Departments);
-
+                snapshot.EnterpriseRhineDepartment = enterprises.RhineDepartment;
                 int playerCount = state.Players.Count;
                 int offersPerSeat = enterprises.OffersPerSeat < 1 ? 2 : enterprises.OffersPerSeat;
                 snapshot.EnterprisePicksPerPlayer = enterprises.PicksPerPlayer;
@@ -189,12 +249,68 @@ namespace NomadCity.Core.Net
                 }
             }
 
+            foreach (PersistentTacticState tactic in state.PersistentTactics)
+            {
+                var entry = new PersistentTacticSnapshot
+                {
+                    CardId = tactic.CardId,
+                    Seat = tactic.Seat,
+                    Kind = (int)tactic.Kind,
+                    Markers = tactic.Markers,
+                    UsedCleanupThisTurn = tactic.UsedCleanupThisTurn,
+                };
+                entry.AttachedFacilityIds.AddRange(tactic.AttachedFacilityIds);
+                snapshot.PersistentTactics.Add(entry);
+            }
+
+            foreach (DeferredEffect deferred in state.DeferredEffects)
+            {
+                var entry = new DeferredEffectSnapshot { Seat = deferred.Seat };
+                entry.Ops.AddRange(CaptureOps(deferred.Ops));
+                snapshot.DeferredEffects.Add(entry);
+            }
+
+            return snapshot;
+        }
+
+        /// <summary>把效果序列递归镜像成纯数据（供线格式序列化 / 还原）。</summary>
+        private static IEnumerable<RewardOpSnapshot> CaptureOps(IReadOnlyList<RewardOp> ops)
+        {
+            if (ops == null) yield break;
+            foreach (RewardOp op in ops) yield return CaptureOp(op);
+        }
+
+        private static RewardOpSnapshot CaptureOp(RewardOp op)
+        {
+            var snapshot = new RewardOpSnapshot
+            {
+                Kind = (int)op.Kind,
+                Resource = (int)op.Resource,
+                Amount = op.Amount,
+                Scope = (int)op.Scope,
+                Count = (int)op.Count,
+            };
+
+            if (op.SpreadOptions != null)
+                foreach (ResourceType type in op.SpreadOptions) snapshot.SpreadOptions.Add((int)type);
+
+            if (op.Branches != null)
+            {
+                foreach (EffectBranch branch in op.Branches)
+                {
+                    var branchSnapshot = new EffectBranchSnapshot { Label = branch.Label ?? string.Empty };
+                    branchSnapshot.Ops.AddRange(CaptureOps(branch.Ops));
+                    snapshot.Branches.Add(branchSnapshot);
+                }
+            }
+
+            if (op.Ops != null) snapshot.Ops.AddRange(CaptureOps(op.Ops));
             return snapshot;
         }
 
         /// <summary>
         /// 还原成一份全新的 <see cref="GameState"/>。catalog 由调用方提供（静态查表数据，不随对局变化）。
-        /// 延迟结算队列按设计恒为空（<see cref="Capture"/> 已保证）。
+        /// 延迟结算队列会连同其中递归的效果序列一并还原。
         /// </summary>
         public GameState Restore(ICardCatalog catalog)
         {
@@ -236,6 +352,11 @@ namespace NomadCity.Core.Net
             state.CityPatternCards.AddRange(CityPatternCards);
             foreach (PatternSnapshot pattern in CityPatternStates) state.CityPatternStates.Add(pattern.Restore());
 
+            foreach (PublicRevealSnapshot reveal in PublicReveals)
+            {
+                state.PublicReveals.Add(new PublicReveal(reveal.Seat, reveal.CardId, reveal.Reason));
+            }
+
             // —— 企业扩展 ——
             EnterpriseState enterprises = state.Enterprises;
             enterprises.Reset(Players.Count, EnterprisePicksPerPlayer < 1 ? 1 : EnterprisePicksPerPlayer);
@@ -254,6 +375,7 @@ namespace NomadCity.Core.Net
                 enterprises.OperatorDeck.AddRange(EnterpriseOperatorDeck);
             }
             enterprises.ActiveBoards.AddRange(EnterpriseBoards);
+            enterprises.RhineDepartment = EnterpriseRhineDepartment;
 
             int offersPerSeat = EnterpriseOffersPerSeat < 1 ? 2 : EnterpriseOffersPerSeat;
             for (int seat = 0; seat < enterprises.ChosenBoards.Count; seat++)
@@ -261,7 +383,6 @@ namespace NomadCity.Core.Net
                 if (seat < EnterpriseChosen.Count) enterprises.ChosenBoards[seat] = EnterpriseChosen[seat];
                 if (seat < EnterpriseSecondChosen.Count)
                     enterprises.SecondChosenBoards[seat] = EnterpriseSecondChosen[seat];
-                if (seat < EnterpriseDepartments.Count) enterprises.Departments[seat] = EnterpriseDepartments[seat];
 
                 enterprises.Offers[seat].Clear();
                 for (int slot = 0; slot < offersPerSeat; slot++)
@@ -284,7 +405,56 @@ namespace NomadCity.Core.Net
                 }
             }
 
+            foreach (PersistentTacticSnapshot entry in PersistentTactics)
+            {
+                var tactic = new PersistentTacticState
+                {
+                    CardId = entry.CardId,
+                    Seat = entry.Seat,
+                    Kind = (PersistentTacticKind)entry.Kind,
+                    Markers = entry.Markers,
+                    UsedCleanupThisTurn = entry.UsedCleanupThisTurn,
+                };
+                tactic.AttachedFacilityIds.AddRange(entry.AttachedFacilityIds);
+                state.PersistentTactics.Add(tactic);
+            }
+
+            foreach (DeferredEffectSnapshot entry in DeferredEffects)
+                state.DeferredEffects.Add(new DeferredEffect(entry.Seat, RestoreOps(entry.Ops)));
+
             return state;
+        }
+
+        /// <summary>把快照里的纯数据镜像递归还原成效果序列。</summary>
+        private static List<RewardOp> RestoreOps(IReadOnlyList<RewardOpSnapshot> snapshots)
+        {
+            var ops = new List<RewardOp>(snapshots.Count);
+            foreach (RewardOpSnapshot snapshot in snapshots) ops.Add(RestoreOp(snapshot));
+            return ops;
+        }
+
+        private static RewardOp RestoreOp(RewardOpSnapshot snapshot)
+        {
+            List<EffectBranch> branches = null;
+            if (snapshot.Branches.Count > 0)
+            {
+                branches = new List<EffectBranch>(snapshot.Branches.Count);
+                foreach (EffectBranchSnapshot branch in snapshot.Branches)
+                    branches.Add(new EffectBranch(branch.Label, RestoreOps(branch.Ops)));
+            }
+
+            List<RewardOp> ops = snapshot.Ops.Count > 0 ? RestoreOps(snapshot.Ops) : null;
+
+            List<ResourceType> spread = null;
+            if (snapshot.SpreadOptions.Count > 0)
+            {
+                spread = new List<ResourceType>(snapshot.SpreadOptions.Count);
+                foreach (int type in snapshot.SpreadOptions) spread.Add((ResourceType)type);
+            }
+
+            return RewardOp.Restore((RewardKind)snapshot.Kind, (ResourceType)snapshot.Resource,
+                snapshot.Amount, (InfluencePlacementScope)snapshot.Scope, branches,
+                (CountSource)snapshot.Count, ops, spread);
         }
 
         /// <summary>一名玩家的快照。</summary>
@@ -301,6 +471,9 @@ namespace NomadCity.Core.Net
             public readonly List<int> DiscardCharacterCards = new();
             public int PlacedCharacterCard = -1;
 
+            /// <summary>红色 · 一次性：这张牌用完后放回游戏盒。</summary>
+            public bool PlacedCardReturnsToBox;
+
             public bool UsedCharacterCardThisTurn;
             public bool UsedCharacterStrategyThisTurn;
             public bool UsedCharacterTacticsThisTurn;
@@ -313,7 +486,14 @@ namespace NomadCity.Core.Net
             public int MobileCityNodeId = -1;
             public readonly List<int> UsedPatternActionsThisTurn = new();
             public int ExtraMainActionsThisTurn;
+
+            /// <summary>额外主要行动（不能是特殊行动）的剩余次数。</summary>
+            public int ExtraMainActionsExcludingSpecialThisTurn;
+
+            /// <summary>本回合是否可同时发动策略与计谋。</summary>
+            public bool BothCharacterEffectsThisTurn;
             public int CharacterCardBanRound;
+            public bool FreeMoveRelocatesInfluenceThisTurn;
 
             /// <summary>开局入场「7 选 5」是否已完成（企业扩展）。</summary>
             public bool SetupDiscardDone = true;
@@ -332,6 +512,7 @@ namespace NomadCity.Core.Net
                     Score = player.Score,
                     MarkersInSupply = player.MarkersInSupply,
                     PlacedCharacterCard = player.PlacedCharacterCard,
+                    PlacedCardReturnsToBox = player.PlacedCardReturnsToBox,
                     UsedCharacterCardThisTurn = player.UsedCharacterCardThisTurn,
                     UsedCharacterStrategyThisTurn = player.UsedCharacterStrategyThisTurn,
                     UsedCharacterTacticsThisTurn = player.UsedCharacterTacticsThisTurn,
@@ -340,7 +521,10 @@ namespace NomadCity.Core.Net
                     CityPanelUsed = (bool[])player.CityPanelUsed.Clone(),
                     MobileCityNodeId = player.MobileCityNodeId,
                     ExtraMainActionsThisTurn = player.ExtraMainActionsThisTurn,
+                    ExtraMainActionsExcludingSpecialThisTurn = player.ExtraMainActionsExcludingSpecialThisTurn,
+                    BothCharacterEffectsThisTurn = player.BothCharacterEffectsThisTurn,
                     CharacterCardBanRound = player.CharacterCardBanRound,
+                    FreeMoveRelocatesInfluenceThisTurn = player.FreeMoveRelocatesInfluenceThisTurn,
                     SetupDiscardDone = player.SetupDiscardDone,
                 };
 
@@ -367,13 +551,17 @@ namespace NomadCity.Core.Net
                     Score = Score,
                     MarkersInSupply = MarkersInSupply,
                     PlacedCharacterCard = PlacedCharacterCard,
+                    PlacedCardReturnsToBox = PlacedCardReturnsToBox,
                     UsedCharacterCardThisTurn = UsedCharacterCardThisTurn,
                     UsedCharacterStrategyThisTurn = UsedCharacterStrategyThisTurn,
                     UsedCharacterTacticsThisTurn = UsedCharacterTacticsThisTurn,
                     CharacterSecondEffectPending = CharacterSecondEffectPending,
                     MobileCityNodeId = MobileCityNodeId,
                     ExtraMainActionsThisTurn = ExtraMainActionsThisTurn,
+                    ExtraMainActionsExcludingSpecialThisTurn = ExtraMainActionsExcludingSpecialThisTurn,
+                    BothCharacterEffectsThisTurn = BothCharacterEffectsThisTurn,
                     CharacterCardBanRound = CharacterCardBanRound,
+                    FreeMoveRelocatesInfluenceThisTurn = FreeMoveRelocatesInfluenceThisTurn,
                     SetupDiscardDone = SetupDiscardDone,
                 };
 

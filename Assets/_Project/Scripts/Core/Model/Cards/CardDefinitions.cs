@@ -51,9 +51,20 @@ namespace NomadCity.Core.Model
         /// <summary>计谋效果序列；空表示未录入。</summary>
         public readonly IReadOnlyList<RewardOp> TacticsOps;
 
+        /// <summary>策略是「红色 · 一次性」：使用后此牌进弃牌区时改为放回游戏盒（本局不再可用）。</summary>
+        public readonly bool StrategyReturnsToBox;
+
+        /// <summary>计谋是「红色 · 一次性」：使用后此牌进弃牌区时改为放回游戏盒（本局不再可用）。</summary>
+        public readonly bool TacticsReturnsToBox;
+
+        /// <summary>计谋是否「持续留在场上（∞）」；非 None 时使用后不进弃牌区。</summary>
+        public readonly PersistentTacticKind PersistentTactic;
+
         public CharacterCardDef(int id, PlayerColor color, string name,
             string strategyName = null, string tacticsName = null,
-            IReadOnlyList<RewardOp> strategyOps = null, IReadOnlyList<RewardOp> tacticsOps = null)
+            IReadOnlyList<RewardOp> strategyOps = null, IReadOnlyList<RewardOp> tacticsOps = null,
+            bool strategyReturnsToBox = false, bool tacticsReturnsToBox = false,
+            PersistentTacticKind persistentTactic = PersistentTacticKind.None)
         {
             Id = id;
             Color = color;
@@ -62,7 +73,14 @@ namespace NomadCity.Core.Model
             TacticsName = tacticsName ?? string.Empty;
             StrategyOps = strategyOps ?? Array.Empty<RewardOp>();
             TacticsOps = tacticsOps ?? Array.Empty<RewardOp>();
+            StrategyReturnsToBox = strategyReturnsToBox;
+            TacticsReturnsToBox = tacticsReturnsToBox;
+            PersistentTactic = persistentTactic;
         }
+
+        /// <summary>某种效果是否为「红色 · 一次性」（用后放回游戏盒）。</summary>
+        public bool ReturnsToBox(CharacterEffectKind kind) =>
+            kind == CharacterEffectKind.Tactics ? TacticsReturnsToBox : StrategyReturnsToBox;
 
         /// <summary>取某一效果（策略 / 计谋）的效果序列。</summary>
         public IReadOnlyList<RewardOp> OpsOf(CharacterEffectKind kind) =>
@@ -434,6 +452,109 @@ namespace NomadCity.Core.Model
         /// 受影响的玩家各得 1 金券，发动者额外再得 1 金券。
         /// </summary>
         PlaceHighway = 40,
+
+        /// <summary>
+        /// 企业扩展（银灰·策略「商业手腕」）：先选 1 种基础资源（候选见 <see cref="RewardOp.SpreadOptions"/>），
+        /// 再选 1 位玩家（可以是自己），该玩家按 <c>Amount</c> 金券 / 个把这种资源全部卖光。
+        /// 「你获得 1 分」用单独的 <see cref="GainScore"/> 表达。
+        /// </summary>
+        OperatorSellToPlayer = 41,
+
+        /// <summary>
+        /// 企业扩展（银灰·计谋「制衡战略」）：所有玩家（包括发动者）各移除 1 个自己的影响力。
+        /// </summary>
+        OperatorBalanceInfluence = 42,
+
+        /// <summary>
+        /// 企业扩展（泥岩·策略「源岩D.I.Y」）：支付 <c>Amount</c> 个 <see cref="RewardOp.Resource"/>，
+        /// 然后进行 1 次建造；付不起时整条效果不执行，也不会白送建造。
+        /// </summary>
+        OperatorPayResourceBuild = 43,
+
+        /// <summary>
+        /// 企业扩展（森蚺·策略「我寻思能行」）：本回合免费的移动城市本应移除对手影响力时，
+        /// 改为由发动者移动这些影响力（被动修正，作用到本回合收尾为止）。
+        /// </summary>
+        OperatorRelocateInsteadOfRemove = 44,
+
+        /// <summary>
+        /// 企业扩展（森蚺·计谋「暴躁铁皮」）：从设施供应区选至多 <c>Amount</c> 张名称不同的设施牌
+        /// 放回游戏盒，每张之后立刻补牌。「获得 3 异铁」用单独的 <see cref="GainResource"/> 表达。
+        /// </summary>
+        OperatorSupplyToBox = 45,
+
+        /// <summary>
+        /// 企业扩展（凯尔希·计谋「掌控全局」）：选 1 家企业板，依次触发其每项已解锁、
+        /// 本回合尚未用过的企业特效。
+        /// </summary>
+        TriggerAllEnterpriseEffects = 46,
+
+        /// <summary>
+        /// 企业扩展（W·计谋「致命攻势」）：选 2 名不同对手，各用发动者 1 个影响力替换其 1 个影响力。
+        /// 4 金券的费用用单独的 <see cref="RewardKind.PayVouchers"/> 表达。
+        /// </summary>
+        OperatorReplaceTwoOpponents = 47,
+
+        /// <summary>
+        /// 企业扩展（异客·策略「沁礁黑市」）：先选 1 种基础资源（候选见 <see cref="RewardOp.SpreadOptions"/>），
+        /// 再选 1 位对手，从该对手处取得至多 <c>Amount</c> 个该资源；发动者与该对手各得 1 分。
+        /// </summary>
+        OperatorTakeOpponentResources = 48,
+
+        /// <summary>
+        /// 企业扩展（雷姆必拓 2 级）：与 <see cref="ReplaceInfluence"/> 相同，但候选只限
+        /// **资源点（带资源指示物的节点）上**的影响力，不含航道。
+        /// </summary>
+        ReplaceResourceNodeInfluence = 49,
+
+        /// <summary>
+        /// 企业扩展城市样式（城建开拓区ᴱ）：从设施牌堆选 1 张设施建设，然后必须洗混设施牌堆。
+        /// 结算同雷神工业 5 级（<c>EnterpriseEffectResolver.BuildFromDeckAndShuffle</c>）。
+        /// </summary>
+        BuildFromFacilityDeckAndShuffle = 50,
+
+        /// <summary>
+        /// 企业扩展城市样式（拓荒者据点ᴱ）：在自己移动城市所在的资源点放置 <c>Amount</c> 个影响力。
+        /// 落点只限该资源点上的空格，按 §6.4a 的放置条件校验。
+        /// </summary>
+        PlaceInfluenceAtCityNode = 51,
+
+        /// <summary>
+        /// 企业扩展城市样式（拓荒者据点ᴱ）：移动 X 个自己的影响力，X = 当前特殊行动样式牌上自己的标记数
+        /// （<c>Amount</c> &gt; 0 时再以它为上限）。走与 <see cref="RelocateInfluence"/> 相同的移动流程。
+        /// </summary>
+        RelocateInfluencePerPatternMarkers = 52,
+
+        /// <summary>
+        /// 企业扩展城市样式（核心商业区ᴱ / 拓荒指挥中枢ᴱ）：本回合追加 <c>Amount</c> 次主要行动，
+        /// 但这些额外行动**不能是**城市样式特殊行动。
+        /// </summary>
+        ExtraMainActionsExcludingSpecialAction = 53,
+
+        /// <summary>
+        /// 企业扩展城市样式（大型企业园ᴱ）：选择 1 家企业，触发该企业 <c>Amount</c> 次企业特效。
+        /// </summary>
+        TriggerEnterpriseEffectTwice = 54,
+
+        /// <summary>
+        /// 企业扩展城市样式（警备队辖区ᴱ）：从 <see cref="RewardOp.Branches"/> 的 3 个选项里选 2 个并依次执行。
+        /// 每个选项的可行性（费用 / 影响力）由企业扩展执行器单独判定。
+        /// </summary>
+        ChooseTwoOfThreeOptions = 55,
+
+        /// <summary>
+        /// 企业扩展城市样式（拓荒指挥中枢ᴱ）：本回合使用角色牌时，可以同时发动策略与计谋
+        /// （临时视为起始玩家的连用权限）。
+        /// </summary>
+        AllowBothCharacterEffectsThisRound = 56,
+
+        /// <summary>工程订购：打出时从设施供应区选至多 <c>Amount</c> 张异名设施牌压在这张持续计谋牌下。</summary>
+        AttachSupplyFacilitiesUnderPersistentTactic = 57,
+
+        /// <summary>
+        /// 为了大家 / 隐蔽仓库：打出时在此牌上放置至多 <c>Amount</c> 个玩家标记（从自己的标记供应堆取）。
+        /// </summary>
+        PlaceMarkersOnPersistentTactic = 58,
     }
 
     /// <summary>
@@ -514,6 +635,16 @@ namespace NomadCity.Core.Model
             SpreadOptions = spreadOptions;
         }
 
+        /// <summary>
+        /// 快照还原用：按字段原样重建。仅供 <c>GameStateSnapshot.Restore</c> 使用，
+        /// 不参与卡面定义（卡面请用下面的具名工厂）。
+        /// </summary>
+        public static RewardOp Restore(RewardKind kind, ResourceType resource, int amount,
+            InfluencePlacementScope scope, IReadOnlyList<EffectBranch> branches = null,
+            CountSource count = default, IReadOnlyList<RewardOp> ops = null,
+            IReadOnlyList<ResourceType> spreadOptions = null) =>
+            new(kind, resource, amount, scope, branches, count, ops, spreadOptions);
+
         public static RewardOp Gain(ResourceType type, int amount) => new(RewardKind.GainResource, type, amount, default);
         public static RewardOp Pay(ResourceType type, int amount) => new(RewardKind.PayResource, type, amount, default);
         public static RewardOp Vouchers(int amount) => new(RewardKind.GainVouchers, default, amount, default);
@@ -536,6 +667,10 @@ namespace NomadCity.Core.Model
 
         /// <summary>替换 1 个影响力（移除一个后在同一空格放置一个自己的）。</summary>
         public static RewardOp ReplaceInfluence(int amount = 1) => new(RewardKind.ReplaceInfluence, default, amount, default);
+
+        /// <summary>只替换资源点（带资源指示物的节点）上的影响力（雷姆必拓 2 级）。</summary>
+        public static RewardOp ReplaceResourceNodeInfluence(int amount = 1) =>
+            new(RewardKind.ReplaceResourceNodeInfluence, default, amount, default);
 
         /// <summary>每数到一个 <paramref name="source"/> 就获得 <paramref name="perUnit"/> 金券。</summary>
         public static RewardOp VouchersPerCount(CountSource source, int perUnit) =>
@@ -638,6 +773,76 @@ namespace NomadCity.Core.Model
         public static RewardOp PlaceHighway() =>
             new(RewardKind.PlaceHighway, default, 1, default);
 
+        /// <summary>银灰·策略「商业手腕」：选 1 种资源 + 1 位玩家，该玩家按 4 金券 / 个卖光该资源。</summary>
+        public static RewardOp OperatorSellToPlayer(int price = 4) =>
+            new(RewardKind.OperatorSellToPlayer, default, price, default, null, default, null,
+                new[] { ResourceType.Orirock, ResourceType.Originium, ResourceType.Oriron });
+
+        /// <summary>银灰·计谋「制衡战略」：所有玩家（含自己）各移除 1 个自己的影响力。</summary>
+        public static RewardOp OperatorBalanceInfluence() =>
+            new(RewardKind.OperatorBalanceInfluence, default, 1, default);
+
+        /// <summary>泥岩·策略「源岩D.I.Y」：支付 1 源岩，然后进行 1 次建造。</summary>
+        public static RewardOp OperatorPayAndBuild(ResourceType type = ResourceType.Orirock, int amount = 1) =>
+            new(RewardKind.OperatorPayResourceBuild, type, amount, default);
+
+        /// <summary>森蚺·策略「我寻思能行」：本回合免费移动城市改为移动对手影响力（被动修正）。</summary>
+        public static RewardOp OperatorRelocateInsteadOfRemove() =>
+            new(RewardKind.OperatorRelocateInsteadOfRemove, default, 1, default);
+
+        /// <summary>森蚺·计谋「暴躁铁皮」：从设施供应区选至多 2 张名称不同的设施牌放回游戏盒。</summary>
+        public static RewardOp OperatorSupplyToBox(int max = 2) =>
+            new(RewardKind.OperatorSupplyToBox, default, max, default);
+
+        /// <summary>凯尔希·计谋「掌控全局」：选 1 家企业，触发其每项已解锁的特效。</summary>
+        public static RewardOp TriggerAllEnterpriseEffects() =>
+            new(RewardKind.TriggerAllEnterpriseEffects, default, 1, default);
+
+        /// <summary>W·计谋「致命攻势」：选 2 名不同对手，各用你的 1 个影响力替换其 1 个。</summary>
+        public static RewardOp OperatorReplaceTwoOpponents() =>
+            new(RewardKind.OperatorReplaceTwoOpponents, default, 2, default);
+
+        /// <summary>异客·策略「沁礁黑市」：选 1 种资源 + 1 位对手，取其至多 4 个；双方各得 1 分。</summary>
+        public static RewardOp OperatorTakeOpponentResources(int max = 4) =>
+            new(RewardKind.OperatorTakeOpponentResources, default, max, default, null, default, null,
+                new[] { ResourceType.Orirock, ResourceType.Originium, ResourceType.Oriron });
+
+        /// <summary>城建开拓区ᴱ：从设施牌堆选 1 张设施建设，随后洗混设施牌堆。</summary>
+        public static RewardOp BuildFromFacilityDeck() =>
+            new(RewardKind.BuildFromFacilityDeckAndShuffle, default, 1, default);
+
+        /// <summary>拓荒者据点ᴱ：在移动城市所在资源点放置 <paramref name="amount"/> 个影响力。</summary>
+        public static RewardOp InfluenceAtCityNode(int amount = 2) =>
+            new(RewardKind.PlaceInfluenceAtCityNode, default, amount, default);
+
+        /// <summary>拓荒者据点ᴱ：移动 X 个自己的影响力，X = 样式牌上自己的标记数（<paramref name="cap"/> 封顶）。</summary>
+        public static RewardOp RelocateInfluencePerPatternMarkers(int cap = 0) =>
+            new(RewardKind.RelocateInfluencePerPatternMarkers, default, cap, default);
+
+        /// <summary>额外主要行动，但不能用来使用城市样式特殊行动。</summary>
+        public static RewardOp ExtraMainActionExcludingSpecial(int amount = 1) =>
+            new(RewardKind.ExtraMainActionsExcludingSpecialAction, default, amount, default);
+
+        /// <summary>大型企业园ᴱ：选 1 家企业，触发其 <paramref name="count"/> 次企业特效。</summary>
+        public static RewardOp TriggerEnterpriseEffectTwice(int count = 2) =>
+            new(RewardKind.TriggerEnterpriseEffectTwice, default, count, default);
+
+        /// <summary>警备队辖区ᴱ：从这些选项里选 2 个并依次执行。</summary>
+        public static RewardOp ChooseTwoOfThree(params EffectBranch[] branches) =>
+            new(RewardKind.ChooseTwoOfThreeOptions, default, 2, default, branches);
+
+        /// <summary>拓荒指挥中枢ᴱ：本回合使用角色牌时可以同时发动策略与计谋。</summary>
+        public static RewardOp BothCharacterEffectsThisRound() =>
+            new(RewardKind.AllowBothCharacterEffectsThisRound, default, 1, default);
+
+        /// <summary>工程订购：从设施供应区选至多 <paramref name="amount"/> 张异名设施牌压在这张持续计谋牌下。</summary>
+        public static RewardOp AttachSupplyFacilities(int amount = 2) =>
+            new(RewardKind.AttachSupplyFacilitiesUnderPersistentTactic, default, amount, default);
+
+        /// <summary>为了大家 / 隐蔽仓库：打出时在此牌上放置至多 <paramref name="amount"/> 个玩家标记。</summary>
+        public static RewardOp PlaceMarkersOnPersistentTactic(int amount) =>
+            new(RewardKind.PlaceMarkersOnPersistentTactic, default, amount, default);
+
         public override string ToString() => Kind switch
         {
             RewardKind.GainResource => $"获得 {Resource}×{Amount}",
@@ -689,6 +894,25 @@ namespace NomadCity.Core.Model
             RewardKind.TriggerEnterpriseEffectOnce => "选 1 家企业，触发 1 个已解锁特效",
             RewardKind.AdvanceAndTriggerEnterprise => "选 1 家企业，提升 1 级并触发 1 个已解锁特效",
             RewardKind.PlaceHighway => "选 1 条航道，移除其上影响力并放置公路",
+            RewardKind.OperatorSellToPlayer => $"选 1 种资源 + 1 位玩家，按其以 {Amount} 金券 / 个卖光",
+            RewardKind.OperatorBalanceInfluence => "所有玩家（含自己）各移除 1 个影响力",
+            RewardKind.OperatorPayResourceBuild => $"支付 {Resource}×{Amount}，然后建造 1 次",
+            RewardKind.OperatorRelocateInsteadOfRemove => "本回合免费移动城市改为移动对手影响力",
+            RewardKind.OperatorSupplyToBox => $"从设施供应区选至多 {Amount} 张名称不同的牌放回游戏盒",
+            RewardKind.TriggerAllEnterpriseEffects => "选 1 家企业，触发其每项已解锁特效",
+            RewardKind.OperatorReplaceTwoOpponents => "选 2 名不同对手，各替换 1 个影响力",
+            RewardKind.OperatorTakeOpponentResources => $"选 1 种资源 + 1 位对手，取其至多 {Amount} 个，双方各得 1 分",
+            RewardKind.BuildFromFacilityDeckAndShuffle => "从设施牌堆选 1 张建设，然后洗混设施牌堆",
+            RewardKind.PlaceInfluenceAtCityNode => $"在移动城市所在资源点放置影响力×{Amount}",
+            RewardKind.RelocateInfluencePerPatternMarkers => "移动 X 个自己的影响力（X = 样式牌上自己的标记数）",
+            RewardKind.ExtraMainActionsExcludingSpecialAction => $"本回合额外主要行动×{Amount}（不能是特殊行动）",
+            RewardKind.TriggerEnterpriseEffectTwice => $"选 1 家企业，触发 {Amount} 次企业特效",
+            RewardKind.ChooseTwoOfThreeOptions => Branches == null || Branches.Count == 0
+                ? "三选二（无分支）"
+                : $"三选二并依次执行（{string.Join(" ／ ", Branches)}）",
+            RewardKind.AllowBothCharacterEffectsThisRound => "本回合使用角色牌时可同时发动策略与计谋",
+            RewardKind.AttachSupplyFacilitiesUnderPersistentTactic => $"从设施供应区选至多 {Amount} 张异名设施压在持续计谋牌下",
+            RewardKind.PlaceMarkersOnPersistentTactic => $"在持续计谋牌上放置至多 {Amount} 个玩家标记",
             _ => Kind.ToString(),
         };
     }

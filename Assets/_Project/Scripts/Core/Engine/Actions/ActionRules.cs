@@ -15,9 +15,6 @@ namespace NomadCity.Core.Engine
         {
             if (state == null) return CommandResult.Fail("引擎没有游戏状态。");
 
-            // 开发者模式：放开「轮到谁 / 是不是行动阶段」这两道闸门，任何座位在任何阶段都能行动。
-            if (state.DeveloperMode) return CommandResult.Success;
-
             if (state.IsGameOver) return CommandResult.Fail("本局已经结束。");
             if (state.Phase != TurnPhase.PlayerActions) return CommandResult.Fail("当前不是玩家行动阶段。");
             if (seat < 0 || seat >= state.Players.Count) return CommandResult.Fail($"座位号 {seat} 无效。");
@@ -33,11 +30,11 @@ namespace NomadCity.Core.Engine
 
             // §10.1.2：起始玩家连续使用策略与计谋时，两种效果之间不能插入其他主要 / 快速行动。
             // 角色牌自己的命令绕开这道闸门（见 UseCharacterCardCommand / EndCharacterCardUseCommand）。
-            if (!state.DeveloperMode && state.Player(seat).CharacterSecondEffectPending)
+            if (state.Player(seat).CharacterSecondEffectPending)
                 return CommandResult.Fail("使用两种角色牌效果之间不能插入其他行动（§10.1.2）：请先使用另一种效果或结束角色牌使用。");
 
             // 企业扩展：开局入场「7 选 5」没做完之前不能开始行动（EnterpriseExpansion.md §4.2）。
-            if (!state.DeveloperMode && !state.Player(seat).SetupDiscardDone)
+            if (!state.Player(seat).SetupDiscardDone)
                 return CommandResult.Fail("请先把开局手牌里的 2 张放回游戏盒（企业扩展开局入场）。");
 
             return CommandResult.Success;
@@ -54,10 +51,10 @@ namespace NomadCity.Core.Engine
         /// 宣告城市样式这类快速行动也用它，塞进去会把「主要行动后仍可任意次快速行动」一起堵死。
         /// 「额外主要行动」余额（§6.3f）例外。
         /// </summary>
-        public static CommandResult ValidateMainActionAvailable(GameState state, int seat, bool isContinuation = false)
+        public static CommandResult ValidateMainActionAvailable(GameState state, int seat, bool isContinuation = false,
+            bool specialAction = false)
         {
             if (state == null) return CommandResult.Fail("引擎没有游戏状态。");
-            if (state.DeveloperMode) return CommandResult.Success;
             if (seat < 0 || seat >= state.Players.Count) return CommandResult.Success; // 座位问题交给 ValidateActiveSeat
 
             if (isContinuation) return CommandResult.Success;
@@ -72,7 +69,13 @@ namespace NomadCity.Core.Engine
             }
 
             if (!state.MainActionTakenThisRound) return CommandResult.Success;
-            if (state.Player(seat).ExtraMainActionsThisTurn > 0) return CommandResult.Success;
+
+            PlayerState player = state.Player(seat);
+            if (player.ExtraMainActionsThisTurn > 0) return CommandResult.Success;
+
+            // 企业扩展：额外的「特殊行动以外」主要行动不能拿来再用特殊行动。
+            if (!specialAction && player.ExtraMainActionsExcludingSpecialThisTurn > 0)
+                return CommandResult.Success;
 
             return CommandResult.Fail("本轮已经执行过主要行动：可以先做任意次快速行动，或点「结束回合」交给下一位（§6.1）。");
         }
@@ -85,7 +88,6 @@ namespace NomadCity.Core.Engine
         public static CommandResult ValidateCharacterCardAllowed(GameState state, int seat)
         {
             if (state == null) return CommandResult.Fail("引擎没有游戏状态。");
-            if (state.DeveloperMode) return CommandResult.Success;
 
             if (seat >= 0 && seat < state.Players.Count &&
                 state.Player(seat).CharacterCardBanRound == state.ActionRound)
@@ -94,16 +96,9 @@ namespace NomadCity.Core.Engine
             return CommandResult.Success;
         }
 
-        /// <summary>
-        /// 开发者模式（仅调试）：跳过所有费用校验与扣除（建设 / 城市移动 / 探索路费 / 采集路费 / 效果里的付费），
-        /// 让各行动与效果可以「不消耗资源」地反复测试。正式游戏请务必关闭。
-        /// </summary>
-        public static bool IgnoresCosts(GameState state) => state != null && state.DeveloperMode;
-
         /// <summary>资源点是否已开放探索：非红色区域恒开放；红色区域要等人数变体规定的回合（§10.3）。</summary>
         public static bool IsNodeOpen(GameState state, MapNodeState node)
         {
-            if (state.DeveloperMode) return true; // 开发者模式：红区也随时可探索
             if (!node.IsRedZone) return true;
             return state.TurnNumber >= PlayerCountVariant.For(state.Players.Count).RedZoneOpenTurn;
         }

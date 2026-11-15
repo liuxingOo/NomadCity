@@ -37,7 +37,8 @@ namespace NomadCity.Tests
             foreach (PlayerColor color in Enum.GetValues(typeof(PlayerColor)))
             {
                 IReadOnlyList<int> ids = catalog.CharacterCardIds(color);
-                Assert.AreEqual(CardCounts.CharacterRoles, ids.Count);
+                // 目录始终返回「基础 5 + 企业扩展 2」共 7 张；是否真的发 7 张由 BoardSetup 按扩展开关裁剪。
+                Assert.AreEqual(CardCounts.CharacterRoles + CardCounts.CharacterExtensionRoles, ids.Count);
                 AssertUnique(ids);
                 foreach (int id in ids)
                 {
@@ -191,7 +192,8 @@ namespace NomadCity.Tests
         {
             GameState state = NewGame(4).State;
 
-            foreach (PlayerState player in state.Players) Assert.AreEqual(30, player.MarkersInSupply);
+            // 开局会把 1 个标记永久放到计分轨的「0」处，因此手里剩 29 个（§4.2 步 3）。
+            foreach (PlayerState player in state.Players) Assert.AreEqual(29, player.MarkersInSupply);
         }
 
         [Test]
@@ -460,7 +462,7 @@ namespace NomadCity.Tests
 
             Assert.IsTrue(result.Ok, result.Error);
             Assert.AreEqual(vouchersBefore - 4, player.Vouchers, "条件段应扣掉 4 张金券。");
-            Assert.AreEqual(29, player.MarkersInSupply, "结果段应放置 1 个影响力标记。");
+            Assert.AreEqual(28, player.MarkersInSupply, "结果段应放置 1 个影响力标记（开局 29 个）。");
             Assert.AreEqual(0, engine.State.Map.Node(1).Slots.OwnerOf(0), "第一个合法空格归座位 0。");
             Assert.IsFalse(command.Report.Declined);
             Assert.IsTrue(engine.State.Map.Node(1).EventResolved);
@@ -478,7 +480,7 @@ namespace NomadCity.Tests
 
             Assert.IsTrue(result.Ok, result.Error);
             Assert.AreEqual(3, player.Vouchers, "条件段付不起就不该扣钱。");
-            Assert.AreEqual(30, player.MarkersInSupply, "结果段不应执行。");
+            Assert.AreEqual(29, player.MarkersInSupply, "结果段不应执行（开局 29 个）。");
             Assert.IsTrue(command.Report.Declined);
             Assert.IsTrue(engine.State.Map.Node(1).EventResolved, "条件段不可行也视为已结算，避免反复重试。");
         }
@@ -495,7 +497,7 @@ namespace NomadCity.Tests
 
             Assert.IsTrue(result.Ok, result.Error);
             Assert.AreEqual(vouchersBefore, player.Vouchers, "放弃条件段不应扣钱。");
-            Assert.AreEqual(30, player.MarkersInSupply, "放弃后结果段不应执行。");
+            Assert.AreEqual(29, player.MarkersInSupply, "放弃后结果段不应执行（开局 29 个）。");
             Assert.IsTrue(command.Report.Declined);
             Assert.IsTrue(engine.State.Map.Node(1).EventResolved);
         }
@@ -512,7 +514,7 @@ namespace NomadCity.Tests
             CommandResult result = engine.Dispatch(command);
 
             Assert.IsTrue(result.Ok, result.Error);
-            Assert.AreEqual(29, player.MarkersInSupply, "结果段应放置 1 个影响力标记。");
+            Assert.AreEqual(28, player.MarkersInSupply, "结果段应放置 1 个影响力标记（开局 29 个）。");
             Assert.AreEqual(0, engine.State.Map.Node(1).Slots.OwnerOf(1),
                 "应当放在玩家选中的那个空格（下标 1）。");
             Assert.AreEqual(-1, engine.State.Map.Node(1).Slots.OwnerOf(0),
@@ -591,7 +593,7 @@ namespace NomadCity.Tests
 
             Assert.IsTrue(engine.Dispatch(new ChooseStartNodeCommand(0, 1)).Ok, "起始玩家先选。");
             Assert.AreEqual(-1, state.Map.Node(1).Slots.OwnerOf(0), "起始玩家按规则书不放影响力。");
-            Assert.AreEqual(30, state.Player(0).MarkersInSupply);
+            Assert.AreEqual(29, state.Player(0).MarkersInSupply);
 
             int before = state.Player(1).MarkersInSupply;
             Assert.IsTrue(engine.Dispatch(new ChooseStartNodeCommand(1, 2)).Ok, "非起始玩家后选。");

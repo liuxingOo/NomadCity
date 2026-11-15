@@ -38,5 +38,20 @@ namespace NomadCity.Core.Net
         TriggerEnterpriseEffect = 25,
         DiscardSetupHandCards = 26,
         PickRhineDepartment = 27,
+
+        /// <summary>开发者模式：直接设置某块企业板的合作等级（不参与正式对局）。</summary>
+        DeveloperSetEnterpriseLevel = 28,
+
+        /// <summary>收尾阶段发动持续计谋（泥岩小队 / 为了大家）的「每收尾阶段一次」能力。</summary>
+        UsePersistentTacticCleanup = 29,
+
+        // —— 开发者模式面板（仅单机热座调试用） ——
+        DeveloperSetTurn = 30,
+        DeveloperSetPlayerStat = 31,
+        DeveloperBuildFacility = 32,
+        DeveloperRemoveFacility = 33,
+        DeveloperResetPanelUse = 34,
+        DeveloperDeclareCityPattern = 35,
+        DeveloperUseCharacterCard = 36,
     }
 }

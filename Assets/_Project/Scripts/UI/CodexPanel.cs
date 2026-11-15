@@ -907,11 +907,13 @@ namespace NomadCity.UI
 
         private static List<int> CharacterIds()
         {
-            // 28 张 = 4 色 × 7 名，同名角色四色效果相同、卡面也共用：图鉴每种只放一张。
+            // 7 名基础/扩展角色 = 5 色 × 5 名 + 2 名扩展，同名角色四色效果相同、卡面也共用：图鉴每种只放一张。
             var ids = new List<int>();
             for (int i = 0; i < CardCounts.CharacterRoles; i++) ids.Add(CardIds.CharacterBase + i);
             for (int i = 0; i < CardCounts.CharacterExtensionRoles; i++)
                 ids.Add(CardIds.CharacterExtensionBase + i);
+            // 罗德岛干员牌（700–707）：8 张各不相同，全部单独列出。
+            for (int i = 0; i < CardCounts.OperatorCards; i++) ids.Add(CardIds.OperatorCharacterBase + i);
             return ids;
         }
 
@@ -945,7 +947,11 @@ namespace NomadCity.UI
         {
             Sprite[] faces = characterPanel != null ? characterPanel.CardFaces : null;
             int index = CharacterHandPanel.SpriteIndexOf(cardId);
-            return faces != null && index >= 0 && index < faces.Length ? faces[index] : null;
+            if (faces != null && index >= 0 && index < faces.Length && faces[index] != null)
+                return faces[index];
+
+            // 干员牌不在场景切好的卡面数组里，按 rhodes_operators_exp.png 的格子运行时取图。
+            return OperatorCardArt.SpriteFor(cardId);
         }
 
         private Sprite EventSprite(int cardId)

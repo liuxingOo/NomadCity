@@ -13,7 +13,7 @@ namespace NomadCity.Core.Engine
     /// - 是当前行动玩家；这张牌在场上且已录入特殊行动；
     /// - 这张牌上自己有可用格的标记（<see cref="CityPatternState.HasUsableMarker"/>）；
     /// - 本回合还没用过这张牌的特殊行动；
-    /// - 费用付得起（开发者模式跳过，见 <see cref="ActionRules.IgnoresCosts"/>）。
+    /// - 费用付得起。
     ///
     /// 这是**主要行动**，占用本回合的主要行动名额（§6.3f），因此 ConsumesAction = true。
     /// 「源石工业中枢」的「额外 2 次主要行动」由 <c>RewardKind.ExtraMainActions</c> 写入玩家状态，
@@ -54,7 +54,7 @@ namespace NomadCity.Core.Engine
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
 
-            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat);
+            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat, false, true);
             if (!quota.Ok) return quota;
 
             // 先查「在不在场上」再取定义：目录对越界 id 会抛异常，不能直接拿来判空。
@@ -73,8 +73,7 @@ namespace NomadCity.Core.Engine
             if (!patternState.HasUsableMarker(ActorSeat))
                 return CommandResult.Fail($"《{CardName(card)}》上没有你可用的玩家标记，无法使用特殊行动（§10.2-4）。");
 
-            if (!ActionRules.IgnoresCosts(state) &&
-                !EffectResolver.CanPay(state, ActorSeat, card.SpecialActionCost, out string reason))
+            if (!EffectResolver.CanPay(state, ActorSeat, card.SpecialActionCost, out string reason))
                 return CommandResult.Fail($"支付《{CardName(card)}》特殊行动的费用失败：{reason}。");
 
             return CommandResult.Success;

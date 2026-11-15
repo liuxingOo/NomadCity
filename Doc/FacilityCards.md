@@ -170,7 +170,7 @@
   | L4 | `Effect` | 入场效果点选（`ChoicePopup` 或直接点地图） | 取消 → 回 L3 |
 
   - 付费按钮的可点状态由 `FacilityCardDef.CanPayWithResources(EffectiveResourceCost(...), ...)` 决定（含费用修正）；
-    开发者模式（`ActionRules.IgnoresCosts`）下两个按钮都可用且不扣费。费用为 0 / 免费的牌（如城邦行政区无费用态）
+    两种支付方式各自按「是否付得起」点亮。费用为 0 / 免费的牌（如城邦行政区无费用态）
     跳过 L1 直接进 L2。
   - **L4 与主要行动同源**：`ChoiceRequest.Pick`（`ChoicePick`）非空时，UI 不弹长列表，而是照主要行动的交互
     直接点地图——`ChoicePickKind.InfluenceSlot`（部署／调度／拿走／替换）用 `MapHit.IsSlot` 命中，

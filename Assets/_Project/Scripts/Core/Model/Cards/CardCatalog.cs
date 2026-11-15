@@ -157,7 +157,6 @@ namespace NomadCity.Core.Model
 
         private static readonly CharacterCardDef[] Characters = BuildCharacters();
         private static readonly CharacterCardDef[] ExtensionCharacters = BuildExtensionCharacters();
-        private static readonly CharacterCardDef[] OperatorCharacters = BuildOperatorCharacters();
         private static readonly FacilityCardDef[] Facilities = BuildFacilities();
         private static readonly EventCardDef[] Events = BuildEvents();
         private static readonly EventCardDef[] EnterpriseEvents = BuildEnterpriseEvents();
@@ -326,7 +325,7 @@ namespace NomadCity.Core.Model
         private static RewardOp[][] BuildExtensionRoleStrategyOps() => new[]
         {
             // 山·策略「开辟商路」：选 1 条航道，移除其上所有影响力并在该航道放置公路指示物；
-            // 受影响的玩家各得 1 金券，你额外再得 1 金券。
+            // 影响力被移除的玩家各得 1 分，你额外再得 1 分。
             new[] { RewardOp.PlaceHighway() },
 
             // 玛恩纳·策略「公事公办」：选 1 家企业 → 所有玩家提升 1 级；或 选 1 家企业 → 触发 1 个已解锁企业特效。
@@ -371,17 +370,39 @@ namespace NomadCity.Core.Model
         private static readonly string[] OperatorTacticsNames =
             { "制衡战略", "泥岩小队", "\"暴躁铁皮\"", "工程订购", "掌控全局", "致命攻势", "为了大家", "隐蔽仓库" };
 
+        // 注意：必须放在上面这些名字之后 —— C# 静态字段按书写顺序初始化，
+        // 提前到前面的 Character 数组区会在名字还没赋值时就构造，触发空引用。
+        private static readonly CharacterCardDef[] OperatorCharacters = BuildOperatorCharacters();
+
         /// <summary>8 张干员牌全部是蓝色；它们不进常规手牌，只能由【干员特派】抽进手牌。</summary>
         private static CharacterCardDef[] BuildOperatorCharacters()
         {
             RewardOp[][] strategies = BuildOperatorStrategyOps();
             RewardOp[][] tactics = BuildOperatorTacticsOps();
+
+            // 红色 · 一次性计谋：用后放回游戏盒（Doc/CardEffects.md §5）。按 OperatorNames 顺序：
+            // 银灰「制衡战略」、凯尔希「掌控全局」、W「致命攻势」。
+            bool[] tacticsToBox = { true, false, false, false, true, true, false, false };
+
+            // 4 张「持续留在场上（∞）」计谋：泥岩 / 可露希尔 / 多萝西 / 异客。
+            var persistent = new[]
+            {
+                PersistentTacticKind.None,
+                PersistentTacticKind.MudrockSquad,
+                PersistentTacticKind.None,
+                PersistentTacticKind.EngineeringOrder,
+                PersistentTacticKind.None,
+                PersistentTacticKind.None,
+                PersistentTacticKind.ForEveryone,
+                PersistentTacticKind.HiddenWarehouse,
+            };
+
             var defs = new CharacterCardDef[CardCounts.OperatorCards];
             for (int i = 0; i < defs.Length; i++)
             {
                 defs[i] = new CharacterCardDef(CardIds.OperatorCharacterBase + i, PlayerColor.Blue,
                     OperatorNames[i], OperatorStrategyNames[i], OperatorTacticsNames[i],
-                    strategies[i], tactics[i]);
+                    strategies[i], tactics[i], false, tacticsToBox[i], persistent[i]);
             }
             return defs;
         }
@@ -389,13 +410,17 @@ namespace NomadCity.Core.Model
         private static RewardOp[][] BuildOperatorStrategyOps() => new[]
         {
             // 银灰·策略「商业手腕」：选 1 种资源 + 1 位玩家，该玩家以 4 金券单价卖掉全部该资源；你得 1 分。
-            new RewardOp[0],
+            new[]
+            {
+                RewardOp.OperatorSellToPlayer(4),
+                RewardOp.Score(1),
+            },
 
             // 泥岩·策略「源岩D.I.Y」：支付 1 源岩，进行 1 次建造。
-            new RewardOp[0],
+            new[] { RewardOp.OperatorPayAndBuild(ResourceType.Orirock, 1) },
 
-            // 森蚺·策略「我寻思能行」：免费移除对手影响力时，改为移动这些影响力（被动修正，暂未接入）。
-            new RewardOp[0],
+            // 森蚺·策略「我寻思能行」：本回合免费的移动城市改为移动对手影响力（被动修正）。
+            new[] { RewardOp.OperatorRelocateInsteadOfRemove() },
 
             // 可露希尔·策略「采购协议」：获得 1 源岩 + 1 源石 + 1 异铁；或选 1 家企业触发其 1 个已解锁特效。
             new[]
@@ -416,10 +441,10 @@ namespace NomadCity.Core.Model
                 RewardOp.Score(1),
             },
 
-            // W·策略「伺机出动」：放置 2 次影响力；本回合收尾阶段移除 2 个你的影响力。
+            // W·策略「伺机出动」：放置 3 次影响力；本回合收尾阶段移除 2 个你的影响力。
             new[]
             {
-                RewardOp.Influence(InfluencePlacementScope.DeployRules, 2),
+                RewardOp.Influence(InfluencePlacementScope.DeployRules, 3),
                 RewardOp.Deferred(RewardOp.RemoveOwnInfluence(2)),
             },
 
@@ -431,20 +456,42 @@ namespace NomadCity.Core.Model
             },
 
             // 异客·策略「沁礁黑市」：从 1 位对手处获取至多 4 个所选资源，双方各得 1 分。
-            new RewardOp[0],
+            new[] { RewardOp.OperatorTakeOpponentResources(4) },
         };
 
         private static RewardOp[][] BuildOperatorTacticsOps() => new[]
         {
-            // 以下计谋都需要「持续留在场上 / 特殊替换」的机制，尚未接入，先保留牌面名。
-            new RewardOp[0], // 银灰·制衡战略
-            new RewardOp[0], // 泥岩·泥岩小队
-            new RewardOp[0], // 森蚺·"暴躁铁皮"
-            new RewardOp[0], // 可露希尔·工程订购
-            new RewardOp[0], // 凯尔希·掌控全局
-            new RewardOp[0], // W·致命攻势
-            new RewardOp[0], // 多萝西·为了大家
-            new RewardOp[0], // 异客·隐蔽仓库
+            // 银灰·制衡战略：所有玩家（含自己）各移除 1 个影响力。
+            new[] { RewardOp.OperatorBalanceInfluence() },
+
+            // 泥岩·泥岩小队：持续留在场上；收尾阶段可支付 2 源岩放置 1 个影响力（PersistentTacticRules）。
+            new RewardOp[0],
+
+            // 森蚺·"暴躁铁皮"：从设施供应区选至多 2 张名称不同的设施牌放回游戏盒；获得 3 异铁。
+            new[]
+            {
+                RewardOp.OperatorSupplyToBox(2),
+                RewardOp.Gain(ResourceType.Oriron, 3),
+            },
+
+            // 可露希尔·工程订购：打出时从供应区选至多 2 张异名设施压在牌下，建设时可选用。
+            new[] { RewardOp.AttachSupplyFacilities(2) },
+
+            // 凯尔希·掌控全局：选 1 家企业，触发其每项已解锁特效。
+            new[] { RewardOp.TriggerAllEnterpriseEffects() },
+
+            // W·致命攻势：支付 4 金券，选 2 名不同对手各替换 1 个影响力。
+            new[]
+            {
+                RewardOp.PayVouchers(4),
+                RewardOp.OperatorReplaceTwoOpponents(),
+            },
+
+            // 多萝西·为了大家：打出时在此牌上放至多 4 个玩家标记；收尾阶段可移除 2 个标记放置 1 个影响力。
+            new[] { RewardOp.PlaceMarkersOnPersistentTactic(4) },
+
+            // 异客·隐蔽仓库：打出时在此牌上放至多 5 个玩家标记；支付资源时可用标记代替。
+            new[] { RewardOp.PlaceMarkersOnPersistentTactic(5) },
         };
 
         private static RewardOp[][] BuildRoleStrategyOps() => new[]
@@ -490,10 +537,10 @@ namespace NomadCity.Core.Model
                 RewardOp.ReplaceInfluence(1),
             },
 
-            // 极境·计谋「导航通讯」：支付 3 至纯源石 → 以「相邻且有自己的影响力」的资源点为目标免费城市移动。
+            // 极境·计谋「导航通讯」：支付 3 异铁 → 以「相邻且有自己的影响力」的资源点为目标免费城市移动。
             new[]
             {
-                RewardOp.Pay(ResourceType.OriginitePrime, 3),
+                RewardOp.Pay(ResourceType.Oriron, 3),
                 RewardOp.FreeCityMoveOwnInfluenced(1),
             },
 
@@ -981,27 +1028,56 @@ namespace NomadCity.Core.Model
             {
                 // —— I 级（4 张，550–553）——
                 Pattern(550, 1, "城建开拓区ᴱ", 5,
+                    new[] { RewardOp.LoseScore(1) },
+                    new[] { RewardOp.BuildFromFacilityDeck() },
                     new PatternCell(0, 1, FacilityColor.Yellow),
                     new PatternCell(1, 0, FacilityColor.Blue),
                     new PatternCell(1, 1, FacilityColor.Blue),
                     new PatternCell(1, 2, FacilityColor.Red)),
 
                 Pattern(551, 1, "拓荒者据点ᴱ", 2,
+                    System.Array.Empty<RewardOp>(),
+                    new[]
+                    {
+                        RewardOp.InfluenceAtCityNode(2),
+                        RewardOp.RelocateInfluencePerPatternMarkers(),
+                    },
                     new PatternCell(0, 1, FacilityColor.Yellow),
                     new PatternCell(1, 0, FacilityColor.Blue)),
 
                 Pattern(552, 1, "核心商业区ᴱ", 3,
+                    System.Array.Empty<RewardOp>(),
+                    new[]
+                    {
+                        RewardOp.Alternative(
+                            new EffectBranch("获得 4 金券", RewardOp.Vouchers(4)),
+                            new EffectBranch("获得 1 源岩", RewardOp.Gain(ResourceType.Orirock, 1)),
+                            new EffectBranch("获得 1 源石", RewardOp.Gain(ResourceType.Originium, 1)),
+                            new EffectBranch("获得 1 异铁", RewardOp.Gain(ResourceType.Oriron, 1))),
+                        RewardOp.ExtraMainActionExcludingSpecial(1),
+                    },
                     new PatternCell(0, 0, FacilityColor.Blue),
                     new PatternCell(0, 1, FacilityColor.Blue),
                     new PatternCell(0, 2, FacilityColor.Red)),
 
                 Pattern(553, 1, "大型企业园ᴱ", 3,
+                    System.Array.Empty<RewardOp>(),
+                    new[] { RewardOp.TriggerEnterpriseEffectTwice(2) },
                     new PatternCell(0, 0, FacilityColor.Blue),
                     new PatternCell(1, 0, FacilityColor.Red),
                     new PatternCell(1, 1, FacilityColor.Blue)),
 
                 // —— II 级（2 张，554–555，与基础版 504 / 505 同阵）——
                 Pattern(554, 2, "警备队辖区ᴱ", 6,
+                    System.Array.Empty<RewardOp>(),
+                    new[]
+                    {
+                        RewardOp.ForbidCharacterCardsThisRound(),
+                        RewardOp.ChooseTwoOfThree(
+                            new EffectBranch("支付 2 源岩 + 1 异铁，替换 1 个影响力"),
+                            new EffectBranch("放置 1 个影响力，获得 1 源石"),
+                            new EffectBranch("移除 1 个影响力，获得 2 异铁")),
+                    },
                     new PatternCell(0, 0, FacilityColor.Blue),
                     new PatternCell(1, 0, FacilityColor.Red),
                     new PatternCell(1, 1, FacilityColor.Blue),
@@ -1010,6 +1086,12 @@ namespace NomadCity.Core.Model
                     new PatternCell(2, 2, FacilityColor.Red)),
 
                 Pattern(555, 2, "拓荒指挥中枢ᴱ", 7,
+                    System.Array.Empty<RewardOp>(),
+                    new[]
+                    {
+                        RewardOp.ExtraMainActionExcludingSpecial(1),
+                        RewardOp.BothCharacterEffectsThisRound(),
+                    },
                     new PatternCell(0, 0, FacilityColor.Yellow),
                     new PatternCell(1, 0, FacilityColor.Red),
                     new PatternCell(1, 1, FacilityColor.Yellow),

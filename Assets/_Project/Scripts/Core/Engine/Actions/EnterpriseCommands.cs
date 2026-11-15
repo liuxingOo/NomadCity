@@ -90,11 +90,13 @@ namespace NomadCity.Core.Engine
         internal static EffectReport SettleDepartment(GameState state, int seat, int level, IEffectChoices choices)
         {
             EnterpriseState enterprises = state.Enterprises;
-            if (seat < 0 || seat >= enterprises.Departments.Count) return null;
+            if (enterprises == null) return null;
 
-            if (enterprises.Departments[seat] < 0) enterprises.Departments[seat] = 0;
+            // 科室板是整块莱茵生命企业板共用的「当前激活面板」：谁被「所有玩家提升 1 级」
+            // 带到莱茵生命，结算的都是这张板级激活面板，而不是固定的第 1 张。
+            int departmentId = enterprises.RhineDepartment;
+            if (departmentId < 0) departmentId = 0;
 
-            int departmentId = enterprises.Departments[seat];
             RhineDepartmentDef department = EnterpriseCatalog.Department(departmentId);
             EnterpriseLevel entry = department?.Level(level);
             if (entry == null) return null;
@@ -138,7 +140,7 @@ namespace NomadCity.Core.Engine
                 : new List<EffectLogEntry>();
 
             EnterpriseState enterprises = state.Enterprises;
-            int current = seat >= 0 && seat < enterprises.Departments.Count ? enterprises.Departments[seat] : -1;
+            int current = enterprises.RhineDepartment;
 
             var candidates = new List<int>(EnterpriseCatalog.DepartmentCount);
             for (int id = 0; id < EnterpriseCatalog.DepartmentCount; id++)
@@ -151,7 +153,7 @@ namespace NomadCity.Core.Engine
             if (picked < 0)
                 return new EffectReport(seat, entries, true, "这次没有切换科室板。");
 
-            enterprises.Departments[seat] = picked;
+            enterprises.RhineDepartment = picked;
             RhineDepartmentDef department = EnterpriseCatalog.Department(picked);
             string name = department != null ? department.Name : $"科室板 {picked + 1}";
 
@@ -168,6 +170,32 @@ namespace NomadCity.Core.Engine
                 note = $"切换至「{name}」科室板，并结算了该科室板 {cooperation} 级奖励。";
 
             return new EffectReport(seat, entries, false, note);
+        }
+
+        /// <summary>当前激活的科室板 id（板级共享）；-1 = 还没选定。</summary>
+        internal static int ActiveDepartmentId(EnterpriseState enterprises, int seat) =>
+            enterprises?.RhineDepartment ?? -1;
+
+        /// <summary>
+        /// 兜底：正常开局时科室板已在 <see cref="EnterpriseRules.Prepare"/> 里随机抽定；
+        /// 只有绕过开局建状态（旧存档 / 测试直接 Reset）时，才用状态数据推导一个稳定结果，
+        /// 保证联机各端应用同一条命令后得到相同结果。
+        /// </summary>
+        internal static void PickInitialRhineDepartmentIfNeeded(GameState state)
+        {
+            EnterpriseState enterprises = state.Enterprises;
+            if (enterprises == null) return;
+            if (enterprises.RhineDepartment >= 0) return;
+            if (!enterprises.IsActive((int)EnterpriseId.RhineLab)) return;
+
+            int hash = 17;
+            hash = hash * 31 + enterprises.ActiveBoards.Count;
+            hash = hash * 31 + enterprises.Deck.Count;
+            foreach (int board in enterprises.ActiveBoards) hash = hash * 31 + board;
+            foreach (int board in enterprises.Deck) hash = hash * 31 + board;
+
+            int pick = (hash & 0x7fffffff) % EnterpriseCatalog.DepartmentCount;
+            enterprises.RhineDepartment = pick < 0 ? 0 : pick;
         }
 
         /// <summary>
@@ -249,8 +277,13 @@ namespace NomadCity.Core.Engine
                 if (player.CityPanelSlots[s] < 0) panelSlots.Add(s);
             }
 
+            // 规则：无法满足建造条件（没有空位 / 没有能建的设施 / 不想建）时，
+            // 必须洗混设施牌堆结束这次企业特效的结算。
             if (panelSlots.Count == 0)
-                return new EffectReport(seat, entries, false, "城市面板没有空位，跳过这次建设。");
+            {
+                ShuffleFacilityDeck(state);
+                return new EffectReport(seat, entries, false, "城市面板没有空位，跳过这次建设；设施牌堆已经洗混。");
+            }
 
             var facilityIds = new List<int>();
             foreach (int id in state.FacilityDeck)
@@ -262,7 +295,10 @@ namespace NomadCity.Core.Engine
             }
 
             if (facilityIds.Count == 0)
-                return new EffectReport(seat, entries, false, "设施牌堆里没有可建设的设施，跳过这次建设。");
+            {
+                ShuffleFacilityDeck(state);
+                return new EffectReport(seat, entries, false, "设施牌堆里没有可建设的设施，跳过这次建设；设施牌堆已经洗混。");
+            }
 
             BuildChoice? pick = choices.ChooseBuild(seat, default, state, facilityIds, panelSlots, false);
             if (pick == null)
@@ -282,7 +318,8 @@ namespace NomadCity.Core.Engine
             {
                 state.FacilitySupply.Remove(pickedId);
                 state.FacilityDeck.Insert(0, pickedId);
-                return new EffectReport(seat, entries, false, $"建设不可执行：{check.Error}");
+                ShuffleFacilityDeck(state);
+                return new EffectReport(seat, entries, false, $"建设不可执行：{check.Error}；设施牌堆已经洗混。");
             }
 
             build.Apply(state);
@@ -421,6 +458,8 @@ namespace NomadCity.Core.Engine
             {
                 player.HandCharacterCards.Remove(boxed);
                 player.DiscardCharacterCards.Remove(boxed);
+                // 规则要求「向所有玩家展示，之后放回游戏盒」：记一条公开记录，界面会把卡面亮出来。
+                state.PublicReveals.Add(new PublicReveal(seat, boxed, "干员特派：向所有玩家展示后放回游戏盒"));
             }
 
             string pickedName = state.Catalog.Character(picked)?.Name ?? $"干员牌 {picked}";
@@ -527,6 +566,8 @@ namespace NomadCity.Core.Engine
 
             enterprises.DraftDone = true;
             EnterpriseRules.CompleteBoardSet(state);
+            // 3 人局补足第 4 块板时若翻开莱茵生命，板级科室板需随机激活一张（无人可选）。
+            EnterpriseEffectResolver.PickInitialRhineDepartmentIfNeeded(state);
         }
     }
 
@@ -635,6 +676,12 @@ namespace NomadCity.Core.Engine
         /// <summary>这一级结算出来的效果明细；<see cref="settle"/> 为 false 时为 null。</summary>
         public EffectReport Report { get; private set; }
 
+        /// <summary>效果点选答案（联机编码用）。</summary>
+        public IEffectChoices EffectChoices => choices;
+
+        /// <summary>是否顺便结算该等级的即时奖励（联机编码用）。</summary>
+        public bool Settle => settle;
+
         public CommandResult Validate(GameState state)
         {
             if (!state.DeveloperMode) return CommandResult.Fail("这是开发者测试命令，只能在开发者模式下使用。");
@@ -643,10 +690,6 @@ namespace NomadCity.Core.Engine
                 return CommandResult.Fail($"座位号 {ActorSeat} 无效。");
             if (BoardId < 0 || BoardId >= EnterpriseCatalog.BoardCount)
                 return CommandResult.Fail($"企业板 {BoardId} 不存在。");
-            if (!state.Enterprises.IsActive(BoardId))
-                return CommandResult.Fail("这张企业板不在本局场上。");
-            if (state.Enterprises.LevelOf(BoardId, ActorSeat) < 0)
-                return CommandResult.Fail("这名玩家不在这张企业板上。");
             if (Level < 0 || Level > 5) return CommandResult.Fail("合作等级只能是 0–5。");
 
             return CommandResult.Success;
@@ -654,6 +697,8 @@ namespace NomadCity.Core.Engine
 
         public void Apply(GameState state)
         {
+            // 开发者面板允许在任意企业板上设等级：不在场上就先把它激活上场。
+            state.Enterprises.Activate(BoardId);
             state.Enterprises.SetLevel(BoardId, ActorSeat, Level);
             if (settle)
                 Report = EnterpriseRules.SettleLevel(state, BoardId, ActorSeat, Level,
@@ -699,9 +744,8 @@ namespace NomadCity.Core.Engine
 
         public void Apply(GameState state)
         {
-            EnterpriseState enterprises = state.Enterprises;
-            if (ActorSeat >= 0 && ActorSeat < enterprises.Departments.Count)
-                enterprises.Departments[ActorSeat] = DepartmentId;
+            // 科室板是板级共享的：任何能操作莱茵生命的玩家选定后，所有人在 L2–L5 都按这张结算。
+            state.Enterprises.RhineDepartment = DepartmentId;
         }
     }
 
@@ -763,7 +807,7 @@ namespace NomadCity.Core.Engine
             }
 
             EnterpriseState enterprises = state.Enterprises;
-            if (!enterprises.DraftDone)
+            if (!enterprises.DraftDone && !state.DeveloperMode)
                 return CommandResult.Fail("开局的企业抽选还没完成。");
 
             if (!enterprises.IsActive(BoardId))
@@ -779,7 +823,10 @@ namespace NomadCity.Core.Engine
             if (current < Level)
                 return CommandResult.Fail($"合作等级不足：这张板的 {Level} 级特效要合作等级达到 {Level} 级才能触发（你当前 {current} 级）。");
 
-            if (enterprises.HasUsedEffectThisTurn(BoardId, ActorSeat, Level))
+            // 雷神工业 3 / 5 级的「不占用主要行动的建设」一回合内不限次数（Doc §8.3），
+            // 其余企业特效仍然一回合只能触发 1 次。开发者面板允许反复触发，方便连续测试。
+            if (!state.DeveloperMode && !entry.UnlimitedPerTurn
+                && enterprises.HasUsedEffectThisTurn(BoardId, ActorSeat, Level))
                 return CommandResult.Fail($"本回合已经触发过「{board.Name}」{Level} 级的企业特效了（同一特效一回合只能触发 1 次）。");
 
             switch (entry.Special)
@@ -923,6 +970,10 @@ namespace NomadCity.Core.Engine
             player.HandCharacterCards.Clear();
             if (picked >= 0) player.HandCharacterCards.Add(picked);
             player.Vouchers += 10;
+
+            // 规则要求「先回收 1 张并向所有玩家展示」：记一条公开记录，界面会把卡面亮出来。
+            if (picked >= 0)
+                state.PublicReveals.Add(new PublicReveal(seat, picked, "罗德岛 4 级：从弃牌区回收后向所有玩家展示"));
 
             string note;
             if (picked >= 0)

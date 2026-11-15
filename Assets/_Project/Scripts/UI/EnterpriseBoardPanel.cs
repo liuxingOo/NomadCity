@@ -435,17 +435,12 @@ namespace NomadCity.UI
 
         /// <summary>
         /// 这张企业板采用的科室板 id；不是莱茵生命 = -1。
-        /// 先看本面板的座位，再找场上选了莱茵生命的那位玩家（科室板只有他会选）。
+        /// 科室板是板级共享的，直接取企业状态上的唯一激活值。
         /// </summary>
         private int DepartmentOfBoard(int boardId)
         {
             if (state == null || boardId != (int)EnterpriseId.RhineLab) return -1;
-
-            List<int> departments = state.Enterprises.Departments;
-            if (seat >= 0 && seat < departments.Count && departments[seat] >= 0) return departments[seat];
-            for (int s = 0; s < departments.Count; s++)
-                if (departments[s] >= 0) return departments[s];
-            return -1;
+            return state.Enterprises.RhineDepartment;
         }
 
         /// <summary>画一块企业板：卡面 + 玩家标记 + 效果条热区按钮。</summary>

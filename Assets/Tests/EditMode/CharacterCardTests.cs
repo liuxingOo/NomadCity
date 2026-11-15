@@ -247,7 +247,62 @@ namespace NomadCity.Tests
             Assert.AreEqual(-1, player.PlacedCharacterCard);
             Assert.AreEqual(7, player.Vouchers);   // 10 - 3
             Assert.AreEqual(0, state.Map.Node(0).Slots.OwnerOf(0)); // 对手影响力被替换成自己的
-            Assert.AreEqual(31, state.Players[1].MarkersInSupply, "被替换掉的标记退回原所有者");
+            Assert.AreEqual(30, state.Players[1].MarkersInSupply, "被替换掉的标记退回原所有者");
+        }
+
+        [Test]
+        public void 使用_起始玩家可以先计谋后策略()
+        {
+            GameEngine engine = PlaceThenAdvance(0, RazerCard);
+            GameState state = engine.State;
+            PlayerState player = state.Players[0];
+            state.ActiveSeat = 0;
+            state.FirstPlayerSeat = 0;
+            player.MarkersInSupply = 30;
+            player.Vouchers = 10;
+            state.Map.Node(0).Slots.Place(0, 1); // 对手的影响力：计谋「控制阵地」的替换目标
+
+            CommandResult first = engine.Dispatch(
+                new UseCharacterCardCommand(0, CharacterEffectKind.Tactics));
+
+            Assert.IsTrue(first.Ok, first.Error);
+            Assert.IsTrue(player.CharacterSecondEffectPending, "速查表：起始玩家可自选两种效果的发动顺序。");
+            Assert.AreEqual(RazerCard, player.PlacedCharacterCard, "另一种效果还没用，牌应留在盖放位。");
+
+            CommandResult second = engine.Dispatch(
+                new UseCharacterCardCommand(0, CharacterEffectKind.Strategy));
+
+            Assert.IsTrue(second.Ok, second.Error);
+            Assert.AreEqual(-1, player.PlacedCharacterCard);
+            Assert.AreEqual(7, player.Vouchers); // 10 - 3
+        }
+
+        [Test]
+        public void 使用_拓荒指挥中枢放开限制后非起始玩家也能连发两种效果()
+        {
+            GameEngine engine = PlaceThenAdvance(0, RazerCard);
+            GameState state = engine.State;
+            PlayerState player = state.Players[0];
+            state.ActiveSeat = 0;
+            state.FirstPlayerSeat = 1; // 不是起始玩家
+            player.BothCharacterEffectsThisTurn = true; // 拓荒指挥中枢ᴱ：本回合可同时发动策略与计谋
+            player.MarkersInSupply = 30;
+            player.Vouchers = 10;
+            state.Map.Node(0).Slots.Place(0, 1);
+
+            CommandResult first = engine.Dispatch(
+                new UseCharacterCardCommand(0, CharacterEffectKind.Strategy));
+
+            Assert.IsTrue(first.Ok, first.Error);
+            Assert.IsTrue(player.CharacterSecondEffectPending, "被放开的玩家同样要留住牌等第二种效果。");
+            Assert.AreEqual(RazerCard, player.PlacedCharacterCard);
+
+            CommandResult second = engine.Dispatch(
+                new UseCharacterCardCommand(0, CharacterEffectKind.Tactics));
+
+            Assert.IsTrue(second.Ok, second.Error);
+            Assert.AreEqual(-1, player.PlacedCharacterCard);
+            Assert.AreEqual(7, player.Vouchers);
         }
 
         [Test]
@@ -332,7 +387,7 @@ namespace NomadCity.Tests
             Assert.AreEqual(2, player.Vouchers);
             Assert.AreEqual(0, state.Map.Node(1).Slots.OwnerOf(0), "同格应换成自己的影响力");
             Assert.AreEqual(29, player.MarkersInSupply);
-            Assert.AreEqual(31, state.Players[1].MarkersInSupply, "被移除的标记退回原所有者");
+            Assert.AreEqual(30, state.Players[1].MarkersInSupply, "被移除的标记退回原所有者");
         }
 
         // ————————————————————— 极境 —————————————————————
@@ -355,21 +410,21 @@ namespace NomadCity.Tests
         }
 
         [Test]
-        public void 极境计谋_导航通讯_付三至纯源石后免费移动到相邻且有自己影响力的点()
+        public void 极境计谋_导航通讯_付三异铁后免费移动到相邻且有自己影响力的点()
         {
             GameEngine engine = NewGameAtActions();
             GameState state = engine.State;
             PlayerState player = state.Players[0];
             player.MobileCityNodeId = 0;
             player.MarkersInSupply = 30;
-            player.Resources.Add(ResourceType.OriginitePrime, 3);
+            player.Resources.Add(ResourceType.Oriron, 3);
             state.Map.Node(1).Slots.Place(0, 0); // 自己的影响力
 
             EffectReport report = EffectResolver.Execute(state, 0, Role(JijingCard).TacticsOps);
 
             Assert.IsTrue(report.AnyApplied, report.Describe());
             Assert.AreEqual(1, player.MobileCityNodeId);
-            Assert.AreEqual(0, player.Resources.Get(ResourceType.OriginitePrime));
+            Assert.AreEqual(0, player.Resources.Get(ResourceType.Oriron));
             Assert.AreEqual(0, state.Map.Node(0).Slots.OwnerOf(0), "出发点放下 1 个影响力");
         }
 
@@ -381,7 +436,7 @@ namespace NomadCity.Tests
             PlayerState player = state.Players[0];
             player.MobileCityNodeId = 0;
             player.MarkersInSupply = 30;
-            player.Resources.Add(ResourceType.OriginitePrime, 3);
+            player.Resources.Add(ResourceType.Oriron, 3);
 
             EffectResolver.Execute(state, 0, Role(JijingCard).TacticsOps);
 
@@ -588,6 +643,9 @@ namespace NomadCity.Tests
             public int ChooseOpponent(int seat, RewardOp op, GameState state,
                 IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
 
+            public int ChoosePlayer(int seat, RewardOp op, GameState state,
+                IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
+
             public int ChooseDiscardedCharacterCard(int seat, RewardOp op, GameState state,
                 IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
 
@@ -623,6 +681,9 @@ namespace NomadCity.Tests
 
             public int ChooseSupplyFacility(int seat, RewardOp op, GameState state,
                 IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
+
+            public int ChooseAmount(int seat, RewardOp op, GameState state, int min, int max) =>
+                max <= 0 ? -1 : max;
 
             public int ChooseOptionalStep(int seat, RewardOp op, GameState state, int stepIndex, string label) => 0;
         }

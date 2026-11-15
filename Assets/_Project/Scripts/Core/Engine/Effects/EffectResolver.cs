@@ -92,6 +92,12 @@ namespace NomadCity.Core.Engine
         int ChooseOpponent(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates);
 
         /// <summary>
+        /// 【银灰·策略「商业手腕」】选 1 位玩家（候选 = 座位号，**可以包括自己**）。
+        /// 返回 -1 表示作罢。
+        /// </summary>
+        int ChoosePlayer(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates);
+
+        /// <summary>
         /// 从角色牌弃牌区里选 1 张（候选 = 角色牌 id；企业扩展「罗德岛 4 级」）。
         /// 返回 -1 表示不取回（弃牌区为空时不会调用）。
         /// </summary>
@@ -120,6 +126,12 @@ namespace NomadCity.Core.Engine
 
         /// <summary>为「从余下延伸枢纽中选 1 张并建设」选一张延伸枢纽（候选 = 设施牌 id）；-1 表示作罢。</summary>
         int ChooseExtensionHub(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates);
+
+        /// <summary>
+        /// 选一个「至多 / 至少」的数量（如「放置至多 4 个玩家标记」）。
+        /// 返回 [min, max] 内的整数；-1 表示放弃。
+        /// </summary>
+        int ChooseAmount(int seat, RewardOp op, GameState state, int min, int max);
 
         /// <summary>
         /// 为「结算另一张设施的入场效果」在**自己面板**上挑一张设施（候选 = 面板格子下标）；-1 表示作罢。
@@ -200,6 +212,9 @@ namespace NomadCity.Core.Engine
         public int ChooseOpponent(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates) =>
             candidates != null && candidates.Count > 0 ? candidates[0] : -1;
 
+        public int ChoosePlayer(int seat, RewardOp op, GameState state, IReadOnlyList<int> candidates) =>
+            candidates != null && candidates.Count > 0 ? candidates[0] : -1;
+
         public int ChooseDiscardedCharacterCard(int seat, RewardOp op, GameState state,
             IReadOnlyList<int> candidates) =>
             candidates != null && candidates.Count > 0 ? candidates[0] : -1;
@@ -210,6 +225,9 @@ namespace NomadCity.Core.Engine
         public int ChooseCharacterCardIntoBox(int seat, RewardOp op, GameState state,
             IReadOnlyList<int> candidates) =>
             candidates != null && candidates.Count > 0 ? candidates[0] : -1;
+
+        public int ChooseAmount(int seat, RewardOp op, GameState state, int min, int max) =>
+            max <= 0 ? -1 : max;
 
         public BuildChoice? ChooseBuild(int seat, RewardOp op, GameState state,
             IReadOnlyList<int> facilityIds, IReadOnlyList<int> panelSlots, bool freeOnly = false) =>
@@ -362,6 +380,17 @@ namespace NomadCity.Core.Engine
             RewardKind.TriggerEnterpriseEffectOnce => true,    // 企业扩展
             RewardKind.AdvanceAndTriggerEnterprise => true,    // 企业扩展（山·计谋）
             RewardKind.PlaceHighway => true,                   // 企业扩展（山·策略）
+            RewardKind.OperatorSellToPlayer => true,           // 企业扩展（银灰·策略）
+            RewardKind.OperatorBalanceInfluence => true,       // 企业扩展（银灰·计谋）
+            RewardKind.OperatorPayResourceBuild => true,       // 企业扩展（泥岩·策略）
+            RewardKind.OperatorRelocateInsteadOfRemove => true,// 企业扩展（森蚺·策略）
+            RewardKind.OperatorSupplyToBox => true,            // 企业扩展（森蚺·计谋）
+            RewardKind.TriggerAllEnterpriseEffects => true,    // 企业扩展（凯尔希·计谋）
+            RewardKind.OperatorReplaceTwoOpponents => true,    // 企业扩展（W·计谋）
+            RewardKind.OperatorTakeOpponentResources => true,  // 企业扩展（异客·策略）
+            RewardKind.BuildFromFacilityDeckAndShuffle => true,// 企业扩展城市样式（城建开拓区ᴱ）
+            RewardKind.TriggerEnterpriseEffectTwice => true,   // 企业扩展城市样式（大型企业园ᴱ）
+            RewardKind.ChooseTwoOfThreeOptions => true,        // 企业扩展城市样式（警备队辖区ᴱ）
             _ => false,
         };
 
@@ -466,20 +495,23 @@ namespace NomadCity.Core.Engine
                     return true;
 
                 case RewardKind.PayResource:
-                    if (ActionRules.IgnoresCosts(state)) return true; // 开发者模式：不扣费
-                    if (!player.Resources.TrySpend(op.Resource, op.Amount))
+                {
+                    // 「隐蔽仓库」：每次支付资源可以用牌上标记代替至多 2 个（§9.9）。
+                    PersistentTacticRules.TrySubstituteForPayment(state, seat, op.Resource, op.Amount,
+                        choices, out int remaining);
+                    if (!player.Resources.TrySpend(op.Resource, remaining))
                     {
                         note = $"{op.Resource} 不足。";
                         return false;
                     }
                     return true;
+                }
 
                 case RewardKind.GainVouchers:
                     player.Vouchers += op.Amount;
                     return true;
 
                 case RewardKind.PayVouchers:
-                    if (ActionRules.IgnoresCosts(state)) return true; // 开发者模式：不扣费
                     if (player.Vouchers < op.Amount)
                     {
                         note = "金券不足。";
@@ -510,6 +542,7 @@ namespace NomadCity.Core.Engine
                     return TryRelocateInfluence(state, seat, op, choices, out note);
 
                 case RewardKind.ReplaceInfluence:
+                case RewardKind.ReplaceResourceNodeInfluence:
                     return TryReplaceInfluence(state, seat, op, choices, out note);
 
                 case RewardKind.GainVouchersPerCount:
@@ -577,6 +610,26 @@ namespace NomadCity.Core.Engine
 
                 case RewardKind.PlaceInfluencePerPatternMarkers:
                     return TryPlaceInfluencePerPatternMarkers(state, seat, op, choices, out note);
+
+                case RewardKind.PlaceInfluenceAtCityNode:
+                    return TryPlaceInfluenceAtCityNode(state, seat, op, choices, out note);
+
+                case RewardKind.RelocateInfluencePerPatternMarkers:
+                    return TryRelocatePerPatternMarkers(state, seat, op, choices, out note);
+
+                case RewardKind.ExtraMainActionsExcludingSpecialAction:
+                    player.ExtraMainActionsExcludingSpecialThisTurn += op.Amount;
+                    return true;
+
+                case RewardKind.AllowBothCharacterEffectsThisRound:
+                    player.BothCharacterEffectsThisTurn = true;
+                    return true;
+
+                case RewardKind.AttachSupplyFacilitiesUnderPersistentTactic:
+                    return TryAttachSupplyFacilities(state, seat, op, choices);
+
+                case RewardKind.PlaceMarkersOnPersistentTactic:
+                    return TryPlaceMarkersOnPersistentTactic(state, seat, op, choices);
 
                 case RewardKind.ExtraMainActions:
                     player.ExtraMainActionsThisTurn += op.Amount;
@@ -666,6 +719,152 @@ namespace NomadCity.Core.Engine
         }
 
         /// <summary>
+        /// 工程订购：从设施供应区选至多 <c>Amount</c> 张**名称不同**的设施牌压在持续计谋牌下。
+        /// 选完补满供应区。
+        /// </summary>
+        private static bool TryAttachSupplyFacilities(GameState state, int seat, RewardOp op,
+            IEffectChoices choices)
+        {
+            PersistentTacticState tactic = LatestPersistentTacticOf(state, seat);
+            if (tactic == null) return false;
+
+            int attached = 0;
+            var names = new HashSet<string>();
+            while (attached < op.Amount)
+            {
+                var candidates = new List<int>();
+                foreach (int id in state.FacilitySupply)
+                {
+                    FacilityCardDef card = state.Catalog.Facility(id);
+                    if (card == null || names.Contains(card.Name)) continue;
+                    candidates.Add(id);
+                }
+                if (candidates.Count == 0) break;
+
+                int pick = choices.ChooseSupplyFacility(seat, op, state, candidates);
+                if (pick < 0 || !candidates.Contains(pick)) break;
+
+                FacilityCardDef picked = state.Catalog.Facility(pick);
+                if (picked != null) names.Add(picked.Name);
+                state.FacilitySupply.Remove(pick);
+                tactic.AttachedFacilityIds.Add(pick);
+                attached++;
+            }
+
+            if (attached > 0) BoardSetup.RefillFacilitySupply(state);
+            return attached > 0;
+        }
+
+        /// <summary>为了大家 / 隐蔽仓库：打出时在此牌上放置至多 <c>Amount</c> 个玩家标记。</summary>
+        private static bool TryPlaceMarkersOnPersistentTactic(GameState state, int seat, RewardOp op,
+            IEffectChoices choices)
+        {
+            PersistentTacticState tactic = LatestPersistentTacticOf(state, seat);
+            if (tactic == null) return false;
+
+            PlayerState player = state.Player(seat);
+            int max = System.Math.Min(op.Amount, player.MarkersInSupply);
+            if (max <= 0) return false;
+
+            int amount = choices.ChooseAmount(seat, op, state, 0, max);
+            if (amount <= 0) return false;
+            if (amount > max) amount = max;
+
+            player.MarkersInSupply -= amount;
+            tactic.Markers += amount;
+            return true;
+        }
+
+        /// <summary>这位玩家最新放上场的持续计谋牌（打出时初始效果作用在它身上）。</summary>
+        private static PersistentTacticState LatestPersistentTacticOf(GameState state, int seat)
+        {
+            for (int i = state.PersistentTactics.Count - 1; i >= 0; i--)
+                if (state.PersistentTactics[i].Seat == seat) return state.PersistentTactics[i];
+            return null;
+        }
+
+        /// <summary>
+        /// 拓荒者据点ᴱ：在移动城市所在的资源点上放置 <c>Amount</c> 个影响力。        /// 落点只限该资源点上的空格，仍按 §6.4a 校验（有资源指示物、没有对手城市）。
+        /// </summary>
+        private static bool TryPlaceInfluenceAtCityNode(GameState state, int seat, RewardOp op,
+            IEffectChoices choices, out string note)
+        {
+            note = null;
+            PlayerState player = state.Player(seat);
+            int nodeId = player.MobileCityNodeId;
+            if (nodeId < 0)
+            {
+                note = "移动城市不在任何资源点上，无法在其所在资源点放置影响力。";
+                return false;
+            }
+
+            MapNodeState node = state.Map.Node(nodeId);
+            int placed = 0;
+            string failReason = null;
+
+            for (int i = 0; i < op.Amount; i++)
+            {
+                if (player.MarkersInSupply <= 0)
+                {
+                    failReason = "玩家供应堆里没有标记，无法放置影响力（§11.3）。";
+                    break;
+                }
+
+                var candidates = new List<InfluenceSlotRef>();
+                for (int s = 0; s < node.Slots.Capacity; s++)
+                {
+                    InfluenceSlotRef slot = InfluenceSlotRef.OnNode(nodeId, s);
+                    if (ActionRules.CanPlaceInfluence(state, seat, slot).Ok) candidates.Add(slot);
+                }
+                if (candidates.Count == 0)
+                {
+                    failReason = "该资源点上没有可放置的空格。";
+                    break;
+                }
+
+                InfluenceSlotRef? target = choices.ChooseInfluenceSlot(seat, op, state, candidates);
+                if (target == null)
+                {
+                    failReason = "放弃放置影响力。";
+                    break;
+                }
+                if (!candidates.Contains(target.Value))
+                {
+                    failReason = "选择的空格不在合法范围内。";
+                    break;
+                }
+
+                player.MarkersInSupply--;
+                state.Map.SlotsOf(target.Value).Place(target.Value.SlotIndex, seat);
+                placed++;
+            }
+
+            if (failReason == null) return true;
+            note = placed == 0 ? failReason : $"仅放置了 {placed} 个影响力（{failReason}）";
+            return placed > 0;
+        }
+
+        /// <summary>
+        /// 拓荒者据点ᴱ：移动 X 个自己的影响力，X = 当前特殊行动样式牌上自己的标记数
+        /// （<c>Amount</c> &gt; 0 时再以它为上限）。移动流程与 <see cref="RewardKind.RelocateInfluence"/> 一致。
+        /// </summary>
+        private static bool TryRelocatePerPatternMarkers(GameState state, int seat, RewardOp op,
+            IEffectChoices choices, out string note)
+        {
+            CityPatternState pattern = state.PatternStateOf(state.ActiveSpecialActionPatternId);
+            int count = pattern?.CountOf(seat) ?? 0;
+            if (op.Amount > 0 && count > op.Amount) count = op.Amount;
+
+            if (count <= 0)
+            {
+                note = "这张城市样式牌上没有你的玩家标记，无法移动影响力。";
+                return false;
+            }
+
+            return TryRelocateInfluence(state, seat, RewardOp.RelocateInfluence(count), choices, out note);
+        }
+
+        /// <summary>
         /// 「合计获得 N 个资源，在若干种类里任意分配」（开采电铲）：让选择器给出各资源的数量，
         /// 再把结果**夹到合计恰好 = <see cref="RewardOp.Amount"/>**（多给的部分按顺序削掉、少给的补给第一种），
         /// 避免选择器给错数时凭空多出 / 少掉资源。
@@ -724,12 +923,6 @@ namespace NomadCity.Core.Engine
             IReadOnlyList<ResourceType> options = op.SpreadOptions;
             if (options == null || options.Count == 0) return false;
 
-            if (ActionRules.IgnoresCosts(state))
-            {
-                note = "开发者模式：不扣费";
-                return true;
-            }
-
             PlayerState player = state.Player(seat);
 
             Dictionary<ResourceType, int> holdings = new Dictionary<ResourceType, int>();
@@ -778,8 +971,7 @@ namespace NomadCity.Core.Engine
         /// 「放置 X 个影响力，X = 当前特殊行动所在样式牌上自己的标记数，至多 cap 个」（军工业化区域特殊行动）。
         /// 计数来源是 <c>GameState.ActiveSpecialActionPatternId</c>；落点按部署规则（§6.4a）。
         /// </summary>
-        private static bool TryPlaceInfluencePerPatternMarkers(GameState state, int seat, RewardOp op,
-            IEffectChoices choices, out string note)
+        private static bool TryPlaceInfluencePerPatternMarkers(GameState state, int seat, RewardOp op,            IEffectChoices choices, out string note)
         {
             note = null;
             CityPatternState pattern = state.PatternStateOf(state.ActiveSpecialActionPatternId);
@@ -923,7 +1115,7 @@ namespace NomadCity.Core.Engine
                     break;
                 }
 
-                TakeInfluence(state, target.Value);
+                TakeInfluence(state, target.Value, choices);
                 removed++;
             }
 
@@ -1011,7 +1203,10 @@ namespace NomadCity.Core.Engine
                     break;
                 }
 
-                List<InfluenceSlotRef> candidates = OccupiedInfluenceCandidates(state);
+                // 雷姆必拓 2 级只允许替换「资源点（带资源指示物的节点）」上的影响力。
+                List<InfluenceSlotRef> candidates = op.Kind == RewardKind.ReplaceResourceNodeInfluence
+                    ? OccupiedResourceNodeInfluenceCandidates(state)
+                    : OccupiedInfluenceCandidates(state);
                 if (candidates.Count == 0)
                 {
                     failReason = "场上没有可替换的影响力。";
@@ -1032,7 +1227,7 @@ namespace NomadCity.Core.Engine
                 }
 
                 InfluenceSlotRef slot = target.Value;
-                TakeInfluence(state, slot);
+                TakeInfluence(state, slot, choices);
 
                 CommandResult place = ActionRules.CanPlaceInfluence(state, seat, slot);
                 if (place.Ok)
@@ -1054,14 +1249,17 @@ namespace NomadCity.Core.Engine
             return done + partial > 0; // 移除已经生效，算「尽量执行」的成功
         }
 
-        /// <summary>移除一个影响力，并把该标记退回其所有者的供应堆。</summary>
-        private static void TakeInfluence(GameState state, InfluenceSlotRef slot)
+        /// <summary>移除一个影响力，并把该标记退回其所有者的供应堆（「为了大家」可改为放到自己牌上）。</summary>
+        private static void TakeInfluence(GameState state, InfluenceSlotRef slot, IEffectChoices choices)
         {
             int owner = state.Map.OccupantOf(slot);
             if (owner < 0) return;
 
             state.Map.SlotsOf(slot).Clear(slot.SlotIndex);
-            if (owner < state.Players.Count) state.Player(owner).MarkersInSupply++;
+            if (owner >= state.Players.Count) return;
+
+            if (PersistentTacticRules.TryCaptureRemovedInfluence(state, owner, choices)) return;
+            state.Player(owner).MarkersInSupply++;
         }
 
         // —— 行动类效果（建设 / 城市移动 / 探索 / 结算他牌 / 售卖 / 延伸枢纽）——
@@ -1166,8 +1364,18 @@ namespace NomadCity.Core.Engine
                 }
 
                 RouteState route = state.Map.FindRoute(current, target);
-                ActionRules.ClearRouteInfluencesOfOthers(state, route.Id, seat);
-                ActionRules.ClearNodeInfluencesOfOthers(state, target, seat);
+                // 森蚺·策略「我寻思能行」：本回合免费的移动城市本应移除对手影响力时，
+                // 改为由发动者把这些影响力移动到别的合法空格（被动修正）。
+                if (player.FreeMoveRelocatesInfluenceThisTurn)
+                {
+                    RelocateOthersInfluence(state, route.Id, true);
+                    RelocateOthersInfluence(state, target, false);
+                }
+                else
+                {
+                    ActionRules.ClearRouteInfluencesOfOthers(state, route.Id, seat);
+                    ActionRules.ClearNodeInfluencesOfOthers(state, target, seat);
+                }
                 player.MobileCityNodeId = target;
                 state.LastCityMoveRouteId = route.Id; // 供「在经过的航道上放置影响力」取落点候选
 
@@ -1179,6 +1387,57 @@ namespace NomadCity.Core.Engine
 
             note = moved == 0 ? failReason : $"完成了 {moved} 次城市移动（{failReason}）";
             return moved > 0;
+        }
+
+        /// <summary>
+        /// 森蚺·策略「我寻思能行」：把一条航道或一个资源点上**所有非发动者的影响力**，
+        /// 按各自所有者的部署规则移动到别的合法空格；找不到落点时按规则退回其供应堆。
+        /// </summary>
+        private static void RelocateOthersInfluence(GameState state, int targetId, bool isRoute)
+        {
+            InfluenceSlots slots = isRoute ? state.Map.Route(targetId).Slots : state.Map.Node(targetId).Slots;
+            for (int i = 0; i < slots.Capacity; i++)
+            {
+                int owner = slots.OwnerOf(i);
+                if (owner < 0) continue;
+
+                InfluenceSlotRef origin = isRoute
+                    ? InfluenceSlotRef.OnRoute(targetId, i)
+                    : InfluenceSlotRef.OnNode(targetId, i);
+                slots.Clear(i);
+                InfluenceSlotRef? destination = FindRelocationSlot(state, owner, origin);
+                if (destination == null)
+                {
+                    state.Player(owner).MarkersInSupply++;
+                    continue;
+                }
+                state.Map.SlotsOf(destination.Value).Place(destination.Value.SlotIndex, owner);
+            }
+        }
+
+        /// <summary>为一次「移动对手影响力」找第一个合法落点（按该影响力所有者的部署规则判定）。</summary>
+        private static InfluenceSlotRef? FindRelocationSlot(GameState state, int owner,
+            InfluenceSlotRef origin)
+        {
+            foreach (MapNodeState node in state.Map.Nodes)
+            {
+                for (int i = 0; i < node.Slots.Capacity; i++)
+                {
+                    var candidate = InfluenceSlotRef.OnNode(node.Id, i);
+                    if (candidate.Equals(origin)) continue; // 「移动」不能原地放回
+                    if (ActionRules.CanPlaceInfluence(state, owner, candidate).Ok) return candidate;
+                }
+            }
+            foreach (RouteState route in state.Map.Routes)
+            {
+                for (int i = 0; i < route.Slots.Capacity; i++)
+                {
+                    var candidate = InfluenceSlotRef.OnRoute(route.Id, i);
+                    if (candidate.Equals(origin)) continue;
+                    if (ActionRules.CanPlaceInfluence(state, owner, candidate).Ok) return candidate;
+                }
+            }
+            return null;
         }
 
         /// <summary>
@@ -1220,20 +1479,17 @@ namespace NomadCity.Core.Engine
                     break;
                 }
 
-                if (!ActionRules.IgnoresCosts(state))
+                TollCalculator.Toll toll = TollCalculator.Compute(state, seat, path, null);
+                if (player.Vouchers < toll.Total)
                 {
-                    TollCalculator.Toll toll = TollCalculator.Compute(state, seat, path, null);
-                    if (player.Vouchers < toll.Total)
-                    {
-                        failReason = $"路费需要 {toll.Total} 金券。";
-                        break;
-                    }
-                    foreach (TollCalculator.Payment payment in toll.Payments)
-                    {
-                        player.Vouchers -= payment.Amount;
-                        if (payment.PayeeSeat != TollCalculator.SupplyPayee)
-                            state.Player(payment.PayeeSeat).Vouchers += payment.Amount;
-                    }
+                    failReason = $"路费需要 {toll.Total} 金券。";
+                    break;
+                }
+                foreach (TollCalculator.Payment payment in toll.Payments)
+                {
+                    player.Vouchers -= payment.Amount;
+                    if (payment.PayeeSeat != TollCalculator.SupplyPayee)
+                        state.Player(payment.PayeeSeat).Vouchers += payment.Amount;
                 }
 
                 // 步 2：翻事件牌、放指示物，并自动结算第一个选项（UI 接入后由玩家点选）。
@@ -1488,7 +1744,7 @@ namespace NomadCity.Core.Engine
                     break;
                 }
 
-                TakeInfluence(state, target.Value);
+                TakeInfluence(state, target.Value, choices);
                 removed++;
             }
 
@@ -1656,7 +1912,6 @@ namespace NomadCity.Core.Engine
             }
 
             ResourceType type = options[pick];
-            bool free = ActionRules.IgnoresCosts(state); // 开发者模式：不扣资源
             int price = op.Amount;
             int total = 0;
 
@@ -1665,7 +1920,7 @@ namespace NomadCity.Core.Engine
                 int count = other.Resources.Get(type);
                 if (count <= 0) continue;
 
-                if (!free) other.Resources.TrySpend(type, count);
+                other.Resources.TrySpend(type, count);
                 other.Vouchers += count * price;
                 total += count;
             }
@@ -1822,6 +2077,23 @@ namespace NomadCity.Core.Engine
         }
 
         /// <summary>场上所有**非空**的影响力格，不分归属（「拿走 / 替换影响力」的候选）。</summary>
+        /// <summary>只取「资源点」（带资源指示物的节点）上已有的影响力格。</summary>
+        private static List<InfluenceSlotRef> OccupiedResourceNodeInfluenceCandidates(GameState state)
+        {
+            var list = new List<InfluenceSlotRef>();
+            MapState map = state.Map;
+            for (int id = 0; id < map.Nodes.Count; id++)
+            {
+                MapNodeState node = map.Node(id);
+                if (!node.HasResourceToken) continue;
+                for (int i = 0; i < node.Slots.Capacity; i++)
+                {
+                    if (!node.Slots.IsEmpty(i)) list.Add(InfluenceSlotRef.OnNode(id, i));
+                }
+            }
+            return list;
+        }
+
         private static List<InfluenceSlotRef> OccupiedInfluenceCandidates(GameState state)
         {
             var list = new List<InfluenceSlotRef>();
@@ -1892,18 +2164,29 @@ namespace NomadCity.Core.Engine
             int vouchers = player.Vouchers;
             int markers = player.MarkersInSupply;
 
+            // 「隐蔽仓库」在一次支付里至多顶替 2 个资源。
+            PersistentTacticState hidden = state.FindPersistentTactic(seat, PersistentTacticKind.HiddenWarehouse);
+            int hiddenBudget = hidden == null ? 0 : System.Math.Min(2, hidden.Markers);
+
             foreach (RewardOp op in cost)
             {
                 switch (op.Kind)
                 {
                     case RewardKind.PayResource:
-                        if (!pool.Has(op.Resource, op.Amount))
+                    {
+                        int deficit = System.Math.Max(0, op.Amount - pool.Get(op.Resource));
+                        if (deficit > 0)
                         {
-                            reason = $"{op.Resource} 不足";
-                            return false;
+                            if (deficit > hiddenBudget)
+                            {
+                                reason = $"{op.Resource} 不足";
+                                return false;
+                            }
+                            hiddenBudget -= deficit;
                         }
-                        pool.Set(op.Resource, pool.Get(op.Resource) - op.Amount);
+                        pool.Set(op.Resource, System.Math.Max(0, pool.Get(op.Resource) - op.Amount));
                         break;
+                    }
 
                     case RewardKind.PayVouchers:
                         if (vouchers < op.Amount)
@@ -1950,12 +2233,15 @@ namespace NomadCity.Core.Engine
                         break;
 
                     case RewardKind.ReplaceInfluence:
+                    case RewardKind.ReplaceResourceNodeInfluence:
                         if (markers < op.Amount)
                         {
                             reason = "玩家标记不足";
                             return false;
                         }
-                        if (OccupiedInfluenceCandidates(state).Count == 0)
+                        if ((op.Kind == RewardKind.ReplaceResourceNodeInfluence
+                                ? OccupiedResourceNodeInfluenceCandidates(state)
+                                : OccupiedInfluenceCandidates(state)).Count == 0)
                         {
                             reason = "场上没有可替换的影响力";
                             return false;

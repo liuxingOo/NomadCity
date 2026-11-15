@@ -92,6 +92,9 @@ namespace NomadCity.UI
 
                 int cardId = player != null && i < player.CityPanelSlots.Length ? player.CityPanelSlots[i] : -1;
                 bool isCore = i == PlayerState.CityPanelCoreSlot;
+                // 宣告用过的设施会「倒置」：卡面旋转 180°，和规则里的 CityPanelUsed 对应。
+                bool used = !isCore && player != null && i < player.CityPanelUsed.Length
+                            && player.CityPanelUsed[i];
 
                 int faceIndex = FacilitySupplyPanel.SpriteIndexOf(cardId);
                 Sprite face = faceIndex >= 0 && faceIndex < cardFaces.Length ? cardFaces[faceIndex] : null;
@@ -108,6 +111,7 @@ namespace NomadCity.UI
                     // 空格子没有卡面：建设选位时亮成高亮色提示「可放这里」，
                     // 其余时候全透明（露出底板背景），但都保留 Raycast Target 以便建设时点得到。
                     image.color = hasFace ? Color.white : buildable ? buildSlotHighlight : new Color(1f, 1f, 1f, 0f);
+                    image.rectTransform.localEulerAngles = used ? new Vector3(0f, 0f, 180f) : Vector3.zero;
                 }
 
                 // 卡面自带设施名，底板也印着「核心指挥塔」——一律不再叠文本。

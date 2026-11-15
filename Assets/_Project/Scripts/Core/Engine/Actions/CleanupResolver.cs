@@ -14,6 +14,9 @@ namespace NomadCity.Core.Engine
         /// <summary>执行整个收尾阶段。</summary>
         public static void Resolve(GameState state)
         {
+            // 0. 持续计谋的「每收尾阶段一次」在本阶段重新可用（§9.9）。
+            PersistentTacticRules.ResetCleanupUsage(state);
+
             // 1. 未使用盖放的角色牌与弃牌区一起回到手牌（§10.1.4）。
             ReclaimCharacterCards(state);
 

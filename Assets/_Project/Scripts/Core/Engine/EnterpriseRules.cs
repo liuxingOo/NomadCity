@@ -40,6 +40,12 @@ namespace NomadCity.Core.Engine
                     enterprises.Deck.RemoveAt(0);
                 }
             }
+
+            // 莱茵生命的科室板：开局用同一个随机源抽定 1 张（同一颗种子可复现），
+            // 之后无论是它被选为初始企业，还是作为第 4 块板补进场上，都用这张。
+            enterprises.RhineDepartment = rng != null
+                ? rng.Next(EnterpriseCatalog.DepartmentCount)
+                : 0;
         }
 
         /// <summary>

@@ -73,6 +73,7 @@ namespace NomadCity.Core.Engine
 
             player.HandCharacterCards.Remove(CardId);
             player.PlacedCharacterCard = CardId;
+            player.PlacedCardReturnsToBox = false;
             player.UsedCharacterCardThisTurn = false;
             player.UsedCharacterStrategyThisTurn = false;
             player.UsedCharacterTacticsThisTurn = false;
@@ -142,15 +143,18 @@ namespace NomadCity.Core.Engine
             if (Effect == CharacterEffectKind.Tactics && player.UsedCharacterTacticsThisTurn)
                 return CommandResult.Fail("本回合已经用掉这张牌的「计谋」了。");
 
-            // 非起始玩家每回合只能发动两种效果中的一种（§6.5a）。
-            bool startPlayer = state.FirstPlayerSeat == ActorSeat;
+            // 非起始玩家每回合只能发动两种效果中的一种（§6.5a）；
+            // 企业扩展「拓荒指挥中枢ᴱ」的特殊行动会临时放开这条限制。
+            bool startPlayer = state.FirstPlayerSeat == ActorSeat || player.BothCharacterEffectsThisTurn;
             if (!startPlayer && (player.UsedCharacterStrategyThisTurn || player.UsedCharacterTacticsThisTurn))
                 return CommandResult.Fail("只有起始玩家才能连续发动策略与计谋（§6.5a）；你本回合已经用掉了一种效果。");
 
             CharacterCardDef def = state.Catalog.Character(player.PlacedCharacterCard);
-            if (def == null || !def.HasEffects)
+            bool persistentTactic = def != null && Effect == CharacterEffectKind.Tactics &&
+                                    def.PersistentTactic != PersistentTacticKind.None;
+            if (def == null || (!def.HasEffects && !persistentTactic))
                 return CommandResult.Fail($"「{def?.Name}」的策略 / 计谋效果还没有录入。");
-            if (def.OpsOf(Effect).Count == 0)
+            if (def.OpsOf(Effect).Count == 0 && !persistentTactic)
                 return CommandResult.Fail($"「{def.NameOf(Effect)}」还没有录入效果。");
 
             // 计谋可能要「先支付 N 金券」（如山·商业网络）：付不起不能发动。
@@ -159,7 +163,7 @@ namespace NomadCity.Core.Engine
             {
                 if (op.Kind == RewardKind.PayVouchers) voucherCost += op.Amount;
             }
-            if (voucherCost > 0 && !ActionRules.IgnoresCosts(state) && player.Vouchers < voucherCost)
+            if (voucherCost > 0 && player.Vouchers < voucherCost)
                 return CommandResult.Fail($"发动「{def.NameOf(Effect)}」需要先支付 {voucherCost} 金券。");
 
             return CommandResult.Success;
@@ -170,6 +174,21 @@ namespace NomadCity.Core.Engine
             PlayerState player = state.Player(ActorSeat);
             CharacterCardDef def = state.Catalog.Character(player.PlacedCharacterCard);
 
+            // 「持续留在场上（∞）」的计谋：先把牌作为持续牌放上场，再结算它的「打出时」效果。
+            bool persistent = Effect == CharacterEffectKind.Tactics &&
+                              def.PersistentTactic != PersistentTacticKind.None;
+            PersistentTacticState made = null;
+            if (persistent)
+            {
+                made = new PersistentTacticState
+                {
+                    CardId = player.PlacedCharacterCard,
+                    Seat = ActorSeat,
+                    Kind = def.PersistentTactic,
+                };
+                state.PersistentTactics.Add(made);
+            }
+
             // 企业角色牌（山 / 玛恩纳）的效果由企业扩展执行器处理。
             Report = EffectResolver.Execute(state, ActorSeat, def.OpsOf(Effect), choices,
                 EnterpriseEffectExtension.Instance);
@@ -177,8 +196,24 @@ namespace NomadCity.Core.Engine
             if (Effect == CharacterEffectKind.Strategy) player.UsedCharacterStrategyThisTurn = true;
             else player.UsedCharacterTacticsThisTurn = true;
 
+            if (persistent)
+            {
+                // 这张牌已经留在场上，不再进入弃牌区，也不能再发动它的另一种效果。
+                player.PlacedCharacterCard = -1;
+                player.PlacedCardReturnsToBox = false;
+                player.UsedCharacterCardThisTurn = true;
+                player.CharacterSecondEffectPending = false;
+                PersistentTacticRules.DiscardIfEmpty(state, made);
+                return;
+            }
+
+            // 「红色 · 一次性」效果：这张牌最终进弃牌区时改为放回游戏盒（§5 红色标记）。
+            if (def.ReturnsToBox(Effect)) player.PlacedCardReturnsToBox = true;
+
             // 起始玩家还有另一种效果没用 → 先留住这张牌，等玩家决定「继续用另一种」或「结束使用」（§10.1.2）。
-            bool otherLeft = state.FirstPlayerSeat == ActorSeat
+            // 企业扩展「拓荒指挥中枢ᴱ」放开这条限制的玩家同理（与 Validate 的判定保持一致）。
+            bool bothEffects = state.FirstPlayerSeat == ActorSeat || player.BothCharacterEffectsThisTurn;
+            bool otherLeft = bothEffects
                              && (Effect == CharacterEffectKind.Strategy
                                  ? !player.UsedCharacterTacticsThisTurn
                                  : !player.UsedCharacterStrategyThisTurn);
@@ -196,9 +231,12 @@ namespace NomadCity.Core.Engine
         {
             if (player.PlacedCharacterCard >= 0)
             {
-                player.DiscardCharacterCards.Add(player.PlacedCharacterCard);
+                // 红色 · 一次性效果：放回游戏盒，本局不再进入任何牌堆 / 弃牌区。
+                if (!player.PlacedCardReturnsToBox)
+                    player.DiscardCharacterCards.Add(player.PlacedCharacterCard);
                 player.PlacedCharacterCard = -1;
             }
+            player.PlacedCardReturnsToBox = false;
             player.UsedCharacterCardThisTurn = true;
             player.CharacterSecondEffectPending = false;
         }

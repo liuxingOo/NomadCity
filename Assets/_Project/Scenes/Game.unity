@@ -20650,7 +20650,6 @@ MonoBehaviour:
   actionLogPanel: {fileID: 758365090}
   chatPanel: {fileID: 222592272}
   screenController: {fileID: 1187456255}
-  developerMode: 0
   entrepreneurPanel: {fileID: 778236307}
 --- !u!4 &1187456252
 Transform:

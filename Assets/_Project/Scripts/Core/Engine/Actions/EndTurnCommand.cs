@@ -34,9 +34,8 @@ namespace NomadCity.Core.Engine
             if (state.Enterprises != null && state.Enterprises.PendingAdvanceSeat == ActorSeat)
                 return CommandResult.Fail("还要先选择 1 家其他企业提升 1 级合作等级（企业特效）。");
 
-            // 规则要求每轮必须做 1 次主要行动才能结束回合；开发者模式放开这条，
-            // 方便单独测快速行动 / 阶段流程。
-            if (!state.DeveloperMode && !state.MainActionTakenThisRound)
+            // 规则要求每轮必须做 1 次主要行动才能结束回合。
+            if (!state.MainActionTakenThisRound)
                 return CommandResult.Fail("本回合还没有执行主要行动：必须先做 1 次主要行动，才能结束回合（§6.1）。");
 
             // 自己城市所在地还有未结算的事件牌：先结算，否则这张牌会跨回合挂着。
@@ -56,6 +55,7 @@ namespace NomadCity.Core.Engine
             // 主动结束回合 = 连没用掉的「额外主要行动」也一并放弃，直接把行动权交给下一位（§6.3f）。
             // 交出之后 CompletePlayerAction 会复位本轮的主要行动名额。
             state.Player(ActorSeat).ExtraMainActionsThisTurn = 0;
+            state.Player(ActorSeat).ExtraMainActionsExcludingSpecialThisTurn = 0;
             TurnFlow.CompletePlayerAction(state);
         }
     }

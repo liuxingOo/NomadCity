@@ -39,6 +39,12 @@ namespace NomadCity.Core.Model
         /// <summary>本回合盖放的角色牌 id；未盖放为 -1。私有。</summary>
         public int PlacedCharacterCard = -1;
 
+        /// <summary>
+        /// 本回合盖放的角色牌是否为「红色 · 一次性」效果：用完后进弃牌区时改为放回游戏盒。
+        /// 盖放新牌时复位；由 <see cref="Engine.UseCharacterCardCommand"/> 在发动一次性效果时置位。
+        /// </summary>
+        public bool PlacedCardReturnsToBox;
+
         /// <summary>本回合是否已使用过盖放的角色牌（每回合至多一次）。</summary>
         public bool UsedCharacterCardThisTurn;
 
@@ -114,11 +120,29 @@ namespace NomadCity.Core.Model
         public int ExtraMainActionsThisTurn;
 
         /// <summary>
+        /// 本回合尚待执行的「额外主要行动」次数，且这些行动**不能是**城市样式特殊行动
+        /// （企业扩展「核心商业区ᴱ / 拓荒指挥中枢ᴱ」）。与 <see cref="ExtraMainActionsThisTurn"/> 分开计。
+        /// </summary>
+        public int ExtraMainActionsExcludingSpecialThisTurn;
+
+        /// <summary>
+        /// 本回合使用角色牌时可以同时发动策略与计谋（企业扩展「拓荒指挥中枢ᴱ」的特殊行动），
+        /// 相当于临时获得起始玩家的连用权限。
+        /// </summary>
+        public bool BothCharacterEffectsThisTurn;
+
+        /// <summary>
         /// 禁止使用角色牌的「轮」号（== <see cref="GameState.ActionRound"/> 时本玩家不能使用角色牌，0 = 无限制）。
         /// 「源石工业中枢」/「高效移动管理体系」特殊行动的「使用此行动的轮中不能使用角色牌」，
         /// 收尾阶段由 <see cref="ResetTurnScopedState"/> 清零。
         /// </summary>
         public int CharacterCardBanRound;
+
+        /// <summary>
+        /// 本回合是否处于森蚺·策略「我寻思能行」的被动修正状态：免费的移动城市本应移除对手影响力时，
+        /// 改为由该玩家移动这些影响力。收尾阶段由 <see cref="ResetTurnScopedState"/> 清零。
+        /// </summary>
+        public bool FreeMoveRelocatesInfluenceThisTurn;
 
         public PlayerState(int seatIndex, PlayerColor color)
         {
@@ -136,13 +160,17 @@ namespace NomadCity.Core.Model
                 Score = Score,
                 MarkersInSupply = MarkersInSupply,
                 PlacedCharacterCard = PlacedCharacterCard,
+                PlacedCardReturnsToBox = PlacedCardReturnsToBox,
                 UsedCharacterCardThisTurn = UsedCharacterCardThisTurn,
                 UsedCharacterStrategyThisTurn = UsedCharacterStrategyThisTurn,
                 UsedCharacterTacticsThisTurn = UsedCharacterTacticsThisTurn,
                 CharacterSecondEffectPending = CharacterSecondEffectPending,
                 MobileCityNodeId = MobileCityNodeId,
                 ExtraMainActionsThisTurn = ExtraMainActionsThisTurn,
+                ExtraMainActionsExcludingSpecialThisTurn = ExtraMainActionsExcludingSpecialThisTurn,
+                BothCharacterEffectsThisTurn = BothCharacterEffectsThisTurn,
                 CharacterCardBanRound = CharacterCardBanRound,
+                FreeMoveRelocatesInfluenceThisTurn = FreeMoveRelocatesInfluenceThisTurn,
                 SetupDiscardDone = SetupDiscardDone,
             };
 
@@ -166,7 +194,11 @@ namespace NomadCity.Core.Model
             CharacterSecondEffectPending = false;
             UsedPatternActionsThisTurn.Clear();
             ExtraMainActionsThisTurn = 0;
+            ExtraMainActionsExcludingSpecialThisTurn = 0;
+            BothCharacterEffectsThisTurn = false;
             CharacterCardBanRound = 0;
+            FreeMoveRelocatesInfluenceThisTurn = false;
+            PlacedCardReturnsToBox = false;
         }
     }
 }

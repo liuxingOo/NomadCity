@@ -77,10 +77,9 @@ namespace NomadCity.Core.Model
         public bool IsGameOver;
 
         /// <summary>
-        /// 开发者模式（仅用于调试）：放开「轮次 / 阶段 / 红色区域是否开放」这几道流程闸门，
-        /// 让任何座位在任何阶段都能直接执行行动，方便单独测各个按钮。**不改变规则效果本身**
-        /// （金券 / 资源 / 标记该扣还是扣）。由 GameBootstrap 在开局时按 Inspector 上的开关写入，
-        /// 正式游戏必须为 false。
+        /// 开发者模式（仅调试）：标记本局是从主菜单「以开发者模式启动」进入的。
+        /// 它本身**不改变任何规则**，只用于让「开发者模式」面板与其调试命令判断可用性；
+        /// 正常的游戏流程、费用与阶段限制都和单人热座完全一致。
         /// </summary>
         public bool DeveloperMode;
 
@@ -150,8 +149,28 @@ namespace NomadCity.Core.Model
         /// </summary>
         public int ActiveSpecialActionPatternId = -1;
 
+        /// <summary>
+        /// 需要向所有玩家公开展示的牌（罗德岛干员特派放回游戏盒、4 级从弃牌区回收）。
+        /// 只追加、不清空；界面按「已弹过多少条」判断哪些是新记录（热座下等同把牌亮给所有人看）。
+        /// </summary>
+        public readonly List<PublicReveal> PublicReveals = new();
+
         /// <summary>企业扩展的运行时状态（8 块企业板、各玩家的合作等级、科室板等）。</summary>
         public EnterpriseState Enterprises = new();
+
+        /// <summary>
+        /// 持续留在场上的干员计谋（∞ 计谋，Doc/EnterpriseExpansion.md §9.9）。
+        /// 这些牌不再进入任何牌堆 / 弃牌区，而是作为状态对象留在这里。
+        /// </summary>
+        public readonly List<PersistentTacticState> PersistentTactics = new();
+
+        /// <summary>取某位玩家的某类持续计谋；没有返回 null。</summary>
+        public PersistentTacticState FindPersistentTactic(int seat, PersistentTacticKind kind)
+        {
+            foreach (PersistentTacticState tactic in PersistentTactics)
+                if (tactic.Seat == seat && tactic.Kind == kind) return tactic;
+            return null;
+        }
 
         public GameState(GameSetup setup)
         {
@@ -193,6 +212,7 @@ namespace NomadCity.Core.Model
             copy.FacilityDeck.AddRange(FacilityDeck);
             copy.FacilitySupply.AddRange(FacilitySupply);
             copy.ExtensionHubSupply.AddRange(ExtensionHubSupply);
+            copy.PublicReveals.AddRange(PublicReveals); // PublicReveal 是只读对象，逐项引用即可
             copy.EventDeckGreen.AddRange(EventDeckGreen);
             copy.EventDeckYellow.AddRange(EventDeckYellow);
             copy.EventDeckRed.AddRange(EventDeckRed);
@@ -202,6 +222,11 @@ namespace NomadCity.Core.Model
             foreach (CityPatternState pattern in CityPatternStates)
             {
                 copy.CityPatternStates.Add(pattern.Clone());
+            }
+
+            foreach (PersistentTacticState tactic in PersistentTactics)
+            {
+                copy.PersistentTactics.Add(tactic.Clone());
             }
 
             foreach (KeyValuePair<int, List<int>> choice in HarvestChoices)
@@ -241,6 +266,21 @@ namespace NomadCity.Core.Model
         {
             int index = CityPatternCards.IndexOf(cardId);
             return index < 0 ? null : CityPatternStates[index];
+        }
+    }
+
+    /// <summary>一条「向所有玩家展示」的记录：谁展示了哪张牌、为什么（只用于界面提示，不参与规则）。</summary>
+    public sealed class PublicReveal
+    {
+        public readonly int Seat;
+        public readonly int CardId;
+        public readonly string Reason;
+
+        public PublicReveal(int seat, int cardId, string reason)
+        {
+            Seat = seat;
+            CardId = cardId;
+            Reason = reason ?? string.Empty;
         }
     }
 }

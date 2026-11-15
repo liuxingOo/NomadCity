@@ -114,6 +114,14 @@ namespace NomadCity.Core.Engine
                 return; // 该玩家本轮还能继续行动，不推进座位
             }
 
+            // 「特殊行动以外」的额外主要行动同样让玩家在本轮继续行动。
+            if (actor.ExtraMainActionsExcludingSpecialThisTurn > 0)
+            {
+                actor.ExtraMainActionsExcludingSpecialThisTurn--;
+                state.MainActionTakenThisRound = false;
+                return;
+            }
+
             state.ActiveSeat = state.NextSeat(state.ActiveSeat);
             state.MainActionTakenThisRound = false; // 换人 → 下一家的主要行动名额复位
             if (state.ActiveSeat != state.FirstPlayerSeat) return; // 这一轮还没走完
@@ -185,7 +193,17 @@ namespace NomadCity.Core.Engine
             if (state.Phase == TurnPhase.Harvest && !state.HarvestPending)
             {
                 AdvancePhase(state); // → 收尾阶段并执行收尾结算（§8）
-                AdvancePhase(state); // → 下一回合的角色牌盖放 / 终局结算
+                if (state.Phase == TurnPhase.Cleanup && !PersistentTacticRules.HasCleanupActionsAvailable(state))
+                    AdvancePhase(state); // → 下一回合的角色牌盖放 / 终局结算
+                return true;
+            }
+
+            // 收尾阶段的持续计谋可选操作：还有玩家能发动就停在这里等他自己决定；
+            // 都用完（或不想用、直接发 AdvancePhaseCommand）后自动进入下一回合。
+            if (state.Phase == TurnPhase.Cleanup)
+            {
+                if (PersistentTacticRules.HasCleanupActionsAvailable(state)) return false;
+                AdvancePhase(state);
                 return true;
             }
 

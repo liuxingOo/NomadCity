@@ -48,7 +48,7 @@ namespace NomadCity.Tests
 
             Assert.IsTrue(result.Ok, result.Error);
             Assert.IsTrue(player.CityPanelUsed[slot], "§6.5b 步 1：用到的设施要标记为已使用。");
-            Assert.AreEqual(29, player.MarkersInSupply, "§10.2 步 2：宣告要从供应堆拿出 1 个玩家标记。");
+            Assert.AreEqual(28, player.MarkersInSupply, "§10.2 步 2：宣告要从供应堆拿出 1 个玩家标记（开局 29 个）。");
             Assert.AreEqual(scoreBefore + 3, player.Score, "§6.5b 步 3：宣告奖励分数立即结算。");
 
             CityPatternState pattern = FindPattern(engine.State, PatternId);
@@ -76,7 +76,7 @@ namespace NomadCity.Tests
 
             Assert.IsTrue(first.Ok, first.Error);
             Assert.IsTrue(second.Ok, second.Error);
-            Assert.AreEqual(28, player.MarkersInSupply);
+            Assert.AreEqual(27, player.MarkersInSupply);
             Assert.AreEqual(2, FindPattern(engine.State, PatternId).CountOf(0),
                 "§10.2：样式是公共目标，同一玩家可以多次组合出同一个样式。");
         }

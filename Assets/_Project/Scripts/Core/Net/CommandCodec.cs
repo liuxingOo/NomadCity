@@ -25,6 +25,9 @@ namespace NomadCity.Core.Net
         /// <summary>Flags 里 bit1 的含义：ResolveEventOptionCommand.GrantRewards。</summary>
         public const uint GrantRewardsBit = 1u << 1;
 
+        /// <summary>Flags 里 bit2 的含义：DeveloperSetEnterpriseLevelCommand.Settle。</summary>
+        public const uint SettleBit = 1u << 2;
+
         // —— 编码：命令对象 → DTO ——
 
         /// <summary>把一条命令按**实际运行时类型**装箱进 DTO。</summary>
@@ -263,6 +266,19 @@ namespace NomadCity.Core.Net
                         Items = AnswerItems(c.EffectChoices),
                     };
 
+                // 开发者：设置企业合作等级：P0 = BoardId；P1 = Level；Flags bit2 = 是否结算；P3/Items = 答案。
+                case DeveloperSetEnterpriseLevelCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.DeveloperSetEnterpriseLevel,
+                        Seat = c.ActorSeat,
+                        P0 = c.BoardId,
+                        P1 = c.Level,
+                        P3 = AnswerCount(c.EffectChoices),
+                        Items = AnswerItems(c.EffectChoices),
+                        Flags = c.Settle ? SettleBit : 0u,
+                    };
+
                 // 选莱茵生命科室板：P0 = DepartmentId。
                 case PickRhineDepartmentCommand c:
                     return new CommandDto
@@ -270,6 +286,17 @@ namespace NomadCity.Core.Net
                         Kind = CommandKind.PickRhineDepartment,
                         Seat = c.ActorSeat,
                         P0 = c.DepartmentId,
+                    };
+
+                // 收尾阶段发动持续计谋：P0 = PersistentTacticKind；P3/Items = 答案。
+                case UsePersistentTacticCleanupCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.UsePersistentTacticCleanup,
+                        Seat = c.ActorSeat,
+                        P0 = (int)c.Kind,
+                        P3 = AnswerCount(c.EffectChoices),
+                        Items = AnswerItems(c.EffectChoices),
                     };
 
                 // 开局弃 2 张角色牌：P0 = 第一张，P1 = 第二张。
@@ -280,6 +307,75 @@ namespace NomadCity.Core.Net
                         Seat = c.ActorSeat,
                         P0 = c.CardA,
                         P1 = c.CardB,
+                    };
+
+                // 开发者：设置回合：P0 = TurnNumber；P1 = ActionRound。
+                case DeveloperSetTurnCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.DeveloperSetTurn,
+                        Seat = c.ActorSeat,
+                        P0 = c.TurnNumber,
+                        P1 = c.ActionRound,
+                    };
+
+                // 开发者：修改玩家数值：Seat = 目标座位；P0 = (int)Stat；P1 = Value。
+                case DeveloperSetPlayerStatCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.DeveloperSetPlayerStat,
+                        Seat = c.ActorSeat,
+                        P0 = (int)c.Stat,
+                        P1 = c.Value,
+                    };
+
+                // 开发者：指定设施建设：Seat = 目标座位；P0 = FacilityId；P1 = PanelSlot。
+                case DeveloperBuildFacilityCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.DeveloperBuildFacility,
+                        Seat = c.ActorSeat,
+                        P0 = c.FacilityId,
+                        P1 = c.PanelSlot,
+                    };
+
+                // 开发者：移除设施：Seat = 目标座位；P0 = PanelSlot（-1 = 全部非核心）。
+                case DeveloperRemoveFacilityCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.DeveloperRemoveFacility,
+                        Seat = c.ActorSeat,
+                        P0 = c.PanelSlot,
+                    };
+
+                // 开发者：重置倒置设施：Seat = 目标座位；P0 = PanelSlot（-1 = 全部）。
+                case DeveloperResetPanelUseCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.DeveloperResetPanelUse,
+                        Seat = c.ActorSeat,
+                        P0 = c.PanelSlot,
+                    };
+
+                // 开发者：指定宣告城市样式：Seat = 目标座位；P0 = PatternCardId。
+                case DeveloperDeclareCityPatternCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.DeveloperDeclareCityPattern,
+                        Seat = c.ActorSeat,
+                        P0 = c.PatternCardId,
+                    };
+
+                // 开发者：使用角色牌：Seat = 目标座位；P0 = CardId；P1 = (int)Effect；P3/Items = 答案。
+                case DeveloperUseCharacterCardCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.DeveloperUseCharacterCard,
+                        Seat = c.ActorSeat,
+                        P0 = c.CardId,
+                        P1 = (int)c.Effect,
+                        P3 = AnswerCount(c.EffectChoices),
+                        Items = AnswerItems(c.EffectChoices),
                     };
 
                 // P0 = 座位号；P1 = 选点数；Items = 本座位的选点 id（只传自己的）。
@@ -407,6 +503,36 @@ namespace NomadCity.Core.Net
 
                 case CommandKind.PickRhineDepartment:
                     return new PickRhineDepartmentCommand(dto.Seat, dto.P0);
+
+                case CommandKind.DeveloperSetEnterpriseLevel:
+                    return new DeveloperSetEnterpriseLevelCommand(dto.Seat, dto.P0, dto.P1,
+                        DecodeAnswers(dto), (dto.Flags & SettleBit) != 0);
+
+                case CommandKind.UsePersistentTacticCleanup:
+                    return new UsePersistentTacticCleanupCommand(dto.Seat,
+                        (PersistentTacticKind)dto.P0, DecodeAnswers(dto));
+
+                case CommandKind.DeveloperSetTurn:
+                    return new DeveloperSetTurnCommand(dto.P0, dto.P1);
+
+                case CommandKind.DeveloperSetPlayerStat:
+                    return new DeveloperSetPlayerStatCommand(dto.Seat, (DeveloperPlayerStat)dto.P0, dto.P1);
+
+                case CommandKind.DeveloperBuildFacility:
+                    return new DeveloperBuildFacilityCommand(dto.Seat, dto.P0, dto.P1);
+
+                case CommandKind.DeveloperRemoveFacility:
+                    return new DeveloperRemoveFacilityCommand(dto.Seat, dto.P0);
+
+                case CommandKind.DeveloperResetPanelUse:
+                    return new DeveloperResetPanelUseCommand(dto.Seat, dto.P0);
+
+                case CommandKind.DeveloperDeclareCityPattern:
+                    return new DeveloperDeclareCityPatternCommand(dto.Seat, dto.P0);
+
+                case CommandKind.DeveloperUseCharacterCard:
+                    return new DeveloperUseCharacterCardCommand(dto.Seat, dto.P0,
+                        (CharacterEffectKind)dto.P1, DecodeAnswers(dto));
 
                 default:
                     throw new ArgumentException($"无法解码未知的命令 Kind：{dto.Kind}。", nameof(dto));

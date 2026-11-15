@@ -15,6 +15,9 @@ namespace NomadCity.App
         [SerializeField] private bool enterpriseExpansion;
         [SerializeField] private bool infectedExpansion;
 
+        [Tooltip("本局是否以开发者模式启动：仍按单人热座正常开局，只额外显示「开发者模式」面板")]
+        [SerializeField] private bool developerMode;
+
         [Tooltip("联机身份：主菜单写入；None = 单机热座")]
         [SerializeField] private OnlineRole onlineRole = OnlineRole.None;
 
@@ -44,6 +47,13 @@ namespace NomadCity.App
         {
             get => infectedExpansion;
             set => infectedExpansion = value;
+        }
+
+        /// <summary>本局是否以开发者模式启动。联机时由 GameBootstrap 强制关闭。</summary>
+        public bool DeveloperMode
+        {
+            get => developerMode;
+            set => developerMode = value;
         }
 
         /// <summary>本局的联机身份。主菜单在加载 Game 场景前写入，GameBootstrap 读取。</summary>

@@ -301,8 +301,8 @@ namespace NomadCity.Tests
             Assert.IsTrue(state.Map.Route(0).Slots.IsEmpty(0));
             Assert.IsTrue(state.Map.Node(1).Slots.IsEmpty(0));
             Assert.AreEqual(0, state.Map.Node(1).Slots.OwnerOf(1));
-            Assert.AreEqual(31, state.Players[1].MarkersInSupply); // 标记退回
-            Assert.AreEqual(31, state.Players[2].MarkersInSupply);
+            Assert.AreEqual(30, state.Players[1].MarkersInSupply); // 29 + 退回的 1 个
+            Assert.AreEqual(30, state.Players[2].MarkersInSupply);
         }
 
         // ————————————————————— 路费 —————————————————————

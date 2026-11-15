@@ -81,8 +81,9 @@ namespace NomadCity.Core.Engine
             if (card.Kind != FacilityKind.Standard)
                 return CommandResult.Fail($"{card.Name} 不是可以建设的设施牌。");
 
-            if (!state.FacilitySupply.Contains(FacilityId))
-                return CommandResult.Fail($"{card.Name} 不在设施供应区里，不能建设。");
+            // 可以从设施供应区拿，也可以从「工程订购」持续计谋牌下拿（§9.9）。
+            if (!state.FacilitySupply.Contains(FacilityId) && !IsUnderEngineeringOrder(state, ActorSeat, FacilityId))
+                return CommandResult.Fail($"{card.Name} 不在设施供应区里，也不在「工程订购」牌下，不能建设。");
 
             if (!player.HasFreePanelSlot)
                 return CommandResult.Fail("城市面板已经放满了，没有空位可以建设（§6.4e 步 2）。");
@@ -131,15 +132,16 @@ namespace NomadCity.Core.Engine
         private CommandResult ValidatePayment(GameState state, FacilityCardDef card, PlayerState player)
         {
             if (freeBuild || IsFreeToBuild(card)) return CommandResult.Success;
-            if (ActionRules.IgnoresCosts(state)) return CommandResult.Success; // 开发者模式：不查费用
 
             switch (Payment)
             {
                 case FacilityPayment.Resources:
-                    if (!FacilityCardDef.CanPayWithResources(
-                            EffectiveResourceCost(state, ActorSeat, card), player.Resources, player.Vouchers))
+                {
+                    IReadOnlyList<RewardOp> cost = EffectiveResourceCost(state, ActorSeat, card);
+                    if (!CanPayResources(state, ActorSeat, cost, player))
                         return CommandResult.Fail($"资源不足以支付「{card.Name}」的资源费用。");
                     return CommandResult.Success;
+                }
 
                 case FacilityPayment.Vouchers:
                     if (player.Vouchers < card.VoucherCost)
@@ -151,7 +153,27 @@ namespace NomadCity.Core.Engine
             }
         }
 
-        /// <summary>这张牌是否免付费：带「免费」关键词，或两个费用都是 0。</summary>
+        /// <summary>
+        /// 资源费用是否付得起；有「隐蔽仓库」持续计谋时，牌上的标记可以顶替至多 2 个资源（§9.9）。
+        /// </summary>
+        private static bool CanPayResources(GameState state, int seat, IReadOnlyList<RewardOp> cost,
+            PlayerState player)
+        {
+            if (FacilityCardDef.CanPayWithResources(cost, player.Resources, player.Vouchers)) return true;
+
+            PersistentTacticState hidden = state.FindPersistentTactic(seat, PersistentTacticKind.HiddenWarehouse);
+            int budget = hidden == null ? 0 : Math.Min(2, hidden.Markers);
+
+            foreach (RewardOp op in cost)
+            {
+                if (op.Kind == RewardKind.PayVouchers) continue;
+                int deficit = Math.Max(0, op.Amount - player.Resources.Get(op.Resource));
+                budget -= deficit;
+                if (budget < 0) return false;
+            }
+            return true;
+        }
+        /// <summary>牌面标了「免建」，或资源 / 金券费用都为 0 的设施，建设时不收费。</summary>
         private static bool IsFreeToBuild(FacilityCardDef card) =>
             card.IsFree || (card.ResourceCost.Count == 0 && card.VoucherCost == 0);
 
@@ -187,10 +209,11 @@ namespace NomadCity.Core.Engine
         private void Pay(GameState state, PlayerState player, FacilityCardDef card)
         {
             if (freeBuild || IsFreeToBuild(card)) return;
-            if (ActionRules.IgnoresCosts(state)) return; // 开发者模式：不扣费
 
             if (Payment == FacilityPayment.Resources)
             {
+                IEffectChoices picker = choices ?? FirstAvailableChoices.Default;
+                int markerBudget = 2; // 「隐蔽仓库」每次支付至多用 2 个标记代替资源。
                 foreach (RewardOp op in EffectiveResourceCost(state, ActorSeat, card))
                 {
                     if (op.Kind == RewardKind.PayVouchers)
@@ -200,7 +223,9 @@ namespace NomadCity.Core.Engine
                     }
                     else
                     {
-                        player.Resources.TrySpend(op.Resource, op.Amount);
+                        PersistentTacticRules.TrySubstituteForPayment(state, ActorSeat, op.Resource,
+                            op.Amount, ref markerBudget, picker, out int remaining);
+                        player.Resources.TrySpend(op.Resource, remaining);
                     }
                 }
             }
@@ -210,15 +235,35 @@ namespace NomadCity.Core.Engine
             }
         }
 
-        /// <summary>步 2：从供应区拿走这张牌（并补牌），放到面板空格上，结算牌面分数。</summary>
+        /// <summary>步 2：从供应区（或「工程订购」牌下）拿走这张牌，放到面板空格上，结算牌面分数。</summary>
         private void PlaceOnPanel(GameState state, PlayerState player, FacilityCardDef card)
         {
-            state.FacilitySupply.Remove(FacilityId);
-            BoardSetup.RefillFacilitySupply(state);
+            PersistentTacticState order = state.FindPersistentTactic(ActorSeat,
+                PersistentTacticKind.EngineeringOrder);
+            bool fromOrder = order != null && order.AttachedFacilityIds.Remove(FacilityId);
+
+            if (!fromOrder)
+            {
+                state.FacilitySupply.Remove(FacilityId);
+                BoardSetup.RefillFacilitySupply(state);
+            }
+            else
+            {
+                // 牌下没有设施了 → 「工程订购」移到所有者的角色牌弃牌区。
+                PersistentTacticRules.DiscardIfEmpty(state, order);
+            }
 
             player.CityPanelSlots[PanelSlot] = FacilityId;
             player.BuiltFacilities.Add(FacilityId);
             player.Score += card.Score;
+        }
+
+        /// <summary>这张牌是否压在本人「工程订购」持续计谋牌下。</summary>
+        private static bool IsUnderEngineeringOrder(GameState state, int seat, int facilityId)
+        {
+            PersistentTacticState order = state.FindPersistentTactic(seat,
+                PersistentTacticKind.EngineeringOrder);
+            return order != null && order.AttachedFacilityIds.Contains(facilityId);
         }
     }
 }

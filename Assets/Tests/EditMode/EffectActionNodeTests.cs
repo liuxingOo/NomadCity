@@ -52,7 +52,11 @@ namespace NomadCity.Tests
             GameEngine engine = NewGame();
             GameState state = engine.State;
             PlayerState player = state.Players[0];
-            state.DeveloperMode = true; // 跳过付费，专测「建造」这一步本身
+            // 建造仍要照常支付设施的资源费用；先把四种资源补足，专测「建造」这一步本身。
+            player.Resources.Set(ResourceType.Orirock, 10);
+            player.Resources.Set(ResourceType.Originium, 10);
+            player.Resources.Set(ResourceType.Oriron, 10);
+            player.Resources.Set(ResourceType.OriginitePrime, 10);
 
             int card = state.FacilitySupply[0];
             EffectReport report = EffectResolver.Execute(state, 0, new[] { RewardOp.BuildOnce() });
@@ -381,6 +385,9 @@ namespace NomadCity.Tests
             public int ChooseOpponent(int seat, RewardOp op, GameState state,
                 IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
 
+            public int ChoosePlayer(int seat, RewardOp op, GameState state,
+                IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
+
             public int ChooseDiscardedCharacterCard(int seat, RewardOp op, GameState state,
                 IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
 
@@ -416,6 +423,9 @@ namespace NomadCity.Tests
 
             public int ChooseSupplyFacility(int seat, RewardOp op, GameState state,
                 IReadOnlyList<int> candidates) => candidates.Count > 0 ? candidates[0] : -1;
+
+            public int ChooseAmount(int seat, RewardOp op, GameState state, int min, int max) =>
+                max <= 0 ? -1 : max;
 
             public int ChooseOptionalStep(int seat, RewardOp op, GameState state, int stepIndex, string label) => 0;
         }

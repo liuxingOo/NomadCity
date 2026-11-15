@@ -22,6 +22,9 @@ namespace NomadCity.App
         [Tooltip("所有主页按钮（如「创建房间」）。打开任何主页弹窗时统一隐藏，关掉弹窗后统一恢复；以后再加主页按钮，直接拖进这个列表即可")]
         [SerializeField] private GameObject[] menuButtons;
 
+        /// <summary>运行时创建的「以开发者模式启动」按钮（复制主页按钮样式，不要求改场景）。</summary>
+        private GameObject developerButton;
+
         [Tooltip("开局设置弹窗里的「进入游戏」按钮（单机）。从「单机游戏」进来时显示，从「创建游戏」进来时隐藏")]
         [SerializeField] private GameObject localConfirmButton;
 
@@ -81,6 +84,7 @@ namespace NomadCity.App
                 session.Role = OnlineRole.None;
                 session.JoinCode = string.Empty;
                 session.Nickname = string.Empty;
+                session.DeveloperMode = false;
             }
 
             if (hostNicknameInput == null)
@@ -111,6 +115,80 @@ namespace NomadCity.App
 
             if (menuButtons == null || menuButtons.Length == 0)
                 Debug.LogWarning("[主菜单] 未指定主页按钮（Menu Buttons），打开弹窗时按钮不会隐藏。");
+
+            EnsureDeveloperButton();
+        }
+
+        /// <summary>
+        /// 运行时补一个「以开发者模式启动」按钮：主菜单场景里只有原来的三个按钮，
+        /// 这里复制第一个主页按钮的样式，摆在所有按钮最下方，并纳入 <see cref="menuButtons"/> 统一显隐。
+        /// 场景里已经有同名按钮时不会重复创建。
+        /// </summary>
+        private void EnsureDeveloperButton()
+        {
+            if (developerButton != null) return;
+
+            GameObject template = null;
+            if (menuButtons != null)
+            {
+                foreach (GameObject button in menuButtons)
+                {
+                    if (button != null) { template = button; break; }
+                }
+            }
+
+            if (template == null)
+            {
+                Debug.LogWarning("[主菜单] 没有可复制的按钮模板，无法创建「以开发者模式启动」按钮。");
+                return;
+            }
+
+            developerButton = Instantiate(template, template.transform.parent);
+            developerButton.name = "Btn_DeveloperMode";
+
+            // 与模板同锚点 / 同尺寸，并在现有按钮的最下方再往下排一行。
+            var templateRect = template.GetComponent<RectTransform>();
+            var rect = developerButton.GetComponent<RectTransform>();
+            if (templateRect != null && rect != null)
+            {
+                rect.anchorMin = templateRect.anchorMin;
+                rect.anchorMax = templateRect.anchorMax;
+                rect.pivot = templateRect.pivot;
+                rect.sizeDelta = templateRect.sizeDelta;
+
+                float lowest = templateRect.anchoredPosition.y;
+                float step = templateRect.sizeDelta.y + 24f;
+                if (menuButtons != null)
+                {
+                    foreach (GameObject button in menuButtons)
+                    {
+                        if (button == null) continue;
+                        var other = button.GetComponent<RectTransform>();
+                        if (other != null) lowest = Mathf.Min(lowest, other.anchoredPosition.y);
+                    }
+                }
+
+                rect.anchoredPosition = new Vector2(templateRect.anchoredPosition.x, lowest - step);
+            }
+
+            var click = developerButton.GetComponent<Button>();
+            if (click != null)
+            {
+                click.onClick.RemoveAllListeners();
+                click.onClick.AddListener(StartDeveloperGame);
+                click.interactable = true;
+            }
+
+            TMP_Text label = developerButton.GetComponentInChildren<TMP_Text>(true);
+            if (label != null) label.text = "以开发者模式启动";
+
+            // 纳入主页按钮列表，打开任何弹窗时跟着一起隐藏。
+            var buttons = new System.Collections.Generic.List<GameObject>();
+            if (menuButtons != null) buttons.AddRange(menuButtons);
+            buttons.Add(developerButton);
+            menuButtons = buttons.ToArray();
+
+            developerButton.SetActive(true);
         }
 
         /// <summary>绑到「单机游戏」按钮的 OnClick：弹出开局设置弹窗，确认按钮是「进入游戏」。</summary>
@@ -279,8 +357,25 @@ namespace NomadCity.App
             if (!ValidateSession()) return;
 
             session.Role = OnlineRole.None;
+            session.DeveloperMode = false;
             session.JoinCode = string.Empty;
             session.Nickname = string.Empty;
+            LoadScene(gameSceneName);
+        }
+
+        /// <summary>
+        /// 绑到「以开发者模式启动」按钮的 OnClick：仍按单人热座正常开局，
+        /// 只在 Game 场景里额外显示「开发者模式」面板。
+        /// </summary>
+        public void StartDeveloperGame()
+        {
+            if (!ValidateSession()) return;
+
+            session.Role = OnlineRole.None;
+            session.DeveloperMode = true;
+            session.JoinCode = string.Empty;
+            session.Nickname = string.Empty;
+            Debug.Log($"[主菜单] 以开发者模式启动 —— {session.ToGameSetup()}");
             LoadScene(gameSceneName);
         }
 
@@ -294,6 +389,7 @@ namespace NomadCity.App
             if (!TryReadNickname(hostNicknameInput, "房主", out string hostName)) return;
 
             session.Role = OnlineRole.Host;
+            session.DeveloperMode = false;
             session.JoinCode = string.Empty;
             session.Nickname = hostName;
             Debug.Log($"[主菜单] 创建联机房间 —— {session.ToGameSetup()}，昵称：{session.Nickname}");
@@ -322,6 +418,7 @@ namespace NomadCity.App
             if (!TryReadNickname(clientNicknameInput, "玩家", out string playerName)) return;
 
             session.Role = OnlineRole.Client;
+            session.DeveloperMode = false;
             session.JoinCode = code;
             session.Nickname = playerName;
             Debug.Log($"[主菜单] 加入联机房间 {code}，昵称：{session.Nickname}");

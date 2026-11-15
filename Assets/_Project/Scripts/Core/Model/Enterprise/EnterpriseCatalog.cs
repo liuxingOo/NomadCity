@@ -33,7 +33,7 @@ namespace NomadCity.Core.Model.Enterprise
     {
         None = 0,
 
-        /// <summary>干员特派（罗德岛 3 / 5 级）：尚需干员牌数据，暂不结算。</summary>
+        /// <summary>干员特派（罗德岛 3 / 5 级）：抽 2 张干员牌选 1、其余洗回，或全部洗回得 1 分；由 EnterpriseCommands.DispatchOperators 结算。</summary>
         OperatorDispatch = 1,
 
         /// <summary>选择 1 家其他企业，提升 1 级（罗德岛 1 级）。</summary>
@@ -91,8 +91,15 @@ namespace NomadCity.Core.Model.Enterprise
         /// <summary>附加数值：目前只用于「免费建造的金券费用上限」（0 = 不限）。</summary>
         public readonly int Amount;
 
+        /// <summary>
+        /// 这条企业特效在一回合内可以重复触发（雷神工业 3 / 5 级的「不占用主要行动的建设」）。
+        /// 其余特效默认一回合一次。
+        /// </summary>
+        public readonly bool UnlimitedPerTurn;
+
         public EnterpriseLevel(int level, string text, bool isEffect, EventOption option = null,
-            EnterpriseSpecial special = EnterpriseSpecial.None, int amount = 0)
+            EnterpriseSpecial special = EnterpriseSpecial.None, int amount = 0,
+            bool unlimitedPerTurn = false)
         {
             Level = level;
             Text = text ?? string.Empty;
@@ -100,6 +107,7 @@ namespace NomadCity.Core.Model.Enterprise
             Option = option;
             Special = special;
             Amount = amount;
+            UnlimitedPerTurn = unlimitedPerTurn;
         }
 
         public override string ToString() => $"Lv{Level}：{Text}";
@@ -246,9 +254,10 @@ namespace NomadCity.Core.Model.Enterprise
                         UnlockCost(2, "企业特效：支付 2 源岩，获得 15 金券。",
                             new[] { RewardOp.Pay(ResourceType.Orirock, 2) }, RewardOp.Vouchers(15)),
                         Instant(3, "获得 1 分。", RewardOp.Score(1)),
-                        UnlockCost(4,
+                        UnlockSpecialCost(4,
                             "企业特效：支付 6 源岩，将设施供应区中所有设施牌洗回设施牌堆，之后补满供应区，然后你可进行 1 次免费建造。",
-                            new[] { RewardOp.Pay(ResourceType.Orirock, 6) }),
+                            new[] { RewardOp.Pay(ResourceType.Orirock, 6) },
+                            EnterpriseSpecial.SupplyReshuffleAndFreeBuild),
                         Instant(5, "获得 2 分。", RewardOp.Score(2)),
                     }),
 
@@ -289,20 +298,19 @@ namespace NomadCity.Core.Model.Enterprise
 
                 // ————————————————— 雷神工业 —————————————————
                 new EnterpriseBoardDef(EnterpriseId.Raythean, "雷神工业", "RAYTHEAN",
-                    "3 级：不占用主要行动的建设。5 级：从设施牌堆选 1 张建设后洗混牌堆。",
+                    "3 级：不占用主要行动的建设（一回合内不限次数）。5 级：从设施牌堆选 1 张建设后洗混牌堆（一回合内不限次数）。",
                     new[]
                     {
                         Note(0, "合作等级 0（标记起点）。"),
                         Unlock(1, "企业特效：获得 3 源石。", RewardOp.Gain(ResourceType.Originium, 3)),
                         Instant(2, "获得 1 分。", RewardOp.Score(1)),
-                        new(3, "企业特效：支付 2 源石，进行 1 次建造（不占用主要行动）。", true,
+                        new(3, "企业特效：支付 2 源石，进行 1 次建造（不占用主要行动，一回合内不限次数）。", true,
                             new EventOption("支付 2 源石 → 建造", new[] { RewardOp.Pay(ResourceType.Originium, 2) },
                                 Array.Empty<RewardOp>()),
-                            EnterpriseSpecial.BuildWithoutAction),
+                            EnterpriseSpecial.BuildWithoutAction, 0, unlimitedPerTurn: true),
                         Instant(4, "获得 1 分。", RewardOp.Score(1)),
-                        UnlockSpecial(5,
-                            "企业特效：从设施牌堆选择 1 张设施，建设该设施，然后你必须洗混设施牌堆。",
-                            EnterpriseSpecial.BuildFromDeckAndShuffle),
+                        new(5, "企业特效：从设施牌堆选择 1 张设施，建设该设施，然后你必须洗混设施牌堆（一回合内不限次数）。",
+                            true, null, EnterpriseSpecial.BuildFromDeckAndShuffle, 0, unlimitedPerTurn: true),
                     }),
 
                 // ————————————————— 约翰老妈 —————————————————
@@ -353,7 +361,7 @@ namespace NomadCity.Core.Model.Enterprise
                             RewardOp.Gain(ResourceType.Originium, 1),
                             RewardOp.Gain(ResourceType.Oriron, 1)),
                         UnlockCost(2, "企业特效：支付 4 金券，替换 1 个在资源点上的影响力。",
-                            new[] { RewardOp.PayVouchers(4) }, RewardOp.ReplaceInfluence(1)),
+                            new[] { RewardOp.PayVouchers(4) }, RewardOp.ReplaceResourceNodeInfluence(1)),
                         Instant(3, "获得 1 分。", RewardOp.Score(1)),
                         UnlockSpecialCost(4, "企业特效：失去 1 分，你进行 1 次采集（其规则和采集阶段相同）。",
                             new[] { RewardOp.LoseScore(1) }, EnterpriseSpecial.ExtraHarvest),

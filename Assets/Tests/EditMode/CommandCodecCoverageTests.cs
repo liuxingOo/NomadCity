@@ -177,6 +177,39 @@ namespace NomadCity.Tests
             CommandKind.PickRhineDepartment =>
                 new CommandDto { Kind = kind, Seat = 1, P0 = 2 },
 
+            // 开发者：P0 = 企业板 id；P1 = 合作等级；Flags bit2 = 结算；P3 = 答案个数，Items = 答案。
+            CommandKind.DeveloperSetEnterpriseLevel =>
+                new CommandDto
+                {
+                    Kind = kind, Seat = 1, P0 = 3, P1 = 4, P3 = 1, Items = new[] { 2 },
+                    Flags = CommandCodec.SettleBit,
+                },
+
+            // 收尾阶段发动持续计谋：P0 = PersistentTacticKind；P3 = 答案个数，Items = 答案。
+            CommandKind.DeveloperSetTurn =>
+                new CommandDto { Kind = kind, Seat = -1, P0 = 5, P1 = 2 },
+
+            CommandKind.DeveloperSetPlayerStat =>
+                new CommandDto { Kind = kind, Seat = 2, P0 = 1, P1 = 17 },
+
+            CommandKind.DeveloperBuildFacility =>
+                new CommandDto { Kind = kind, Seat = 1, P0 = 12, P1 = 4 },
+
+            CommandKind.DeveloperRemoveFacility =>
+                new CommandDto { Kind = kind, Seat = 1, P0 = -1 },
+
+            CommandKind.DeveloperResetPanelUse =>
+                new CommandDto { Kind = kind, Seat = 1, P0 = -1 },
+
+            CommandKind.DeveloperDeclareCityPattern =>
+                new CommandDto { Kind = kind, Seat = 2, P0 = 8 },
+
+            CommandKind.DeveloperUseCharacterCard =>
+                new CommandDto { Kind = kind, Seat = 1, P0 = 701, P1 = 2, P3 = 2, Items = new[] { 0, -1 } },
+
+            CommandKind.UsePersistentTacticCleanup =>
+                new CommandDto { Kind = kind, Seat = 1, P0 = 1, P3 = 1, Items = new[] { 0 } },
+
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind,
                 "新增了 CommandKind 却没在往返测试里给出样本 DTO。"),
         };

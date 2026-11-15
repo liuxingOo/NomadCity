@@ -56,7 +56,34 @@ namespace NomadCity.Core.Net
             writer.Ints(snapshot.EnterpriseBoards);
             writer.Ints(snapshot.EnterpriseChosen);
             writer.Ints(snapshot.EnterpriseSecondChosen);
-            writer.Ints(snapshot.EnterpriseDepartments);
+            writer.Int(snapshot.EnterpriseRhineDepartment);
+
+            writer.Int(snapshot.PublicReveals.Count);
+            foreach (GameStateSnapshot.PublicRevealSnapshot reveal in snapshot.PublicReveals)
+            {
+                writer.Int(reveal.Seat);
+                writer.Int(reveal.CardId);
+                writer.String(reveal.Reason);
+            }
+
+            writer.Int(snapshot.PersistentTactics.Count);
+            foreach (GameStateSnapshot.PersistentTacticSnapshot tactic in snapshot.PersistentTactics)
+            {
+                writer.Int(tactic.CardId);
+                writer.Int(tactic.Seat);
+                writer.Int(tactic.Kind);
+                writer.Int(tactic.Markers);
+                writer.Bool(tactic.UsedCleanupThisTurn);
+                writer.Ints(tactic.AttachedFacilityIds);
+            }
+
+            // —— 延迟结算队列 ——
+            writer.Int(snapshot.DeferredEffects.Count);
+            foreach (GameStateSnapshot.DeferredEffectSnapshot deferred in snapshot.DeferredEffects)
+            {
+                writer.Int(deferred.Seat);
+                WriteOps(writer, deferred.Ops);
+            }
 
             // —— 玩家 ——
             writer.Int(snapshot.Players.Count);
@@ -74,6 +101,7 @@ namespace NomadCity.Core.Net
                 writer.Ints(player.HandCharacterCards);
                 writer.Ints(player.DiscardCharacterCards);
                 writer.Int(player.PlacedCharacterCard);
+                writer.Bool(player.PlacedCardReturnsToBox);
                 writer.Bool(player.UsedCharacterCardThisTurn);
                 writer.Bool(player.UsedCharacterStrategyThisTurn);
                 writer.Bool(player.UsedCharacterTacticsThisTurn);
@@ -84,7 +112,10 @@ namespace NomadCity.Core.Net
                 writer.Int(player.MobileCityNodeId);
                 writer.Ints(player.UsedPatternActionsThisTurn);
                 writer.Int(player.ExtraMainActionsThisTurn);
+                writer.Int(player.ExtraMainActionsExcludingSpecialThisTurn);
+                writer.Bool(player.BothCharacterEffectsThisTurn);
                 writer.Int(player.CharacterCardBanRound);
+                writer.Bool(player.FreeMoveRelocatesInfluenceThisTurn);
                 writer.Bool(player.SetupDiscardDone);
             }
 
@@ -196,7 +227,42 @@ namespace NomadCity.Core.Net
             snapshot.EnterpriseBoards.AddRange(reader.Ints());
             snapshot.EnterpriseChosen.AddRange(reader.Ints());
             snapshot.EnterpriseSecondChosen.AddRange(reader.Ints());
-            snapshot.EnterpriseDepartments.AddRange(reader.Ints());
+            snapshot.EnterpriseRhineDepartment = reader.Int();
+
+            int revealCount = reader.Int();
+            for (int i = 0; i < revealCount; i++)
+            {
+                snapshot.PublicReveals.Add(new GameStateSnapshot.PublicRevealSnapshot
+                {
+                    Seat = reader.Int(),
+                    CardId = reader.Int(),
+                    Reason = reader.String(),
+                });
+            }
+
+            int persistentCount = reader.Int();
+            for (int i = 0; i < persistentCount; i++)
+            {
+                var tactic = new GameStateSnapshot.PersistentTacticSnapshot
+                {
+                    CardId = reader.Int(),
+                    Seat = reader.Int(),
+                    Kind = reader.Int(),
+                    Markers = reader.Int(),
+                    UsedCleanupThisTurn = reader.Bool(),
+                };
+                tactic.AttachedFacilityIds.AddRange(reader.Ints());
+                snapshot.PersistentTactics.Add(tactic);
+            }
+
+            // —— 延迟结算队列 ——
+            int deferredCount = reader.Int();
+            for (int i = 0; i < deferredCount; i++)
+            {
+                var deferred = new GameStateSnapshot.DeferredEffectSnapshot { Seat = reader.Int() };
+                ReadOps(reader, deferred.Ops);
+                snapshot.DeferredEffects.Add(deferred);
+            }
 
             // —— 玩家 ——
             int playerCount = reader.Int();
@@ -218,6 +284,7 @@ namespace NomadCity.Core.Net
                 player.HandCharacterCards.AddRange(reader.Ints());
                 player.DiscardCharacterCards.AddRange(reader.Ints());
                 player.PlacedCharacterCard = reader.Int();
+                player.PlacedCardReturnsToBox = reader.Bool();
                 player.UsedCharacterCardThisTurn = reader.Bool();
                 player.UsedCharacterStrategyThisTurn = reader.Bool();
                 player.UsedCharacterTacticsThisTurn = reader.Bool();
@@ -228,7 +295,10 @@ namespace NomadCity.Core.Net
                 player.MobileCityNodeId = reader.Int();
                 player.UsedPatternActionsThisTurn.AddRange(reader.Ints());
                 player.ExtraMainActionsThisTurn = reader.Int();
+                player.ExtraMainActionsExcludingSpecialThisTurn = reader.Int();
+                player.BothCharacterEffectsThisTurn = reader.Bool();
                 player.CharacterCardBanRound = reader.Int();
+                player.FreeMoveRelocatesInfluenceThisTurn = reader.Bool();
                 player.SetupDiscardDone = reader.Bool();
 
                 snapshot.Players.Add(player);
@@ -305,6 +375,62 @@ namespace NomadCity.Core.Net
             }
 
             return snapshot;
+        }
+
+        /// <summary>递归写出一串效果（Used by 延迟结算队列）。</summary>
+        private static void WriteOps(SnapshotWriter writer,
+            IReadOnlyList<GameStateSnapshot.RewardOpSnapshot> ops)
+        {
+            writer.Int(ops.Count);
+            foreach (GameStateSnapshot.RewardOpSnapshot op in ops)
+            {
+                writer.Int(op.Kind);
+                writer.Int(op.Resource);
+                writer.Int(op.Amount);
+                writer.Int(op.Scope);
+                writer.Int(op.Count);
+                writer.Int(op.SpreadOptions.Count);
+                foreach (int type in op.SpreadOptions) writer.Int(type);
+
+                writer.Int(op.Branches.Count);
+                foreach (GameStateSnapshot.EffectBranchSnapshot branch in op.Branches)
+                {
+                    writer.String(branch.Label);
+                    WriteOps(writer, branch.Ops);
+                }
+
+                WriteOps(writer, op.Ops);
+            }
+        }
+
+        /// <summary>递归读回一串效果（与 <see cref="WriteOps"/> 对称）。</summary>
+        private static void ReadOps(SnapshotReader reader,
+            List<GameStateSnapshot.RewardOpSnapshot> ops)
+        {
+            int count = reader.Int();
+            for (int i = 0; i < count; i++)
+            {
+                var op = new GameStateSnapshot.RewardOpSnapshot
+                {
+                    Kind = reader.Int(),
+                    Resource = reader.Int(),
+                    Amount = reader.Int(),
+                    Scope = reader.Int(),
+                    Count = reader.Int(),
+                };
+                op.SpreadOptions.AddRange(reader.Ints());
+
+                int branchCount = reader.Int();
+                for (int b = 0; b < branchCount; b++)
+                {
+                    var branch = new GameStateSnapshot.EffectBranchSnapshot { Label = reader.String() };
+                    ReadOps(reader, branch.Ops);
+                    op.Branches.Add(branch);
+                }
+
+                ReadOps(reader, op.Ops);
+                ops.Add(op);
+            }
         }
 
         // —— 内部读写工具：全 int 小端序，变长列表写成「个数 + 元素」——
