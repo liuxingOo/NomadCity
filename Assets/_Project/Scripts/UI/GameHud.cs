@@ -37,6 +37,9 @@ namespace NomadCity.UI
         [Tooltip("玩家标记图标：按 PlayerColor 顺序（绿 / 黄 / 红 / 蓝），画在「玩家标记」那格图标上")]
         [SerializeField] private Sprite[] playerMarkerSprites = new Sprite[4];
 
+        [Tooltip("起始玩家标记（firstMark）：画在当前回合起始玩家那一行状态栏的左边，每回合跟着起始玩家换位置")]
+        [SerializeField] private Sprite firstPlayerMarkSprite;
+
         [Tooltip("左上角「我的资源」栏：金券图标")]
         [SerializeField] private Sprite voucherIcon;
 
@@ -50,6 +53,11 @@ namespace NomadCity.UI
         private GameObject localResourcePanel;
         private Image localMarkerIcon;
         private readonly TMP_Text[] localResourceValues = new TMP_Text[6];
+
+        // 起始玩家标记：运行时挂在「当前回合起始玩家」那一行状态栏的左边缘，随每回合起始玩家换行。
+        private const float FirstMarkHeight = 112f;
+        private const float FirstMarkWidth = 61f;
+        private RectTransform firstPlayerMark;
 
         // —— 挂机跳过投票 ——
         // 联机时由 GameBootstrap 打开；过一段时间没人操作，就给「不轮自己」的每个待办座位出一个投票按钮。
@@ -90,6 +98,78 @@ namespace NomadCity.UI
             }
 
             BuildLocalResourceBar();
+            BuildFirstPlayerMark();
+        }
+
+        /// <summary>
+        /// 起始玩家标记：运行时建一张 firstMark 图片，刷新时挂到「当前回合起始玩家」那一行状态栏的左边缘。
+        /// 挂在行底下而不是算屏幕坐标 —— 行的位置 / 显隐变化时它会自己跟着走。
+        /// </summary>
+        private void BuildFirstPlayerMark()
+        {
+            if (firstPlayerMarkSprite == null) return;
+
+            var go = new GameObject("FirstPlayerMark", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            var rect = (RectTransform)go.transform;
+
+            // 先随便挂在一个行容器下（刷新时再按实际行重新挂），取得和行同一套坐标空间。
+            Transform host = null;
+            for (int i = 0; i < rows.Length; i++)
+            {
+                if (rows[i] != null && rows[i].Root != null)
+                {
+                    host = rows[i].Root.transform.parent;
+                    break;
+                }
+            }
+            rect.SetParent(host, false);
+
+            rect.anchorMin = rect.anchorMax = new Vector2(0f, 0.5f);
+            rect.pivot = new Vector2(1f, 0.5f);
+            rect.anchoredPosition = new Vector2(-2f, 0f);
+            rect.sizeDelta = new Vector2(FirstMarkWidth, FirstMarkHeight);
+
+            var image = go.GetComponent<Image>();
+            image.sprite = firstPlayerMarkSprite;
+            image.preserveAspect = true;
+            image.raycastTarget = false;
+
+            firstPlayerMark = rect;
+            go.SetActive(false);
+        }
+
+        /// <summary>
+        /// 把起始标记挪到当前回合起始玩家那一行。起始玩家一般顺时针轮换，
+        /// 「设施联邦理事会」的入场效果可以无视顺序把下回合起始玩家改成自己，因此一律按 FirstPlayerSeat 查行。
+        /// </summary>
+        private void RefreshFirstPlayerMark(GameState state)
+        {
+            if (firstPlayerMark == null) return;
+
+            Transform target = null;
+            for (int i = 0; i < rows.Length; i++)
+            {
+                GameHudRow row = rows[i];
+                if (row == null || row.Root == null || !row.Root.activeSelf) continue;
+                if (SeatAt(state, i) != state.FirstPlayerSeat) continue;
+
+                target = row.Root.transform;
+                break;
+            }
+
+            if (target == null)
+            {
+                firstPlayerMark.gameObject.SetActive(false);
+                return;
+            }
+
+            if (firstPlayerMark.parent != target) firstPlayerMark.SetParent(target, false);
+
+            firstPlayerMark.anchorMin = firstPlayerMark.anchorMax = new Vector2(0f, 0.5f);
+            firstPlayerMark.pivot = new Vector2(1f, 0.5f);
+            firstPlayerMark.anchoredPosition = new Vector2(-2f, 0f);
+            firstPlayerMark.SetAsLastSibling();
+            firstPlayerMark.gameObject.SetActive(true);
         }
 
         private void OnInspectClicked(int index)
@@ -308,6 +388,7 @@ namespace NomadCity.UI
                 ApplyStats(state, row, player);
             }
 
+            RefreshFirstPlayerMark(state);
             RefreshLocalResources(state);
         }
 

@@ -238,9 +238,37 @@ namespace NomadCity.Tests
 
             Assert.IsTrue(result.Ok, result.Error);
             Assert.AreEqual(0, player.Resources.Get(ResourceType.Originium), "3 源石付掉。");
+            Assert.AreEqual(state.ActionRound, player.CharacterCardBanRound, "本轮不能用角色牌。");
+
+            // 两次免费移动都登记成挂起行动，交给界面逐步走完（点目标点 + 出发点放影响力）。
+            PendingAction first = state.FindPending(0, PendingActionKind.CityMove);
+            Assert.IsNotNull(first, "应当登记待执行的城市移动");
+            Assert.IsTrue(first.Limits.Free, "效果授予的城市移动免费");
+            Assert.AreEqual(markersBefore, player.MarkersInSupply, "还没真的移动");
+
+            DriveCityMove(first, 1); // A-01 → A-02，出发点 A-01 放 1 个
+            PendingAction second = state.FindPending(0, PendingActionKind.CityMove);
+            Assert.IsNotNull(second, "第二次免费移动还在队列里");
+            DriveCityMove(second, 0); // A-02 → A-01，出发点 A-02 放 1 个
+
             Assert.AreEqual(markersBefore - 2, player.MarkersInSupply, "两次免费移动各在出发点放 1 个影响力。");
             Assert.AreEqual(2, InfluenceCount(0));
-            Assert.AreEqual(state.ActionRound, player.CharacterCardBanRound, "本轮不能用角色牌。");
+        }
+
+        /// <summary>照界面流程走完一次免费城市移动：步 1–2 移动，步 3 在出发点放影响力。</summary>
+        private void DriveCityMove(PendingAction pending, int targetNodeId)
+        {
+            int origin = player.MobileCityNodeId;
+
+            var move = new MoveMobileCityCommand(0, targetNodeId, pending.Id);
+            CommandResult moved = move.Validate(state);
+            Assert.IsTrue(moved.Ok, moved.Error);
+            move.Apply(state);
+
+            var place = new MoveCityInfluenceCommand(0, origin, pending.Id);
+            CommandResult placed = place.Validate(state);
+            Assert.IsTrue(placed.Ok, placed.Error);
+            place.Apply(state);
         }
 
         // —— 通用机制 ——

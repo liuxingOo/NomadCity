@@ -42,6 +42,13 @@ namespace NomadCity.UI
         /// <summary>命令提交入口：由 GameScreenController 包一层状态提示后提交到引擎。</summary>
         public Func<ICommand, CommandResult> Submit;
 
+        /// <summary>
+        /// 开发者触发企业特效时转交给游戏界面：有些特效要点地图 / 选牌，
+        /// 直接派发命令只会用默认答案静默结算，看起来像「没反应」。
+        /// 参数：座位、企业板 id、等级。
+        /// </summary>
+        public Action<int, int, int> TriggerEnterpriseEffectRequested;
+
         public bool IsOpen => root != null && root.activeSelf;
 
         private TMP_FontAsset font;
@@ -258,6 +265,20 @@ namespace NomadCity.UI
             AddStatRow("源石", player.Resources.Get(ResourceType.Originium), DeveloperPlayerStat.Originium, y); y -= 44f;
             AddStatRow("异铁", player.Resources.Get(ResourceType.Oriron), DeveloperPlayerStat.Oriron, y); y -= 44f;
             AddStatRow("至纯源石", player.Resources.Get(ResourceType.OriginitePrime), DeveloperPlayerStat.OriginitePrime, y);
+            y -= 62f;
+
+            // 行动事件（卡牌效果授予的行动）测试入口。放在右侧空白列，避免把「基础」页撑出可视区。
+            float eventX = 600f;
+            float eventY = top - 38f - 44f - 52f;
+            AddText(content, "行动事件测试（效果授予）", eventX, eventY, 320f, 26f, 17f, TextAlignmentOptions.Left);
+            eventY -= 40f;
+            AddButton(content, "授予探索", eventX, eventY, 130f, 34f,
+                () => Run(new DeveloperQueuePendingActionCommand(seat, PendingActionKind.Explore)));
+            AddButton(content, "授予建设", eventX + 140f, eventY, 130f, 34f,
+                () => Run(new DeveloperQueuePendingActionCommand(seat, PendingActionKind.Build)));
+            eventY -= 42f;
+            AddButton(content, "授予移除影响力", eventX, eventY, 170f, 34f,
+                () => Run(new DeveloperQueuePendingActionCommand(seat, PendingActionKind.RemoveInfluence)));
         }
 
         private void ChangeTurn(int delta)
@@ -555,7 +576,7 @@ namespace NomadCity.UI
             }
 
             AddText(content, "等级对当前选中的玩家生效；「+ / -」直接设等级（不在场上会自动上场）。" +
-                             "「触发」只列出已经解锁的黑色特效等级，点一下立即结算。",
+                             "「触发」只列出已经解锁的黑色特效等级，点一下按正常流程结算（面板会自动收起）。",
                 0f, top, ContentWidth, 26f, 14f, TextAlignmentOptions.Left, MutedColor);
 
             float y = top - 38f;
@@ -609,7 +630,16 @@ namespace NomadCity.UI
 
         private void TriggerEnterpriseEffect(int boardId, int level)
         {
-            Run(new TriggerEnterpriseEffectCommand(seat, boardId, level, null, true));
+            if (TriggerEnterpriseEffectRequested == null)
+            {
+                lastStatus = "没有接上企业特效通道，无法触发。";
+                Rebuild();
+                return;
+            }
+
+            // 特效可能要点地图或弹窗选目标：先收起面板，把画面和点击让出来。
+            Close();
+            TriggerEnterpriseEffectRequested(seat, boardId, level);
         }
 
         // —— 提交 ——

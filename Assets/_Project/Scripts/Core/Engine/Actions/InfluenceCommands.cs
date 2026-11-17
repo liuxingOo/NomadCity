@@ -63,22 +63,31 @@ namespace NomadCity.Core.Engine
         /// <summary>一次调度里的移动步骤，1–2 步。</summary>
         public readonly IReadOnlyList<InfluenceMove> Moves;
 
-        public RelocateInfluenceCommand(int seat, IReadOnlyList<InfluenceMove> moves)
+        /// <summary>授予这次调度的挂起行动 id（0 = 操作区的普通调度）。</summary>
+        public readonly int PendingActionId;
+
+        public RelocateInfluenceCommand(int seat, IReadOnlyList<InfluenceMove> moves, int pendingActionId = 0)
         {
             ActorSeat = seat;
             Moves = moves;
+            PendingActionId = pendingActionId;
         }
 
         public int ActorSeat { get; }
         public string Name => "调度";
-        public bool ConsumesAction => true;
+        public bool ConsumesAction => PendingActionId == 0;
 
         public CommandResult Validate(GameState state)
         {
+            CommandResult pending = PendingActionRules.ValidatePending(
+                state, ActorSeat, PendingActionKind.RelocateInfluence, PendingActionId);
+            if (!pending.Ok) return pending;
+
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
 
-            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat);
+            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat,
+                isContinuation: PendingActionId > 0);
             if (!quota.Ok) return quota;
 
             if (Moves == null || Moves.Count == 0) return CommandResult.Fail("调度至少要移动 1 个影响力。");
@@ -111,6 +120,8 @@ namespace NomadCity.Core.Engine
                 state.Map.SlotsOf(move.From).Clear(move.From.SlotIndex);
                 state.Map.SlotsOf(move.To).Place(move.To.SlotIndex, ActorSeat);
             }
+
+            if (PendingActionId > 0) state.ConsumePending(PendingActionId);
         }
     }
 }

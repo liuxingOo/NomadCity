@@ -400,26 +400,31 @@ namespace NomadCity.Core.Engine
         /// 用于限定落点的 PlaceInfluence（<see cref="InfluencePlacementScope"/>）；无则为 -1。
         /// </summary>
         public static EffectReport Execute(GameState state, int seat, IReadOnlyList<RewardOp> ops,
-            IEffectChoices choices = null, IEffectExtension extension = null, int anchorNodeId = -1)
+            IEffectChoices choices = null, IEffectExtension extension = null, int anchorNodeId = -1,
+            bool allowDefer = true)
         {
             var entries = new List<EffectLogEntry>();
             if (state == null || ops == null) return new EffectReport(seat, entries, false, null);
 
             choices ??= FirstAvailableChoices.Default;
-            ExecuteSequence(state, seat, ops, entries, choices, extension, anchorNodeId);
+            ExecuteSequence(state, seat, ops, entries, choices, extension, anchorNodeId, allowDefer);
             return new EffectReport(seat, entries, false, null);
         }
 
         /// <summary>
         /// 按序执行一段效果序列，把每条的执行记要追加进 <paramref name="entries"/>
         /// （供「二选一」的分支递归复用）。
+        /// <paramref name="allowDefer"/> 表示「这段序列的最后一条可以把行动挂起」：
+        /// 只有它是真时，末条探索/建设/移除影响力才会交给界面去跑完整流程，避免打断复合效果的顺序。
         /// </summary>
         private static void ExecuteSequence(GameState state, int seat, IReadOnlyList<RewardOp> ops,
-            List<EffectLogEntry> entries, IEffectChoices choices, IEffectExtension extension, int anchorNodeId)
+            List<EffectLogEntry> entries, IEffectChoices choices, IEffectExtension extension, int anchorNodeId,
+            bool allowDefer)
         {
-            foreach (RewardOp op in ops)
+            for (int i = 0; i < ops.Count; i++)
             {
-                entries.Add(ExecuteOne(state, seat, op, choices, extension, anchorNodeId));
+                entries.Add(ExecuteOne(state, seat, ops[i], choices, extension, anchorNodeId,
+                    allowDefer && i == ops.Count - 1));
             }
         }
 
@@ -445,15 +450,17 @@ namespace NomadCity.Core.Engine
                 if (!CostFeasible(state, seat, option.Cost, anchorNodeId, extension, out string reason))
                     return new EffectReport(seat, entries, true, $"条件段无法完整执行，效果结束：{reason}（§11.2.2）。");
 
-                foreach (RewardOp op in option.Cost)
+                for (int i = 0; i < option.Cost.Count; i++)
                 {
-                    entries.Add(ExecuteOne(state, seat, op, choices, extension, anchorNodeId));
+                    // 条件段是代价，不允许挂起（否则代价会在行动之后才付）。
+                    entries.Add(ExecuteOne(state, seat, option.Cost[i], choices, extension, anchorNodeId, false));
                 }
             }
 
-            foreach (RewardOp op in option.Rewards)
+            for (int i = 0; i < option.Rewards.Count; i++)
             {
-                entries.Add(ExecuteOne(state, seat, op, choices, extension, anchorNodeId));
+                entries.Add(ExecuteOne(state, seat, option.Rewards[i], choices, extension, anchorNodeId,
+                    i == option.Rewards.Count - 1));
             }
 
             return new EffectReport(seat, entries, false, null);
@@ -462,7 +469,7 @@ namespace NomadCity.Core.Engine
         // —— 单条效果 ——
 
         private static EffectLogEntry ExecuteOne(GameState state, int seat, RewardOp op,
-            IEffectChoices choices, IEffectExtension extension, int anchorNodeId)
+            IEffectChoices choices, IEffectExtension extension, int anchorNodeId, bool allowDefer)
         {
             if (IsExtensionOnly(op.Kind))
             {
@@ -477,13 +484,13 @@ namespace NomadCity.Core.Engine
             if (seat < 0 || seat >= state.Players.Count)
                 return new EffectLogEntry(op, false, $"座位号 {seat} 无效。");
 
-            bool applied = TryApplyBase(state, seat, op, choices, extension, anchorNodeId, out string note);
+            bool applied = TryApplyBase(state, seat, op, choices, extension, anchorNodeId, allowDefer, out string note);
             return new EffectLogEntry(op, applied, note);
         }
 
         /// <summary>执行一条基础规则效果；返回是否成功，失败时给出中文原因。</summary>
         private static bool TryApplyBase(GameState state, int seat, RewardOp op, IEffectChoices choices,
-            IEffectExtension extension, int anchorNodeId, out string note)
+            IEffectExtension extension, int anchorNodeId, bool allowDefer, out string note)
         {
             note = null;
             PlayerState player = state.Player(seat);
@@ -533,13 +540,27 @@ namespace NomadCity.Core.Engine
                     return TryPlaceInfluence(state, seat, op, choices, anchorNodeId, out note);
 
                 case RewardKind.Alternative:
-                    return TryAlternative(state, seat, op, choices, extension, anchorNodeId, out note);
+                    return TryAlternative(state, seat, op, choices, extension, anchorNodeId, allowDefer, out note);
 
                 case RewardKind.RemoveInfluence:
+                {
+                    bool handled = false;
+                    if (allowDefer && TryDeferAction(state, seat, PendingActionKind.RemoveInfluence, op.Amount,
+                            PendingActionLimits.Unlimited, out note, out handled))
+                        return true;
+                    if (handled) return false;
                     return TryRemoveInfluence(state, seat, op, choices, out note);
+                }
 
                 case RewardKind.RelocateInfluence:
+                {
+                    bool handled = false;
+                    if (allowDefer && TryDeferAction(state, seat, PendingActionKind.RelocateInfluence, op.Amount,
+                            PendingActionLimits.Unlimited, out note, out handled))
+                        return true;
+                    if (handled) return false;
                     return TryRelocateInfluence(state, seat, op, choices, out note);
+                }
 
                 case RewardKind.ReplaceInfluence:
                 case RewardKind.ReplaceResourceNodeInfluence:
@@ -556,20 +577,53 @@ namespace NomadCity.Core.Engine
                 }
 
                 case RewardKind.BuildOnce:
+                {
+                    bool handled = false;
+                    if (allowDefer && TryDeferAction(state, seat, PendingActionKind.Build, op.Amount,
+                            PendingActionLimits.Unlimited, out note, out handled))
+                        return true;
+                    if (handled) return false;
                     return TryBuildOnce(state, seat, op, choices, out note);
+                }
 
                 case RewardKind.FreeCityMove:
+                {
+                    var limits = PendingActionLimits.Unlimited;
+                    limits.Free = true;
+                    bool handled = false;
+                    if (allowDefer && TryDeferAction(state, seat, PendingActionKind.CityMove, op.Amount,
+                            limits, out note, out handled))
+                        return true;
+                    if (handled) return false;
                     return TryFreeCityMove(state, seat, op, choices, false, out note);
+                }
 
                 case RewardKind.FreeCityMoveOwnInfluenced:
+                {
                     // 「极境·计谋」：候选再限制为「该资源点上有自己的影响力」。
+                    var limits = PendingActionLimits.Unlimited;
+                    limits.Free = true;
+                    limits.NodeScope = PendingNodeScope.OwnInfluence;
+                    bool handled = false;
+                    if (allowDefer && TryDeferAction(state, seat, PendingActionKind.CityMove, op.Amount,
+                            limits, out note, out handled))
+                        return true;
+                    if (handled) return false;
                     return TryFreeCityMove(state, seat, op, choices, true, out note);
+                }
 
                 case RewardKind.ExploreOnce:
+                {
+                    bool handled = false;
+                    if (allowDefer && TryDeferAction(state, seat, PendingActionKind.Explore, op.Amount,
+                            PendingActionLimits.Unlimited, out note, out handled))
+                        return true;
+                    if (handled) return false;
                     return TryExploreOnce(state, seat, op, choices, extension, out note);
+                }
 
                 case RewardKind.SettleAnotherEntryEffect:
-                    return TrySettleAnotherEntryEffect(state, seat, choices, extension, anchorNodeId, out note);
+                    return TrySettleAnotherEntryEffect(state, seat, choices, extension, anchorNodeId, allowDefer, out note);
 
                 case RewardKind.PassStartMarker:
                     state.PendingStartMarkerSeat = seat;
@@ -588,7 +642,16 @@ namespace NomadCity.Core.Engine
                     return TryPlaceInfluenceOnCityMoveRoute(state, seat, op, choices, out note);
 
                 case RewardKind.RemoveOwnInfluence:
+                {
+                    var limits = PendingActionLimits.Unlimited;
+                    limits.Scope = PendingInfluenceScope.Own;
+                    bool handled = false;
+                    if (allowDefer && TryDeferAction(state, seat, PendingActionKind.RemoveInfluence, op.Amount,
+                            limits, out note, out handled))
+                        return true;
+                    if (handled) return false;
                     return TryRemoveOwnInfluence(state, seat, op, choices, out note);
+                }
 
                 case RewardKind.ChooseLeastHeldResource:
                     return TryChooseLeastHeldResource(state, seat, op, choices, out note);
@@ -1057,7 +1120,7 @@ namespace NomadCity.Core.Engine
         /// 没有分支、或选择器放弃时，这条效果被跳过（不阻断后续效果）。
         /// </summary>
         private static bool TryAlternative(GameState state, int seat, RewardOp op, IEffectChoices choices,
-            IEffectExtension extension, int anchorNodeId, out string note)
+            IEffectExtension extension, int anchorNodeId, bool allowDefer, out string note)
         {
             note = null;
             if (op.Branches == null || op.Branches.Count == 0)
@@ -1074,7 +1137,8 @@ namespace NomadCity.Core.Engine
             }
 
             var entries = new List<EffectLogEntry>();
-            ExecuteSequence(state, seat, op.Branches[index].Ops, entries, choices, extension, anchorNodeId);
+            ExecuteSequence(state, seat, op.Branches[index].Ops, entries, choices, extension, anchorNodeId,
+                allowDefer);
 
             foreach (EffectLogEntry entry in entries)
             {
@@ -1441,8 +1505,38 @@ namespace NomadCity.Core.Engine
         }
 
         /// <summary>
-        /// 「执行 1 次探索」（载具仓库的分支）：按 §6.4c 三步走完 —— 付路费 → 翻事件牌、自动取第一个
-        /// 选项结算 → 在目标点放置 1 个影响力。事件选项本身的选择仍走 <paramref name="choices"/>。
+        /// 把「执行 1 次探索 / 建设 / 移除影响力」登记成挂起行动，交给界面走完整流程。
+        /// 返回 true = 已入队；返回 false 且 <paramref name="handled"/> = true = 没有合法目标，
+        /// 已记为自动跳过（不能退回静默结算）；返回 false 且 handled = false = 当前上下文不允许挂起
+        /// （收尾阶段、或不是当前效果序列的最后一条），调用方按原逻辑立即结算。
+        /// </summary>
+        private static bool TryDeferAction(GameState state, int seat, PendingActionKind kind, int amount,
+            PendingActionLimits limits, out string note, out bool handled)
+        {
+            handled = false;
+            note = null;
+
+            if (state.Phase != TurnPhase.PlayerActions) return false;
+            if (seat < 0 || seat >= state.Players.Count) return false;
+
+            if (!PendingActionRules.HasAnyLegalTarget(state, seat, kind, limits))
+            {
+                note = $"没有可以{PendingAction.LabelOf(kind)}的目标，已自动跳过。";
+                handled = true;
+                return false;
+            }
+
+            int remaining = amount < 1 ? 1 : amount;
+            state.EnqueuePending(seat, kind, remaining, limits, -1, "卡牌效果");
+            note = $"获得 {remaining} 次{PendingAction.LabelOf(kind)}（等待执行）。";
+            handled = true;
+            return true;
+        }
+
+        /// <summary>
+        /// 「执行 1 次探索」的立即结算路径：按 §6.4c 三步走完 —— 付路费 → 翻事件牌、自动取第一个
+        /// 选项结算 → 在目标点放置 1 个影响力。
+        /// 只用于收尾阶段等没有界面接管的场合；玩家行动阶段会先走 <see cref="TryDeferAction"/>。
         /// </summary>
         private static bool TryExploreOnce(GameState state, int seat, RewardOp op, IEffectChoices choices,
             IEffectExtension extension, out string note)
@@ -1524,7 +1618,7 @@ namespace NomadCity.Core.Engine
         /// 执行它的入场效果（§11）。候选只保留真的带有入场效果的设施。
         /// </summary>
         private static bool TrySettleAnotherEntryEffect(GameState state, int seat, IEffectChoices choices,
-            IEffectExtension extension, int anchorNodeId, out string note)
+            IEffectExtension extension, int anchorNodeId, bool allowDefer, out string note)
         {
             note = null;
             List<int> slots = AdjacentNonColorFacilitySlots(state, seat);
@@ -1545,7 +1639,7 @@ namespace NomadCity.Core.Engine
             FacilityCardDef card = state.Catalog.Facility(facilityId);
 
             var entries = new List<EffectLogEntry>();
-            ExecuteSequence(state, seat, card.EntryEffects, entries, choices, extension, anchorNodeId);
+            ExecuteSequence(state, seat, card.EntryEffects, entries, choices, extension, anchorNodeId, allowDefer);
 
             foreach (EffectLogEntry entry in entries)
             {
@@ -1844,7 +1938,7 @@ namespace NomadCity.Core.Engine
                 if (choices.ChooseOptionalStep(seat, op, state, i, op.Branches[i].Label) != 0) break;
 
                 var entries = new List<EffectLogEntry>();
-                ExecuteSequence(state, seat, op.Branches[i].Ops, entries, choices, extension, anchorNodeId);
+                ExecuteSequence(state, seat, op.Branches[i].Ops, entries, choices, extension, anchorNodeId, false);
                 executed++;
             }
 
@@ -1883,7 +1977,8 @@ namespace NomadCity.Core.Engine
                     if (index < 0 || index >= op.Branches.Count) continue;
 
                     var entries = new List<EffectLogEntry>();
-                    ExecuteSequence(state, seat, op.Branches[index].Ops, entries, choices, extension, anchorNodeId);
+                    ExecuteSequence(state, seat, op.Branches[index].Ops, entries, choices, extension, anchorNodeId,
+                        false);
                 }
             }
 

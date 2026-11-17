@@ -19,6 +19,7 @@ namespace NomadCity.UI
         Declare = 6,   // 宣告城市样式（快速行动，§6.3b）：弹出场上的 6 张样式牌供挑选
         SpecialAction = 7, // 使用城市样式特殊行动（主要行动，§6.3f）：点「特殊行动」→ 点场上一张样式牌 → 结算
         Harvest = 8,   // 采集阶段选点（§7）：不挂按钮，由 GameScreenController 进入采集阶段时主动切入；提交由采集确认窗收尾
+        RemoveInfluence = 9, // 移除影响力（只由卡牌效果触发，操作区没有按钮）
     }
 
     /// <summary>
@@ -183,6 +184,9 @@ namespace NomadCity.UI
 
         /// <summary>弹窗是不是开着。</summary>
         public bool IsVisible => popupRoot != null && popupRoot.activeSelf;
+
+        /// <summary>操作区弹窗本体的 RectTransform（可见面板），供外部按它定位其他控件。</summary>
+        public RectTransform PopupRoot => popupRoot != null ? popupRoot.transform as RectTransform : null;
 
         /// <summary>展开弹窗。入口按钮常驻不动 —— 这里只开弹窗，不去碰它。</summary>
         public void Show()

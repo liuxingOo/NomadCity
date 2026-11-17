@@ -103,6 +103,13 @@ namespace NomadCity.Game
         [Tooltip("资源点高亮圈的世界直径（比资源点本体大一些，套在它外面）。")]
         [SerializeField, Min(0.01f)] private float nodeHighlightSize = 0.50f;
 
+        [Header("影响力格高亮（移除影响力等效果事件选目标）")]
+        [Tooltip("「移除影响力」这类效果事件里，可以点的影响力格会套一圈亮起来；这是圈的颜色。")]
+        [SerializeField] private Color slotHighlightColor = new Color(0.35f, 0.95f, 0.55f, 0.75f);
+
+        [Tooltip("影响力格高亮圈的世界直径（比影响力标记大一些，套在它外面）。")]
+        [SerializeField, Min(0.01f)] private float slotHighlightSize = 0.26f;
+
         // 排序：底图 -10（约定）；往上依次是高亮、空格、指示物、影响力、移动城市、标签。
         private const int SortHighlight = 0;
         private const int SortSlot = 1;
@@ -149,6 +156,9 @@ namespace NomadCity.Game
 
         /// <summary>当前高亮的资源点 id（采集阶段点选采集点用）；空表示没有高亮。</summary>
         private readonly HashSet<int> highlightedNodes = new HashSet<int>();
+
+        /// <summary>当前高亮的影响力格（「移除影响力」等效果事件选目标用）；空表示没有高亮。</summary>
+        private readonly HashSet<InfluenceSlotRef> highlightedSlots = new HashSet<InfluenceSlotRef>();
 
         private struct HitTarget
         {
@@ -229,6 +239,18 @@ namespace NomadCity.Game
             if (nodeIds != null)
             {
                 foreach (int nodeId in nodeIds) highlightedNodes.Add(nodeId);
+            }
+
+            if (IsReady) Refresh();
+        }
+
+        /// <summary>高亮若干影响力格（「移除影响力」等效果事件选目标用）；传 null 清空。</summary>
+        public void SetHighlightedSlots(IEnumerable<InfluenceSlotRef> slots)
+        {
+            highlightedSlots.Clear();
+            if (slots != null)
+            {
+                foreach (InfluenceSlotRef slot in slots) highlightedSlots.Add(slot);
             }
 
             if (IsReady) Refresh();
@@ -337,6 +359,12 @@ namespace NomadCity.Game
                 InfluenceSlotRef slotRef = InfluenceSlotRef.OnNode(node.Id, slot);
                 int owner = node.Slots.OwnerOf(slot);
 
+                if (highlightedSlots.Contains(slotRef))
+                {
+                    Spawn(MapSpriteFactory.Ring(), world, slotHighlightSize, slotHighlightColor, SortHighlight,
+                        $"SlotHighlight_{node.Code}_{slot}");
+                }
+
                 if (owner >= 0)
                 {
                     // 影响力 = 玩家标记：用 token 素材，没接素材才退回色盘圆片。
@@ -412,6 +440,12 @@ namespace NomadCity.Game
                 {
                     Spawn(MapSpriteFactory.Disc(), world, routeHighlightSize, routeHighlightColor, SortHighlight,
                         $"RouteHighlight_{route.Id}_{slot}");
+                }
+
+                if (highlightedSlots.Contains(slotRef))
+                {
+                    Spawn(MapSpriteFactory.Ring(), world, slotHighlightSize, slotHighlightColor, SortHighlight,
+                        $"SlotHighlight_R{route.Id}_{slot}");
                 }
 
                 if (owner >= 0)

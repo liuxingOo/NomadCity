@@ -164,12 +164,85 @@ namespace NomadCity.Core.Model
         /// </summary>
         public readonly List<PersistentTacticState> PersistentTactics = new();
 
+        /// <summary>
+        /// 卡牌 / 企业 / 城市样式效果授予、等待界面执行的行动（行动事件）。
+        /// 效果结算时只入队，不再在引擎里静默跑完；行动完成的命令按 id 消费它。
+        /// </summary>
+        public readonly List<PendingAction> PendingActions = new();
+
+        /// <summary>下一条挂起行动的 id（0 保留给「没有挂起行动」）。</summary>
+        public int NextPendingActionId = 1;
+
         /// <summary>取某位玩家的某类持续计谋；没有返回 null。</summary>
         public PersistentTacticState FindPersistentTactic(int seat, PersistentTacticKind kind)
         {
             foreach (PersistentTacticState tactic in PersistentTactics)
                 if (tactic.Seat == seat && tactic.Kind == kind) return tactic;
             return null;
+        }
+
+        /// <summary>按 id 找挂起行动；没有返回 null。</summary>
+        public PendingAction FindPending(int id)
+        {
+            if (id <= 0) return null;
+            foreach (PendingAction pending in PendingActions)
+                if (pending.Id == id) return pending;
+            return null;
+        }
+
+        /// <summary>取某位玩家最早的一条挂起行动；没有返回 null。</summary>
+        public PendingAction FindPending(int seat, PendingActionKind kind)
+        {
+            foreach (PendingAction pending in PendingActions)
+                if (pending.Seat == seat && pending.Kind == kind) return pending;
+            return null;
+        }
+
+        /// <summary>该玩家是否还有没做完的挂起行动。</summary>
+        public bool HasPending(int seat)
+        {
+            foreach (PendingAction pending in PendingActions)
+                if (pending.Seat == seat) return true;
+            return false;
+        }
+
+        /// <summary>登记一条待执行的行动，返回新记录。</summary>
+        public PendingAction EnqueuePending(int seat, PendingActionKind kind, int remaining,
+            PendingActionLimits limits, int sourceCardId, string sourceLabel)
+        {
+            var pending = new PendingAction(NextPendingActionId++, seat, kind, remaining, limits,
+                sourceCardId, sourceLabel);
+            PendingActions.Add(pending);
+            return pending;
+        }
+
+        /// <summary>完成一次挂起行动：剩余次数减 1，归零时移除。返回是否真的找到并消费了。</summary>
+        public bool ConsumePending(int id)
+        {
+            for (int i = 0; i < PendingActions.Count; i++)
+            {
+                PendingAction pending = PendingActions[i];
+                if (pending.Id != id) continue;
+
+                pending.Remaining--;
+                if (pending.Remaining <= 0) PendingActions.RemoveAt(i);
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>直接丢弃一条挂起行动（没有合法目标时的自动收尾）。</summary>
+        public bool DropPending(int id)
+        {
+            for (int i = 0; i < PendingActions.Count; i++)
+            {
+                if (PendingActions[i].Id != id) continue;
+                PendingActions.RemoveAt(i);
+                return true;
+            }
+
+            return false;
         }
 
         public GameState(GameSetup setup)
@@ -205,6 +278,7 @@ namespace NomadCity.Core.Model
                 LastCityMoveRouteId = LastCityMoveRouteId,
                 ActiveSpecialActionPatternId = ActiveSpecialActionPatternId,
                 Enterprises = Enterprises == null ? new EnterpriseState() : Enterprises.Clone(),
+                NextPendingActionId = NextPendingActionId,
             };
 
             foreach (PlayerState player in Players) copy.Players.Add(player.Clone());
@@ -227,6 +301,11 @@ namespace NomadCity.Core.Model
             foreach (PersistentTacticState tactic in PersistentTactics)
             {
                 copy.PersistentTactics.Add(tactic.Clone());
+            }
+
+            foreach (PendingAction pending in PendingActions)
+            {
+                copy.PendingActions.Add(pending.Clone());
             }
 
             foreach (KeyValuePair<int, List<int>> choice in HarvestChoices)

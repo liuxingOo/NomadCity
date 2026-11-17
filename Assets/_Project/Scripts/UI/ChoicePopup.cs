@@ -65,6 +65,11 @@ namespace NomadCity.UI
         private float baseY;
         private Vector2 cancelIdle;
 
+        /// <summary>标题在场景里的默认字号、尺寸与位置；长正文展示完要还原回这一套。</summary>
+        private float defaultTitleFontSize;
+        private Vector2 defaultTitleSize;
+        private Vector2 defaultTitlePosition;
+
         /// <summary>弹窗是不是开着。GameScreenController 用它在地图点击时早退。</summary>
         public bool IsVisible => root != null && root.activeSelf;
 
@@ -81,6 +86,14 @@ namespace NomadCity.UI
             {
                 cancelButton.onClick.AddListener(() => Choose(-1));
                 cancelIdle = ((RectTransform)cancelButton.transform).anchoredPosition;
+            }
+
+            if (titleText != null)
+            {
+                var titleRect = (RectTransform)titleText.transform;
+                defaultTitleFontSize = titleText.fontSize;
+                defaultTitleSize = titleRect.sizeDelta;
+                defaultTitlePosition = titleRect.anchoredPosition;
             }
 
             foreach (Button button in optionButtons)
@@ -208,8 +221,44 @@ namespace NomadCity.UI
             if (titleText != null)
                 titleText.text = paging ? $"{title}（第 {page + 1}/{pages} 页）" : title;
 
+            ApplyTitleLayout();
+
             if (count == 0 && optionLabels != null)
                 Debug.LogWarning("[ChoicePopup] 这次没有可选事项，只会留下一个取消键。", this);
+        }
+
+        /// <summary>
+        /// 标题平时是场景里那行大字（36 号、420 宽）。标题一换行就会压到选项按钮上（开局停靠、结束回合这类两三行提示都会），
+        /// 所以这里按实际行数整块往上顶，保证正文底边停在按钮上方；正文特别长（终局名次）时再自动缩小字号、加宽。
+        /// 只有一行的短标题位置几乎不变，照旧贴着默认位置。
+        /// </summary>
+        private void ApplyTitleLayout()
+        {
+            if (titleText == null) return;
+
+            var rect = (RectTransform)titleText.transform;
+
+            // 先还原默认的一套再量：上一条弹窗可能刚把字号 / 宽度改过。
+            titleText.fontSize = defaultTitleFontSize;
+            rect.sizeDelta = defaultTitleSize;
+
+            float height = titleText.GetPreferredValues(titleText.text, rect.sizeDelta.x, 10000f).y;
+            if (height <= rect.sizeDelta.y + 4f)
+            {
+                rect.anchoredPosition = defaultTitlePosition;
+                return;
+            }
+
+            // 多行正文太长（终局名次）就先缩小字号并加宽，避免整块顶出屏幕。
+            if (height > 220f)
+            {
+                titleText.fontSize = Mathf.Max(18f, Mathf.RoundToInt(defaultTitleFontSize * 0.55f));
+                rect.sizeDelta = new Vector2(Mathf.Max(defaultTitleSize.x, 900f), defaultTitleSize.y);
+                height = titleText.GetPreferredValues(titleText.text, rect.sizeDelta.x, 10000f).y;
+            }
+
+            float top = baseY + 30f + 16f + height; // 选项按钮顶边再往上留一点，正文从按钮上方展开
+            rect.anchoredPosition = new Vector2(defaultTitlePosition.x, top - rect.sizeDelta.y * 0.5f);
         }
 
         /// <summary>把 <paramref name="cells"/> 个槽位摆成网格（1 列 / 2 列 / 3 列），并把取消键挪到最下一行之下。</summary>

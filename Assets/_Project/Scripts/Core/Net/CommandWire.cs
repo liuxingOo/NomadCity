@@ -13,14 +13,15 @@ namespace NomadCity.Core.Net
     /// int    P2
     /// int    P3
     /// uint   Flags
+    /// int    PendingActionId   // 0 = 无挂起行动
     /// int    ItemCount      // 为 -1 表示 Items 为 null；否则接 ItemCount 个 int
     /// int[]  Items
     /// </code>
     /// </summary>
     public static class CommandWire
     {
-        /// <summary>固定头部长度：Kind(2) + Seat/P0/P1/P2/P3(20) + Flags(4) + ItemCount(4)。</summary>
-        public const int HeaderSize = 2 + 20 + 4 + 4;
+        /// <summary>固定头部长度：Kind(2) + Seat/P0/P1/P2/P3(20) + Flags(4) + PendingActionId(4) + ItemCount(4)。</summary>
+        public const int HeaderSize = 2 + 20 + 4 + 4 + 4;
 
         /// <summary>把 DTO 编码成字节数组。Items 为 null 或空时写 ItemCount = -1。</summary>
         public static byte[] Write(CommandDto dto)
@@ -36,6 +37,7 @@ namespace NomadCity.Core.Net
             WriteInt(buffer, ref pos, dto.P2);
             WriteInt(buffer, ref pos, dto.P3);
             WriteUInt(buffer, ref pos, dto.Flags);
+            WriteInt(buffer, ref pos, dto.PendingActionId);
             WriteInt(buffer, ref pos, itemCount);
             if (itemCount > 0)
             {
@@ -63,6 +65,7 @@ namespace NomadCity.Core.Net
             dto.P2 = ReadInt(buffer, ref pos);
             dto.P3 = ReadInt(buffer, ref pos);
             dto.Flags = ReadUInt(buffer, ref pos);
+            dto.PendingActionId = ReadInt(buffer, ref pos);
             int itemCount = ReadInt(buffer, ref pos);
 
             if (itemCount < -1)

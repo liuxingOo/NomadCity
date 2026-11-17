@@ -907,7 +907,7 @@ namespace NomadCity.App
         {
             if (choicePopup != null)
             {
-                choicePopup.Show("退出这局联机并回到主菜单？", new[] { "退出对局" }, _ => LeaveOnlineGame());
+                choicePopup.Show("退出这局联机并回到主菜单？", new[] { "确定退出对局" }, _ => LeaveOnlineGame());
                 return;
             }
 

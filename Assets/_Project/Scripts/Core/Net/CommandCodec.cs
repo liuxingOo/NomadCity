@@ -78,6 +78,18 @@ namespace NomadCity.Core.Net
                         P2 = (int)c.Payment,
                         P3 = AnswerCount(c.EffectChoices),
                         Items = AnswerItems(c.EffectChoices),
+                        PendingActionId = c.PendingActionId,
+                    };
+
+                // P0 = PanelSlot；P3 = 入场效果答案个数，Items = 答案。
+                case ResolveFacilityEntryEffectCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.ResolveFacilityEntryEffect,
+                        Seat = c.ActorSeat,
+                        P0 = c.PanelSlot,
+                        P3 = AnswerCount(c.EffectChoices),
+                        Items = AnswerItems(c.EffectChoices),
                     };
 
                 // P0 = CardId。
@@ -122,6 +134,7 @@ namespace NomadCity.Core.Net
                         P0 = c.NodeId,
                         P1 = routeCount,
                         P2 = payeeCount,
+                        PendingActionId = c.PendingActionId,
                     };
                     if (routeCount > 0 || payeeCount > 0)
                     {
@@ -144,15 +157,66 @@ namespace NomadCity.Core.Net
 
                 // P0 = NodeId。
                 case ExploreInfluenceCommand c:
-                    return new CommandDto { Kind = CommandKind.ExploreInfluence, Seat = c.ActorSeat, P0 = c.NodeId };
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.ExploreInfluence,
+                        Seat = c.ActorSeat,
+                        P0 = c.NodeId,
+                        PendingActionId = c.PendingActionId,
+                    };
+
+                // 影响力格引用拆成三槽 + 挂起 id：P0 = (int)Kind，P1 = TargetId，P2 = SlotIndex。
+                case RemoveInfluenceCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.RemoveInfluence,
+                        Seat = c.ActorSeat,
+                        P0 = (int)c.Slot.Kind,
+                        P1 = c.Slot.TargetId,
+                        P2 = c.Slot.SlotIndex,
+                        P3 = AnswerCount(c.EffectChoices),
+                        Items = AnswerItems(c.EffectChoices),
+                        PendingActionId = c.PendingActionId,
+                    };
+
+                // P0 = PendingActionId。
+                case AbandonPendingActionCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.AbandonPendingAction,
+                        Seat = c.ActorSeat,
+                        P0 = c.PendingActionId,
+                    };
+
+                // P0 = (int)Kind，P1 = Remaining，P2 = (int)Scope，P3 = MaxVoucherSpend；Flags bit0 = Free。
+                case DeveloperQueuePendingActionCommand c:
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.DeveloperQueuePendingAction,
+                        Seat = c.ActorSeat,
+                        P0 = (int)c.Kind,
+                        P1 = c.Remaining,
+                        P2 = (int)c.Limits.Scope,
+                        P3 = c.Limits.MaxVoucherSpend,
+                        Flags = (c.Limits.Free ? 1u : 0u)
+                                | (c.Limits.NodeScope == PendingNodeScope.OwnInfluence ? 2u : 0u),
+                    };
 
                 // P0 = TargetNodeId。
                 case MoveMobileCityCommand c:
-                    return new CommandDto { Kind = CommandKind.MoveMobileCity, Seat = c.ActorSeat, P0 = c.TargetNodeId };
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.MoveMobileCity, Seat = c.ActorSeat, P0 = c.TargetNodeId,
+                        PendingActionId = c.PendingActionId,
+                    };
 
                 // P0 = OriginNodeId。
                 case MoveCityInfluenceCommand c:
-                    return new CommandDto { Kind = CommandKind.MoveCityInfluence, Seat = c.ActorSeat, P0 = c.OriginNodeId };
+                    return new CommandDto
+                    {
+                        Kind = CommandKind.MoveCityInfluence, Seat = c.ActorSeat, P0 = c.OriginNodeId,
+                        PendingActionId = c.PendingActionId,
+                    };
 
                 // 影响力格引用拆成三槽：P0 = (int)Kind，P1 = TargetId，P2 = SlotIndex。
                 case PlaceInfluenceCommand c:
@@ -168,7 +232,11 @@ namespace NomadCity.Core.Net
                 // P0 = 移动步数；Items = 每步 6 个 int：[FromKind, FromTarget, FromSlot, ToKind, ToTarget, ToSlot]。
                 case RelocateInfluenceCommand c:
                 {
-                    var dto = new CommandDto { Kind = CommandKind.RelocateInfluence, Seat = c.ActorSeat };
+                    var dto = new CommandDto
+                    {
+                        Kind = CommandKind.RelocateInfluence, Seat = c.ActorSeat,
+                        PendingActionId = c.PendingActionId,
+                    };
                     if (c.Moves != null && c.Moves.Count > 0)
                     {
                         dto.P0 = c.Moves.Count;
@@ -430,7 +498,10 @@ namespace NomadCity.Core.Net
 
                 case CommandKind.BuildFacility:
                     return new BuildFacilityCommand(dto.Seat, dto.P0, dto.P1, (FacilityPayment)dto.P2,
-                        DecodeAnswers(dto));
+                        DecodeAnswers(dto), pendingActionId: dto.PendingActionId);
+
+                case CommandKind.ResolveFacilityEntryEffect:
+                    return new ResolveFacilityEntryEffectCommand(dto.Seat, dto.P0, DecodeAnswers(dto));
 
                 case CommandKind.PlaceCharacterCard:
                     return new PlaceCharacterCardCommand(dto.Seat, dto.P0);
@@ -445,23 +516,47 @@ namespace NomadCity.Core.Net
                     return new DeclareCityPatternCommand(dto.Seat, dto.P0, dto.P1);
 
                 case CommandKind.Explore:
-                    return new ExploreCommand(dto.Seat, dto.P0, DecodeRouteIds(dto), DecodePayees(dto));
+                    return new ExploreCommand(dto.Seat, dto.P0, DecodeRouteIds(dto), DecodePayees(dto),
+                        dto.PendingActionId);
 
                 case CommandKind.ExploreInfluence:
-                    return new ExploreInfluenceCommand(dto.Seat, dto.P0);
+                    return new ExploreInfluenceCommand(dto.Seat, dto.P0, dto.PendingActionId);
+
+                case CommandKind.RemoveInfluence:
+                    return new RemoveInfluenceCommand(dto.Seat,
+                        new InfluenceSlotRef((InfluenceSlotKind)dto.P0, dto.P1, dto.P2), dto.PendingActionId,
+                        DecodeAnswers(dto));
+
+                case CommandKind.AbandonPendingAction:
+                    return new AbandonPendingActionCommand(dto.Seat, dto.P0);
+
+                case CommandKind.DeveloperQueuePendingAction:
+                {
+                    var limits = new PendingActionLimits
+                    {
+                        Free = (dto.Flags & 1u) != 0u,
+                        MaxVoucherSpend = dto.P3,
+                        Scope = (PendingInfluenceScope)dto.P2,
+                        NodeScope = (dto.Flags & 2u) != 0u
+                            ? PendingNodeScope.OwnInfluence
+                            : PendingNodeScope.Any,
+                    };
+                    return new DeveloperQueuePendingActionCommand(dto.Seat, (PendingActionKind)dto.P0,
+                        dto.P1, limits);
+                }
 
                 case CommandKind.MoveMobileCity:
-                    return new MoveMobileCityCommand(dto.Seat, dto.P0);
+                    return new MoveMobileCityCommand(dto.Seat, dto.P0, dto.PendingActionId);
 
                 case CommandKind.MoveCityInfluence:
-                    return new MoveCityInfluenceCommand(dto.Seat, dto.P0);
+                    return new MoveCityInfluenceCommand(dto.Seat, dto.P0, dto.PendingActionId);
 
                 case CommandKind.PlaceInfluence:
                     return new PlaceInfluenceCommand(dto.Seat,
                         new InfluenceSlotRef((InfluenceSlotKind)dto.P0, dto.P1, dto.P2));
 
                 case CommandKind.RelocateInfluence:
-                    return new RelocateInfluenceCommand(dto.Seat, DecodeMoves(dto));
+                    return new RelocateInfluenceCommand(dto.Seat, DecodeMoves(dto), dto.PendingActionId);
 
                 case CommandKind.UsePatternSpecialAction:
                     return new UsePatternSpecialActionCommand(dto.Seat, dto.P0, DecodeAnswers(dto));

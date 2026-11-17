@@ -77,6 +77,23 @@ namespace NomadCity.Core.Net
                 writer.Ints(tactic.AttachedFacilityIds);
             }
 
+            // —— 挂起行动（行动事件） ——
+            writer.Int(snapshot.NextPendingActionId);
+            writer.Int(snapshot.PendingActions.Count);
+            foreach (GameStateSnapshot.PendingActionSnapshot pending in snapshot.PendingActions)
+            {
+                writer.Int(pending.Id);
+                writer.Int(pending.Seat);
+                writer.Int(pending.Kind);
+                writer.Int(pending.Remaining);
+                writer.Bool(pending.Free);
+                writer.Int(pending.MaxVoucherSpend);
+                writer.Int(pending.Scope);
+                writer.Int(pending.NodeScope);
+                writer.Int(pending.SourceCardId);
+                writer.String(pending.SourceLabel);
+            }
+
             // —— 延迟结算队列 ——
             writer.Int(snapshot.DeferredEffects.Count);
             foreach (GameStateSnapshot.DeferredEffectSnapshot deferred in snapshot.DeferredEffects)
@@ -253,6 +270,26 @@ namespace NomadCity.Core.Net
                 };
                 tactic.AttachedFacilityIds.AddRange(reader.Ints());
                 snapshot.PersistentTactics.Add(tactic);
+            }
+
+            // —— 挂起行动（行动事件） ——
+            snapshot.NextPendingActionId = reader.Int();
+            int pendingCount = reader.Int();
+            for (int i = 0; i < pendingCount; i++)
+            {
+                snapshot.PendingActions.Add(new GameStateSnapshot.PendingActionSnapshot
+                {
+                    Id = reader.Int(),
+                    Seat = reader.Int(),
+                    Kind = reader.Int(),
+                    Remaining = reader.Int(),
+                    Free = reader.Bool(),
+                    MaxVoucherSpend = reader.Int(),
+                    Scope = reader.Int(),
+                    NodeScope = reader.Int(),
+                    SourceCardId = reader.Int(),
+                    SourceLabel = reader.String(),
+                });
             }
 
             // —— 延迟结算队列 ——

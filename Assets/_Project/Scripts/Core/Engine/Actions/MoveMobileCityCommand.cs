@@ -21,10 +21,22 @@ namespace NomadCity.Core.Engine
         /// <summary>出发点（移动城市原来的所在地）的资源点 id；<see cref="Apply"/> 后才有值。</summary>
         public int OriginNodeId { get; private set; } = -1;
 
-        public MoveMobileCityCommand(int seat, int targetNodeId)
+        public MoveMobileCityCommand(int seat, int targetNodeId, int pendingActionId = 0)
         {
             ActorSeat = seat;
             TargetNodeId = targetNodeId;
+            PendingActionId = pendingActionId;
+        }
+
+        /// <summary>授予这次城市移动的挂起行动 id（0 = 操作区的主要行动）。</summary>
+        public readonly int PendingActionId;
+
+        /// <summary>这次城市移动是否免费（效果授予且限制了 Free）：跳过 3 源石。</summary>
+        public bool IsFree(GameState state)
+        {
+            if (PendingActionId <= 0 || state == null) return false;
+            PendingAction pending = state.FindPending(PendingActionId);
+            return pending != null && pending.Limits.Free;
         }
 
         public int ActorSeat { get; }
@@ -35,10 +47,15 @@ namespace NomadCity.Core.Engine
 
         public CommandResult Validate(GameState state)
         {
+            CommandResult pending = PendingActionRules.ValidatePending(
+                state, ActorSeat, PendingActionKind.CityMove, PendingActionId);
+            if (!pending.Ok) return pending;
+
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
 
-            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat);
+            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat,
+                isContinuation: PendingActionId > 0);
             if (!quota.Ok) return quota;
 
             PlayerState player = state.Player(ActorSeat);
@@ -48,11 +65,29 @@ namespace NomadCity.Core.Engine
                 return CommandResult.Fail($"目标资源点 {TargetNodeId} 不存在。");
             if (TargetNodeId == origin) return CommandResult.Fail("移动城市已经在目标资源点上。");
 
-            if (player.Resources.Originium < OriginiumCost)
+            if (!IsFree(state) && player.Resources.Originium < OriginiumCost)
                 return CommandResult.Fail($"城市移动需要 {OriginiumCost} 源石。");
 
             if (state.Map.FindRoute(origin, TargetNodeId) == null)
                 return CommandResult.Fail("目标资源点与移动城市所在地不相邻（需要仅通过一条航道相连）。");
+
+            // 效果限制：极境·计谋只能移到「该资源点上有自己影响力」的地方。
+            PendingAction record = state.FindPending(PendingActionId);
+            if (record != null && record.Limits.NodeScope == PendingNodeScope.OwnInfluence)
+            {
+                bool owned = false;
+                MapNodeState targetNode = state.Map.Node(TargetNodeId);
+                for (int i = 0; i < targetNode.Slots.Capacity; i++)
+                {
+                    if (state.Map.OccupantOf(InfluenceSlotRef.OnNode(TargetNodeId, i)) == ActorSeat)
+                    {
+                        owned = true;
+                        break;
+                    }
+                }
+
+                if (!owned) return CommandResult.Fail("这次城市移动只能停靠在有你自己影响力的资源点上。");
+            }
 
             MapNodeState target = state.Map.Node(TargetNodeId);
             if (!ActionRules.IsNodeOpen(state, target))
@@ -72,7 +107,7 @@ namespace NomadCity.Core.Engine
             PlayerState player = state.Player(ActorSeat);
             int origin = player.MobileCityNodeId;
 
-            player.Resources.TrySpend(ResourceType.Originium, OriginiumCost);
+            if (!IsFree(state)) player.Resources.TrySpend(ResourceType.Originium, OriginiumCost);
 
             // 清掉所用航道与目标点上所有对手的影响力。
             RouteState route = state.Map.FindRoute(origin, TargetNodeId);
@@ -118,18 +153,26 @@ namespace NomadCity.Core.Engine
         /// <summary>出发点（移动城市原来的所在地）的资源点 id。</summary>
         public readonly int OriginNodeId;
 
-        public MoveCityInfluenceCommand(int seat, int originNodeId)
+        /// <summary>授予这次城市移动的挂起行动 id（0 = 操作区的主要行动）：走完这步时消费它。</summary>
+        public readonly int PendingActionId;
+
+        public MoveCityInfluenceCommand(int seat, int originNodeId, int pendingActionId = 0)
         {
             ActorSeat = seat;
             OriginNodeId = originNodeId;
+            PendingActionId = pendingActionId;
         }
 
         public int ActorSeat { get; }
         public string Name => "城市移动·放置影响力";
-        public bool ConsumesAction => true;
+        public bool ConsumesAction => PendingActionId == 0;
 
         public CommandResult Validate(GameState state)
         {
+            CommandResult pending = PendingActionRules.ValidatePending(
+                state, ActorSeat, PendingActionKind.CityMove, PendingActionId);
+            if (!pending.Ok) return pending;
+
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
 
@@ -172,6 +215,8 @@ namespace NomadCity.Core.Engine
             state.Player(ActorSeat).MarkersInSupply--;
 
             state.CityMoveOriginNodeId = -1; // 三步走完，这次城市移动结清
+
+            if (PendingActionId > 0) state.ConsumePending(PendingActionId);
         }
     }
 }

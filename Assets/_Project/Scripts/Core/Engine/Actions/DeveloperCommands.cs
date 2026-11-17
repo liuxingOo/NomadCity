@@ -392,6 +392,43 @@ namespace NomadCity.Core.Engine
         }
     }
 
+    /// <summary>
+    /// 开发者模式：给某位玩家登记一条挂起行动（行动事件），用来测试「卡牌效果授予的行动」整套流程
+    /// （探索 / 建设 / 移除影响力）。默认不限次数与限制，可在面板上选免费 / 金券上限 / 影响力范围。
+    /// </summary>
+    public sealed class DeveloperQueuePendingActionCommand : ICommand
+    {
+        public readonly PendingActionKind Kind;
+        public readonly int Remaining;
+        public readonly PendingActionLimits Limits;
+
+        public DeveloperQueuePendingActionCommand(int seat, PendingActionKind kind, int remaining = 1,
+            PendingActionLimits? limits = null)
+        {
+            ActorSeat = seat;
+            Kind = kind;
+            Remaining = remaining;
+            Limits = limits ?? PendingActionLimits.Unlimited;
+        }
+
+        public int ActorSeat { get; }
+        public string Name => "开发者：授予行动";
+        public bool ConsumesAction => false;
+
+        public CommandResult Validate(GameState state)
+        {
+            if (!DeveloperRules.Enabled(state)) return CommandResult.Fail("当前不是开发者模式。");
+            if (ActorSeat < 0 || ActorSeat >= state.Players.Count)
+                return CommandResult.Fail($"座位号 {ActorSeat} 无效。");
+            if (Kind == PendingActionKind.None) return CommandResult.Fail("要授予的行动种类无效。");
+            if (Remaining < 1) return CommandResult.Fail("次数至少是 1。");
+            return CommandResult.Success;
+        }
+
+        public void Apply(GameState state) =>
+            state.EnqueuePending(ActorSeat, Kind, Remaining, Limits, -1, "开发者授予");
+    }
+
     /// <summary>开发者命令共用的准入判断。</summary>
     internal static class DeveloperRules
     {

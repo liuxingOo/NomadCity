@@ -47,6 +47,12 @@ namespace NomadCity.UI
         [Tooltip("最多保留多少行，超出就丢掉最早的（防止长时间游玩把文本撑爆）")]
         [SerializeField] private int maxLines = 300;
 
+        /// <summary>
+        /// 「行动记录」按钮的矩形。确认窗最小化后要贴在它上面，
+        /// 从它往上两级就是整块操作区（OperationBar）。
+        /// </summary>
+        public RectTransform ToggleRect => toggleButton != null ? (RectTransform)toggleButton.transform : null;
+
         /// <summary>一条记录：是谁的行动（-1 = 与具体玩家无关，如阶段推进、联机提示）。</summary>
         private struct LogEntry
         {
@@ -437,6 +443,9 @@ namespace NomadCity.UI
                 case BuildFacilityCommand build:
                     return DescribeBuild(state, build);
 
+                case ResolveFacilityEntryEffectCommand entry:
+                    return DescribeEntryEffect(state, entry);
+
                 case AdvancePhaseCommand:
                     return $"—— 推进阶段：现在进入「{GameHud.StageLabel(state)}」 ——";
 
@@ -540,6 +549,22 @@ namespace NomadCity.UI
                 sb.Append($"《{card.Name}》入场效果：{DescribeReport(command.Report)}。");
 
             return sb.ToString();
+        }
+
+        /// <summary>结算设施入场效果：哪一格的设施、入场效果是什么。</summary>
+        private string DescribeEntryEffect(GameState state, ResolveFacilityEntryEffectCommand command)
+        {
+            PlayerState player = state.Player(command.ActorSeat);
+            int facilityId = command.PanelSlot >= 0 && command.PanelSlot < player.CityPanelSlots.Length
+                ? player.CityPanelSlots[command.PanelSlot]
+                : -1;
+            FacilityCardDef card = facilityId >= 0 ? state.Catalog.Facility(facilityId) : null;
+            string name = card != null ? card.Name : $"设施";
+
+            if (command.Report == null || command.Report.Entries.Count == 0)
+                return $"{SeatName(command.ActorSeat)} 结算了《{name}》的入场效果：无可执行内容。";
+
+            return $"{SeatName(command.ActorSeat)} 结算了《{name}》的入场效果：{DescribeReport(command.Report)}。";
         }
 
         /// <summary>追一句「事件牌《名字》，资源点类型：源石×1」——牌已经翻开了才有。</summary>

@@ -47,7 +47,7 @@ namespace NomadCity.Tests
         // —— 1. 进行一次建造 ——
 
         [Test]
-        public void 进行一次建造_放置到面板空位并从供应区拿走()
+        public void 进行一次建造_玩家行动阶段先登记成待执行行动()
         {
             GameEngine engine = NewGame();
             GameState state = engine.State;
@@ -62,35 +62,81 @@ namespace NomadCity.Tests
             EffectReport report = EffectResolver.Execute(state, 0, new[] { RewardOp.BuildOnce() });
 
             Assert.IsTrue(report.AnyApplied, report.Describe());
+
+            // 玩家行动阶段不再由引擎替玩家选牌、选格、付款：登记成挂起行动，交给界面走完整流程。
+            PendingAction pending = state.FindPending(0, PendingActionKind.Build);
+            Assert.IsNotNull(pending, "应当登记一条待执行的建设");
+            CollectionAssert.DoesNotContain(player.BuiltFacilities, card);
+            CollectionAssert.Contains(state.FacilitySupply, card);
+        }
+
+        [Test]
+        public void 待执行的建设_派发建设命令后完成并消费挂起记录()
+        {
+            GameEngine engine = NewGame();
+            GameState state = engine.State;
+            PlayerState player = state.Players[0];
+            player.Resources.Set(ResourceType.Orirock, 10);
+            player.Resources.Set(ResourceType.Originium, 10);
+            player.Resources.Set(ResourceType.Oriron, 10);
+            player.Resources.Set(ResourceType.OriginitePrime, 10);
+
+            EffectResolver.Execute(state, 0, new[] { RewardOp.BuildOnce() });
+            PendingAction pending = state.FindPending(0, PendingActionKind.Build);
+            Assert.IsNotNull(pending);
+
+            int card = state.FacilitySupply[0];
             int slot = FreeSlot(player);
+            CommandResult result = engine.Dispatch(
+                new BuildFacilityCommand(0, card, slot, FacilityPayment.Resources, null,
+                    pendingActionId: pending.Id));
+
+            Assert.IsTrue(result.Ok, result.Error);
             CollectionAssert.Contains(player.BuiltFacilities, card);
-            CollectionAssert.DoesNotContain(state.FacilitySupply, card);
-            Assert.Greater(slot, -1); // 仍然还留着空位（只建了一张）
+            Assert.IsNull(state.FindPending(pending.Id), "走完后这条挂起记录应当被消费掉");
         }
 
         // —— 2. 免费城市移动 ——
 
         [Test]
-        public void 免费城市移动_移动城市并在出发点放影响力()
+        public void 免费城市移动_先登记挂起行动_走完三步后才移动并放影响力()
         {
             GameEngine engine = NewGame();
             GameState state = engine.State;
             PlayerState player = state.Players[0];
             player.MobileCityNodeId = 0;
             player.MarkersInSupply = 30;
+            player.Resources.Set(ResourceType.Originium, 3);
+            state.Map.Node(1).HasResourceToken = true; // 目标点已有指示物：本条只走城市移动三步，不牵出事件牌
 
             EffectReport report = EffectResolver.Execute(state, 0, new[] { RewardOp.FreeCityMove() });
 
             Assert.IsTrue(report.AnyApplied, report.Describe());
+
+            // 玩家行动阶段不再由引擎替玩家移动：登记成挂起行动，交给界面走完整流程。
+            PendingAction pending = state.FindPending(0, PendingActionKind.CityMove);
+            Assert.IsNotNull(pending, "应当登记一条待执行的城市移动");
+            Assert.IsTrue(pending.Limits.Free, "效果授予的城市移动不收 3 源石");
+            Assert.AreEqual(0, player.MobileCityNodeId, "还没真的移动");
+            Assert.AreEqual(3, player.Resources.Get(ResourceType.Originium), "免费：源石一点未动");
+
+            // 界面流程：点目标点完成步 1–2，再在出发点放影响力完成步 3。
+            CommandResult moved = engine.Dispatch(new MoveMobileCityCommand(0, 1, pending.Id));
+            Assert.IsTrue(moved.Ok, moved.Error);
+            CommandResult placed = engine.Dispatch(new MoveCityInfluenceCommand(0, 0, pending.Id));
+            Assert.IsTrue(placed.Ok, placed.Error);
+
             Assert.AreEqual(1, player.MobileCityNodeId);
             Assert.AreEqual(0, state.Map.Node(0).Slots.OwnerOf(0)); // 出发点放下 1 个自己的影响力
             Assert.AreEqual(29, player.MarkersInSupply);
+            Assert.AreEqual(3, player.Resources.Get(ResourceType.Originium), "免费：源石一点未动");
+            Assert.IsNull(state.FindPending(pending.Id), "走完后这条挂起记录应当被消费掉");
         }
 
         // —— 3. 执行 1 次探索 ——
 
         [Test]
-        public void 执行一次探索_翻牌结算并在目标点放影响力()
+        public void 执行一次探索_玩家行动阶段先登记成待执行行动()
         {
             GameEngine engine = NewGame();
             GameState state = engine.State;
@@ -104,12 +150,42 @@ namespace NomadCity.Tests
 
             Assert.IsTrue(report.AnyApplied, report.Describe());
 
-            MapNodeState node = state.Map.Node(1);
-            Assert.IsTrue(node.HasResourceToken);
-            Assert.IsTrue(node.EventResolved);
-            Assert.IsFalse(node.ExplorePending);
-            Assert.AreEqual(deckBefore - 1, state.EventDeckGreen.Count);
-            Assert.AreEqual(0, node.Slots.OwnerOf(0)); // 归来的影响力落在目标点
+            // 不再由引擎自动选点、翻牌、放影响力：登记成挂起行动，界面会弹事件卡并让玩家选奖励。
+            Assert.IsNotNull(state.FindPending(0, PendingActionKind.Explore));
+            Assert.AreEqual(deckBefore, state.EventDeckGreen.Count);
+            Assert.IsFalse(state.Map.Node(1).HasResourceToken);
+        }
+
+        [Test]
+        public void 待执行的探索_走完三步后消费挂起记录()
+        {
+            GameEngine engine = NewGame();
+            GameState state = engine.State;
+            PlayerState player = state.Players[0];
+            player.MobileCityNodeId = 0;
+            player.MarkersInSupply = 30;
+            player.Vouchers += 50;
+
+            int deckBefore = state.EventDeckGreen.Count;
+            EffectResolver.Execute(state, 0, new[] { RewardOp.ExploreOnce() });
+            PendingAction pending = state.FindPending(0, PendingActionKind.Explore);
+            Assert.IsNotNull(pending);
+
+            CommandResult explore = engine.Dispatch(new ExploreCommand(0, 1, null, null, pending.Id));
+            Assert.IsTrue(explore.Ok, explore.Error);
+            Assert.AreEqual(deckBefore - 1, state.EventDeckGreen.Count, "探索第一步就该翻开事件牌");
+            Assert.GreaterOrEqual(state.Map.Node(1).EventCardId, 0);
+
+            // 翻牌之后还要结算事件选项，再做第三步放影响力，挂起记录才会被消费。
+            Assert.IsNotNull(state.FindPending(pending.Id));
+
+            CommandResult resolve = engine.Dispatch(new ResolveEventOptionCommand(0, 1, 0));
+            Assert.IsTrue(resolve.Ok, resolve.Error);
+
+            CommandResult place = engine.Dispatch(new ExploreInfluenceCommand(0, 1, pending.Id));
+            Assert.IsTrue(place.Ok, place.Error);
+            Assert.IsNull(state.FindPending(pending.Id));
+            Assert.AreEqual(0, state.Map.Node(1).Slots.OwnerOf(0));
         }
 
         // —— 4. 结算他牌入场效果 ——

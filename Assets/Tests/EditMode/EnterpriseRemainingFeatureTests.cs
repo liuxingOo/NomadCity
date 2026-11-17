@@ -534,12 +534,19 @@ namespace NomadCity.Tests
             state.Map.Node(1).Slots.Place(0, 0); // 自己在别处有 1 个影响力
             int supply = player.MarkersInSupply;
 
-            // 分支 1 = 「放到『为了大家』牌上」。
-            var choices = new TestChoices { BranchAnswers = new Queue<int>(new[] { 1 }) };
+            // 效果在玩家行动阶段只登记挂起行动，具体移除由「移除影响力」事件派发命令完成。
             EffectReport report = EffectResolver.Execute(state, 0,
-                new[] { RewardOp.RemoveInfluence(1) }, choices);
-
+                new[] { RewardOp.RemoveInfluence(1) }, new TestChoices());
             Assert.IsTrue(report.AnyApplied, report.Describe());
+            PendingAction pending = state.FindPending(0, PendingActionKind.RemoveInfluence);
+            Assert.IsNotNull(pending);
+            Assert.AreEqual(4, card.Markers);
+
+            // 分支 1 = 「放到『为了大家』牌上」（移除时问被移除方自己）。
+            var choices = new TestChoices { BranchAnswers = new Queue<int>(new[] { 1 }) };
+            Assert.IsTrue(engine.Dispatch(new RemoveInfluenceCommand(0,
+                InfluenceSlotRef.OnNode(1, 0), pending.Id, choices)).Ok);
+
             Assert.AreEqual(5, card.Markers);
             Assert.AreEqual(supply, player.MarkersInSupply, "标记没有回到供应堆。");
         }

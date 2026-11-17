@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using NomadCity.Core.Engine;
 using NomadCity.Core.Net;
@@ -209,6 +210,33 @@ namespace NomadCity.Tests
 
             CommandKind.UsePersistentTacticCleanup =>
                 new CommandDto { Kind = kind, Seat = 1, P0 = 1, P3 = 1, Items = new[] { 0 } },
+
+            // 移除影响力：P0 = 槽位种类；P1 = 目标 id；P2 = 槽位下标；P3 = 答案个数，Items = 答案；
+            // PendingActionId = 授予它的挂起行动。
+            CommandKind.RemoveInfluence =>
+                new CommandDto
+                {
+                    Kind = kind, Seat = 1, P0 = 0, P1 = 4, P2 = 1, P3 = 1, Items = new[] { 1 },
+                    PendingActionId = 3,
+                },
+
+            // 放弃挂起行动：P0 = 挂起行动 id。
+            CommandKind.AbandonPendingAction =>
+                new CommandDto { Kind = kind, Seat = 2, P0 = 5 },
+
+            // 开发者授予挂起行动：P0 = (int)Kind；P1 = Remaining；P2 = (int)Scope；P3 = 金券上限；Flags bit0 = 免费。
+            CommandKind.DeveloperQueuePendingAction =>
+                new CommandDto
+                {
+                    Kind = kind, Seat = 0, P0 = 1, P1 = 2, P2 = 1, P3 = 3, Flags = 1u,
+                },
+
+            // 结算设施入场效果：P0 = PanelSlot；P3 = 入场效果答案个数，Items = 答案。
+            CommandKind.ResolveFacilityEntryEffect =>
+                new CommandDto
+                {
+                    Kind = kind, Seat = 0, P0 = 2, P3 = 3, Items = new[] { 0, 1, -1 },
+                },
 
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind,
                 "新增了 CommandKind 却没在往返测试里给出样本 DTO。"),

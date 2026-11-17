@@ -5,11 +5,15 @@ using NomadCity.Core.Model;
 namespace NomadCity.Core.Engine
 {
     /// <summary>
-    /// 主要行动「建设」（RuleSpec §6.4e），三步一次做完：
+    /// 主要行动「建设」（RuleSpec §6.4e）的前两步：
     /// 1) 支付费用 —— 按牌面的资源费用或金券费用二选一支付（带「免费」关键词则跳过）；
-    /// 2) 把设施牌放到自己城市面板的一个空位上，并**立即**结算牌面奖励分数；
-    /// 3) 结算入场效果（§11 通用效果执行器，不为某张牌硬编码）。
+    /// 2) 把设施牌放到自己城市面板的一个空位上，并**立即**结算牌面奖励分数。
     /// 做完后从设施牌堆补牌，让设施供应区恢复 6 张。
+    ///
+    /// 入场效果（§11）不再在这里结算，而是拆到 <see cref="ResolveFacilityEntryEffectCommand"/>：
+    /// 这样玩家能先看到设施上板，再在弹窗里点选入场效果的分支 / 落点，顺序与桌游一致。
+    /// 企业 / 卡牌效果里的「免费建造」仍可把 <c>runEntryEffects</c> 设为 true 就地结算（它们在效果链里跑，
+    /// 不便再拆出一条玩家命令）。
     ///
     /// 41 张普通设施牌的牌面数据已录入（见 `Doc/FacilityCards.md`）：费用 / 分数 / 关键词 / 入场效果
     /// 都已生效 —— 含「获得 N 资源」「放置影响力」「`or` 二选一」「拿走／移动／替换影响力」，
@@ -38,8 +42,20 @@ namespace NomadCity.Core.Engine
         /// <summary>卡牌给的建造不占主要行动：跳过「本回合主要行动次数」校验（雷神工业 3 级等）。</summary>
         private readonly bool ignoreActionBudget;
 
+        /// <summary>授予这次建设的挂起行动 id（0 = 正常主要行动）。限制从挂起记录里读，不信调用方参数。</summary>
+        public readonly int PendingActionId;
+
+        /// <summary>
+        /// 是否在本命令里就地结算入场效果。
+        /// 玩家手动建设（含开发者模式）传 false：设施先落地，再由
+        /// <see cref="ResolveFacilityEntryEffectCommand"/> 弹窗外结算入场效果。
+        /// 企业 / 卡牌效果里的免费建造传 true（默认）：在效果链里一并结算。
+        /// </summary>
+        private readonly bool runEntryEffects;
+
         public BuildFacilityCommand(int seat, int facilityId, int panelSlot, FacilityPayment payment,
-            IEffectChoices choices = null, bool freeBuild = false, bool ignoreActionBudget = false)
+            IEffectChoices choices = null, bool freeBuild = false, bool ignoreActionBudget = false,
+            int pendingActionId = 0, bool runEntryEffects = true)
         {
             ActorSeat = seat;
             FacilityId = facilityId;
@@ -48,26 +64,48 @@ namespace NomadCity.Core.Engine
             this.choices = choices;
             this.freeBuild = freeBuild;
             this.ignoreActionBudget = ignoreActionBudget;
+            PendingActionId = pendingActionId;
+            this.runEntryEffects = runEntryEffects;
         }
 
         public int ActorSeat { get; }
         public string Name => "建设";
-        public bool ConsumesAction => true;
+
+        /// <summary>挂起行动不占主要行动名额；只有正常建设才在这里记账。</summary>
+        public bool ConsumesAction => PendingActionId == 0;
+
+        /// <summary>这次建设是否免费（卡牌 / 企业给的效果，或牌面本来免费）。</summary>
+        private bool IsFree(GameState state)
+        {
+            if (freeBuild) return true;
+            PendingAction pending = state.FindPending(PendingActionId);
+            return pending != null && pending.Limits.Free;
+        }
 
         /// <summary>入场效果的答案来源（联机编码时要从这里取答案，见 <c>CommandCodec</c>）。</summary>
         public IEffectChoices EffectChoices => choices;
 
         public CommandResult Validate(GameState state)
         {
+            PendingAction pending = null;
+            if (PendingActionId > 0)
+            {
+                CommandResult check = PendingActionRules.ValidatePending(state, ActorSeat,
+                    PendingActionKind.Build, PendingActionId);
+                if (!check.Ok) return check;
+                pending = state.FindPending(PendingActionId);
+            }
+
             // 卡牌给的建造不要求「正好在自己行动阶段」：事件牌也会给出免费建造。
-            if (!ignoreActionBudget)
+            if (!ignoreActionBudget && pending == null)
             {
                 CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
                 if (!turn.Ok) return turn;
             }
 
-            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat);
-            if (!quota.Ok && !ignoreActionBudget) return quota;
+            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat,
+                isContinuation: pending != null);
+            if (!quota.Ok && !ignoreActionBudget && pending == null) return quota;
 
             PlayerState player = state.Player(ActorSeat);
 
@@ -100,6 +138,11 @@ namespace NomadCity.Core.Engine
             if (card.IsUnique && HasSameName(state, player, card))
                 return CommandResult.Fail($"「{card.Name}」带「唯一」关键词，你的城市面板上已经有一张同名设施了（§6.4e）。");
 
+            if (pending != null && pending.Limits.MaxVoucherSpend >= 0 &&
+                card.VoucherCost > pending.Limits.MaxVoucherSpend)
+                return CommandResult.Fail(
+                    $"这次效果只能建设金券费用不超过 {pending.Limits.MaxVoucherSpend} 的设施，而「{card.Name}」需要 {card.VoucherCost}。");
+
             return ValidatePayment(state, card, player);
         }
 
@@ -108,10 +151,17 @@ namespace NomadCity.Core.Engine
             PlayerState player = state.Player(ActorSeat);
             FacilityCardDef card = state.Catalog.Facility(FacilityId);
 
-            Pay(state, player, card);          // 步 1
+            bool free = IsFree(state);
+            Pay(state, player, card, free);    // 步 1
             PlaceOnPanel(state, player, card); // 步 2
-            Report = EffectResolver.Execute(state, ActorSeat, card.EntryEffects, choices,
-                EnterpriseEffectExtension.Instance); // 步 3
+
+            // 入场效果（步 3）：玩家手动建设拆到 ResolveFacilityEntryEffectCommand，
+            // 企业 / 卡牌效果里的免费建造仍在这里就地结算。
+            if (runEntryEffects)
+                Report = EffectResolver.Execute(state, ActorSeat, card.EntryEffects, choices,
+                    EnterpriseEffectExtension.Instance);
+
+            if (PendingActionId > 0) state.ConsumePending(PendingActionId);
         }
 
         /// <summary>
@@ -131,7 +181,7 @@ namespace NomadCity.Core.Engine
         /// <summary>步 1 校验：免建的牌直接过；其余必须明确选一种费用、并且付得起。</summary>
         private CommandResult ValidatePayment(GameState state, FacilityCardDef card, PlayerState player)
         {
-            if (freeBuild || IsFreeToBuild(card)) return CommandResult.Success;
+            if (IsFree(state) || IsFreeToBuild(card)) return CommandResult.Success;
 
             switch (Payment)
             {
@@ -206,9 +256,9 @@ namespace NomadCity.Core.Engine
             return cost;
         }
 
-        private void Pay(GameState state, PlayerState player, FacilityCardDef card)
+        private void Pay(GameState state, PlayerState player, FacilityCardDef card, bool free)
         {
-            if (freeBuild || IsFreeToBuild(card)) return;
+            if (free || IsFreeToBuild(card)) return;
 
             if (Payment == FacilityPayment.Resources)
             {
@@ -264,6 +314,65 @@ namespace NomadCity.Core.Engine
             PersistentTacticState order = state.FindPersistentTactic(seat,
                 PersistentTacticKind.EngineeringOrder);
             return order != null && order.AttachedFacilityIds.Contains(facilityId);
+        }
+    }
+
+    /// <summary>
+    /// 建设的第三步：设施已经落到城市面板上之后，再结算它的入场效果（§11 通用效果执行器）。
+    ///
+    /// 之所以从 <see cref="BuildFacilityCommand"/> 里拆出来，是为了让顺序变成
+    /// 「选费用 → 设施上板 → 弹窗外结算入场效果」，与桌游一致：玩家先看到设施落地，
+    /// 再在弹窗里点选入场效果的分支 / 落点。无入场效果的设施不会走到这条命令。
+    /// 入场效果不占主要行动名额（建设行动已由 BuildFacilityCommand 记账）。
+    /// </summary>
+    public sealed class ResolveFacilityEntryEffectCommand : ICommand
+    {
+        /// <summary>设施所在的城市面板格子下标。</summary>
+        public readonly int PanelSlot;
+
+        /// <summary>入场效果里需要玩家点选时由它回答；不传则用「总是取第一个合法项」的自动结算。</summary>
+        private readonly IEffectChoices choices;
+
+        /// <summary>入场效果的结算报告；Apply 之后才有值。</summary>
+        public EffectReport Report { get; private set; }
+
+        public ResolveFacilityEntryEffectCommand(int seat, int panelSlot, IEffectChoices choices = null)
+        {
+            ActorSeat = seat;
+            PanelSlot = panelSlot;
+            this.choices = choices;
+        }
+
+        public int ActorSeat { get; }
+        public string Name => "结算设施入场效果";
+
+        /// <summary>入场效果属于建设行动的一部分，不单独占用主要行动。</summary>
+        public bool ConsumesAction => false;
+
+        /// <summary>入场效果的答案来源（联机编码时要从这里取答案，见 <c>CommandCodec</c>）。</summary>
+        public IEffectChoices EffectChoices => choices;
+
+        public CommandResult Validate(GameState state)
+        {
+            if (PanelSlot < 0 || PanelSlot >= PlayerState.CityPanelSlotCount)
+                return CommandResult.Fail($"城市面板格号 {PanelSlot} 无效。");
+
+            PlayerState player = state.Player(ActorSeat);
+            if (player.CityPanelSlots[PanelSlot] < 0)
+                return CommandResult.Fail($"城市面板第 {PanelSlot + 1} 格没有设施，无法结算入场效果。");
+
+            return CommandResult.Success;
+        }
+
+        public void Apply(GameState state)
+        {
+            PlayerState player = state.Player(ActorSeat);
+            int facilityId = player.CityPanelSlots[PanelSlot];
+            FacilityCardDef card = state.Catalog.Facility(facilityId);
+
+            IEffectChoices picker = choices ?? FirstAvailableChoices.Default;
+            Report = EffectResolver.Execute(state, ActorSeat, card.EntryEffects, picker,
+                EnterpriseEffectExtension.Instance);
         }
     }
 }

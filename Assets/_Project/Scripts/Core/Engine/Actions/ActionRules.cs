@@ -59,6 +59,10 @@ namespace NomadCity.Core.Engine
 
             if (isContinuation) return CommandResult.Success;
 
+            // 卡牌效果授予的行动还没做完：必须先把这次行动完成，不能另开一次主要行动。
+            if (state.HasPending(seat))
+                return CommandResult.Fail("还有卡牌效果授予的行动没有完成，先把它做完。");
+
             // 还有没走完的多步主要行动时不能另开一次，否则它的收尾步会变成这个玩家的第二次主要行动。
             if (state.CityMoveOriginNodeId >= 0)
                 return CommandResult.Fail("城市移动还没走完（还要在出发点放置 1 个影响力），先完成它（§6.4d）。");
@@ -159,9 +163,26 @@ namespace NomadCity.Core.Engine
             return -1;
         }
 
-        /// <summary>移除某条航道上「除 seat 外」的所有影响力，标记退回各自供应堆（§6.4d）。返回移除数量。</summary>
-        public static int ClearRouteInfluencesOfOthers(GameState state, int routeId, int seat)
+        /// <summary>
+        /// 移除一个影响力，并把该标记退回其所有者的供应堆（「为了大家」可改为放到自己牌上）。
+        /// 效果结算与「移除影响力」行动命令共用这一段。
+        /// 返回被移除影响力的所有者；该格为空时返回 -1。
+        /// </summary>
+        public static int RemoveInfluenceAt(GameState state, InfluenceSlotRef slot, IEffectChoices choices = null)
         {
+            int owner = state.Map.OccupantOf(slot);
+            if (owner < 0) return -1;
+
+            state.Map.SlotsOf(slot).Clear(slot.SlotIndex);
+            if (owner >= state.Players.Count) return owner;
+
+            if (PersistentTacticRules.TryCaptureRemovedInfluence(state, owner, choices)) return owner;
+            state.Player(owner).MarkersInSupply++;
+            return owner;
+        }
+
+        /// <summary>移除某条航道上「除 seat 外」的所有影响力，标记退回各自供应堆（§6.4d）。返回移除数量。</summary>
+        public static int ClearRouteInfluencesOfOthers(GameState state, int routeId, int seat)        {
             InfluenceSlots slots = state.Map.Route(routeId).Slots;
             int removed = 0;
             for (int i = 0; i < slots.Capacity; i++)

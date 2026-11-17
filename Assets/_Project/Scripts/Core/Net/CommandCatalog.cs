@@ -48,6 +48,10 @@ namespace NomadCity.Core.Net
             { typeof(DeveloperResetPanelUseCommand), CommandKind.DeveloperResetPanelUse },
             { typeof(DeveloperDeclareCityPatternCommand), CommandKind.DeveloperDeclareCityPattern },
             { typeof(DeveloperUseCharacterCardCommand), CommandKind.DeveloperUseCharacterCard },
+            { typeof(RemoveInfluenceCommand), CommandKind.RemoveInfluence },
+            { typeof(AbandonPendingActionCommand), CommandKind.AbandonPendingAction },
+            { typeof(DeveloperQueuePendingActionCommand), CommandKind.DeveloperQueuePendingAction },
+            { typeof(ResolveFacilityEntryEffectCommand), CommandKind.ResolveFacilityEntryEffect },
         };
 
         /// <summary>查命令类型对应的 Kind；未登记时抛出异常（有意为之，逼新增命令登记）。</summary>

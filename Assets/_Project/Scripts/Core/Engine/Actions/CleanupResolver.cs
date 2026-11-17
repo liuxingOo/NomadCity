@@ -45,8 +45,9 @@ namespace NomadCity.Core.Engine
             state.DeferredEffects.Clear();
             foreach (DeferredEffect deferred in queue)
             {
+                // 延迟结算自身不能再把行动挂起：否则「本回合收尾移除一个影响力」会变成一条没人执行的挂起行动。
                 EffectResolver.Execute(state, deferred.Seat, deferred.Ops, null,
-                    EnterpriseEffectExtension.Instance);
+                    EnterpriseEffectExtension.Instance, allowDefer: false);
             }
         }
 

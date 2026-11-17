@@ -34,39 +34,31 @@ namespace NomadCity.Tests
             return engine;
         }
 
-        /// <summary>载具仓库的入场效果：「拿走 1 个影响力并移动自己的 1 个」或「执行 1 次探索」二选一（§11.4）。</summary>
-        private static RewardOp[] VehicleDepotEffects() => new[]
+        /// <summary>
+        /// 二选一里挑「连续放置 2 个影响力」：第二个落点的候选必须基于第一个答案之后的状态。
+        /// 拿走 / 移动 / 探索 / 建设这类行动已改由「行动事件」接管（玩家行动阶段只登记挂起行动），
+        /// 所以这里用同一套连锁提问的「部署」来验证会话机制本身。
+        /// </summary>
+        private static RewardOp[] TwoPlacementEffects() => new[]
         {
             RewardOp.Alternative(
-                new EffectBranch("拿走 1 个影响力并移动自己的 1 个影响力",
-                    RewardOp.RemoveInfluence(), RewardOp.RelocateInfluence()),
-                new EffectBranch("执行 1 次探索", RewardOp.ExploreOnce())),
+                new EffectBranch("连续放置 2 个影响力",
+                    RewardOp.Influence(InfluencePlacementScope.DeployRules, 1),
+                    RewardOp.Influence(InfluencePlacementScope.DeployRules, 1)),
+                new EffectBranch("获得 3 金券", RewardOp.Vouchers(3))),
         };
 
-        /// <summary>在候选项里按文案关键字找下标；找不到返回 -1。</summary>
-        private static int IndexOfLabel(ChoiceRequest request, string keyword)
-        {
-            for (int i = 0; i < request.Options.Count; i++)
-            {
-                if (request.Options[i].Label.Contains(keyword)) return i;
-            }
-            return -1;
-        }
-
-        // —— 1. 连锁提问：二选一 → 拿走 → 移动 ——
+        // —— 1. 连锁提问：二选一 → 第一次落点 → 第二次落点 ——
 
         [Test]
-        public void 二选一分支_会连锁问出拿走与移动且候选随前一步变化()
+        public void 二选一分支_会连锁问出两次落点且候选随前一步变化()
         {
             GameEngine engine = NewGame();
             GameState state = engine.State;
-
-            // 玩家 1 在 A-01 第 1 格、玩家 2 在 A-02 第 1 格
-            state.Map.Node(0).Slots.Place(0, 0);
-            state.Map.Node(1).Slots.Place(0, 1);
+            state.Players[0].MarkersInSupply = 30;
 
             var session = new EffectChoiceSession(state,
-                (sandbox, choices) => EffectResolver.Execute(sandbox, 0, VehicleDepotEffects(), choices));
+                (sandbox, choices) => EffectResolver.Execute(sandbox, 0, TwoPlacementEffects(), choices));
 
             session.Advance();
             Assert.IsFalse(session.IsComplete);
@@ -74,27 +66,23 @@ namespace NomadCity.Tests
             StringAssert.Contains("二选一", session.Pending.Prompt);
             Assert.IsTrue(session.Pending.AllowCancel == false, "二选一必须选一个，不给「放弃」");
 
-            session.Answer(0); // 选「拿走并移动」那一支
+            session.Answer(0); // 选「连续放置 2 个影响力」那一支
 
-            StringAssert.Contains("拿走", session.Pending.Prompt);
-            int removeIndex = IndexOfLabel(session.Pending, "玩家2");
-            Assert.GreaterOrEqual(removeIndex, 0, "候选里应有玩家 2 在 A-02 的影响力：" + session.Pending.Prompt);
-            session.Answer(removeIndex);
+            StringAssert.Contains("放置影响力的位置", session.Pending.Prompt);
+            int firstCandidates = session.Pending.Options.Count;
+            Assert.GreaterOrEqual(firstCandidates, 2, "候选里应有多个可放置的空格：" + session.Pending.Prompt);
+            session.Answer(0); // 第一个影响力
 
-            StringAssert.Contains("移动", session.Pending.Prompt);
-            session.Answer(0); // 起点只有「玩家 1 在 A-01 第 1 格」这一处
+            StringAssert.Contains("放置影响力的位置", session.Pending.Prompt);
+            Assert.AreEqual(firstCandidates - 1, session.Pending.Options.Count,
+                "刚放下的那一格不该再出现在候选里（候选基于前一步答案后的状态）");
+            session.Answer(0); // 第二个影响力
 
-            StringAssert.Contains("移动到哪个空格", session.Pending.Prompt);
-            int destination = IndexOfLabel(session.Pending, "A-02 第 1 格");
-            Assert.GreaterOrEqual(destination, 0,
-                "刚被拿走的那一格应重新成为可选落点（候选基于前一步答案后的状态）：" + session.Pending.Prompt);
-            session.Answer(destination);
-
-            Assert.IsTrue(session.IsComplete, "四个问题答完，整串效果就跑完了");
+            Assert.IsTrue(session.IsComplete, "三个问题答完，整串效果就跑完了");
 
             // 试跑跑在副本上：正式状态一根手指头都没动过。
-            Assert.AreEqual(1, state.Map.Node(1).Slots.OwnerOf(0));
-            Assert.AreEqual(0, state.Map.Node(0).Slots.OwnerOf(0));
+            Assert.AreEqual(30, state.Players[0].MarkersInSupply);
+            Assert.AreEqual(-1, state.Map.Node(0).Slots.OwnerOf(0));
         }
 
         // —— 2. 答案回放：正式执行与试跑一致 ——
@@ -104,34 +92,33 @@ namespace NomadCity.Tests
         {
             GameEngine engine = NewGame();
             GameState state = engine.State;
-            state.Map.Node(0).Slots.Place(0, 0);
-            state.Map.Node(1).Slots.Place(0, 1);
+            state.Players[0].MarkersInSupply = 30;
 
             var session = new EffectChoiceSession(state,
-                (sandbox, choices) => EffectResolver.Execute(sandbox, 0, VehicleDepotEffects(), choices));
+                (sandbox, choices) => EffectResolver.Execute(sandbox, 0, TwoPlacementEffects(), choices));
 
-            // 照「拿走对手的，再把在 A-01 的那枚移过去」这条路走完。
+            // 照「连续放置 2 个影响力」这条路走完（第二个落点跟着第一个答案后的候选走）。
             session.Advance();
             session.Answer(0);
-            session.Answer(IndexOfLabel(session.Pending, "玩家2"));
-            session.Answer(IndexOfLabel(session.Pending, "玩家1 的"));
-            session.Answer(IndexOfLabel(session.Pending, "A-02 第 1 格"));
+            session.Answer(0);
+            session.Answer(0);
 
             Assert.IsTrue(session.IsComplete);
 
             // 把玩家点出来的答案交给引擎在正式状态上重放一遍。
-            EffectReport report = EffectResolver.Execute(state, 0, VehicleDepotEffects(),
+            EffectReport report = EffectResolver.Execute(state, 0, TwoPlacementEffects(),
                 new RecordedChoices(session.Answers, strict: false));
 
             Assert.IsTrue(report.AnyApplied, report.Describe());
-            Assert.AreEqual(-1, state.Map.Node(0).Slots.OwnerOf(0), "自己的影响力被移走了");
-            Assert.AreEqual(0, state.Map.Node(1).Slots.OwnerOf(0), "移到了刚拿走的那一格上");
+            Assert.AreEqual(0, state.Map.Node(0).Slots.OwnerOf(0), "第一个影响力落在 A-01 第 1 格");
+            Assert.AreEqual(0, state.Map.Node(0).Slots.OwnerOf(1), "第二个影响力落在同一资源点的下一个空格");
+            Assert.AreEqual(28, state.Players[0].MarkersInSupply);
         }
 
-        // —— 3. 探索：先问要探索哪个资源点 ——
+        // —— 3. 探索：效果授予的行动整段交给界面 ——
 
         [Test]
-        public void 探索入场效果_先问要探索的资源点()
+        public void 探索入场效果_玩家行动阶段不再连环提问_直接登记待执行行动()
         {
             GameEngine engine = NewGame();
             GameState state = engine.State;
@@ -145,51 +132,41 @@ namespace NomadCity.Tests
                 (sandbox, choices) => EffectResolver.Execute(sandbox, 0, new[] { RewardOp.ExploreOnce() }, choices));
 
             session.Advance();
-            Assert.IsFalse(session.IsComplete);
-            StringAssert.Contains("探索", session.Pending.Prompt);
-            Assert.GreaterOrEqual(IndexOfLabel(session.Pending, "A-02"), 0);
+            Assert.IsTrue(session.IsComplete, "效果授予的探索交给界面走完整流程，会话里不再连环提问");
 
-            DriveToEnd(session, 40);
-            Assert.IsTrue(session.IsComplete, "探索的连锁选择（含事件选项）都应被逐个问完");
+            // 试跑跑在副本上：正式状态没有被登记。
+            Assert.IsNull(state.FindPending(0, PendingActionKind.Explore));
 
             EffectReport report = EffectResolver.Execute(state, 0, new[] { RewardOp.ExploreOnce() },
                 new RecordedChoices(session.Answers, strict: false));
 
-            Assert.IsTrue(report.AnyApplied,
-                $"answers={session.Answers.Count} [{string.Join(",", session.Answers)}] / {report.Describe()}");
-            Assert.IsTrue(state.Map.Node(1).HasResourceToken, "目标点翻出了指示物");
-            Assert.AreEqual(0, state.Map.Node(1).Slots.OwnerOf(0), "探索归来的影响力落在目标点");
+            Assert.IsTrue(report.AnyApplied, report.Describe());
+            Assert.IsNotNull(state.FindPending(0, PendingActionKind.Explore));
+            Assert.IsFalse(state.Map.Node(1).HasResourceToken, "指示物等玩家在界面上真的探索时才翻");
         }
 
-        // —— 4. 进行一次建造：依次问设施 → 落点 → 付费方式 ——
+        // —— 4. 进行一次建造：同样交给界面（选牌 / 落点 / 付费方式都在那边） ——
 
         [Test]
-        public void 进行一次建造_依次问出设施_落点_付费方式()
+        public void 建造入场效果_玩家行动阶段不再连环提问_直接登记待执行行动()
         {
             GameEngine engine = NewGame();
             GameState state = engine.State;
-            PlayerState player = state.Players[0];
             state.DeveloperMode = true;
-
-            int emptySlots = 0;
-            for (int i = 0; i < PlayerState.CityPanelSlotCount; i++)
-            {
-                if (i != PlayerState.CityPanelCoreSlot && player.CityPanelSlots[i] < 0) emptySlots++;
-            }
+            int builtBefore = state.Players[0].BuiltFacilities.Count;
 
             var session = new EffectChoiceSession(state,
                 (sandbox, choices) => EffectResolver.Execute(sandbox, 0, new[] { RewardOp.BuildOnce() }, choices));
 
             session.Advance();
-            Assert.AreEqual("选择要建设的设施牌", session.Pending.Prompt);
-            Assert.AreEqual(state.FacilitySupply.Count, session.Pending.Options.Count, "候选就是设施供应区里的牌");
+            Assert.IsTrue(session.IsComplete, "效果授予的建设交给界面走完整流程");
 
-            session.Answer(0);
-            Assert.AreEqual("选择要放到城市面板哪一格", session.Pending.Prompt);
-            Assert.AreEqual(emptySlots, session.Pending.Options.Count);
+            EffectReport report = EffectResolver.Execute(state, 0, new[] { RewardOp.BuildOnce() },
+                new RecordedChoices(session.Answers, strict: false));
 
-            session.Answer(0);
-            StringAssert.Contains("付费方式", session.Pending.Prompt);
+            Assert.IsTrue(report.AnyApplied, report.Describe());
+            Assert.IsNotNull(state.FindPending(0, PendingActionKind.Build));
+            Assert.AreEqual(builtBefore, state.Players[0].BuiltFacilities.Count, "还没真的建造");
         }
 
         // —— 5. 记录式选择器：答案用尽即抛，交给会话接着问 ——

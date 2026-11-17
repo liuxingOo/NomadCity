@@ -26,6 +26,10 @@ namespace NomadCity.Core.Engine
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
 
+            // 卡牌效果授予的行动还没做完：效果给的行动必须执行，不能靠结束回合绕过。
+            if (state.HasPending(ActorSeat))
+                return CommandResult.Fail("还有卡牌效果授予的行动没有完成，先把它做完才能结束回合。");
+
             // 城市移动三步没走完就结束回合，出发点那 1 个影响力会永久丢掉（§6.4d）。
             if (state.CityMoveOriginNodeId >= 0)
                 return CommandResult.Fail("城市移动还没走完（还要在出发点放置 1 个影响力），不能结束回合（§6.4d）。");

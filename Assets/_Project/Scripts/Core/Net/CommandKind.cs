@@ -53,5 +53,18 @@ namespace NomadCity.Core.Net
         DeveloperResetPanelUse = 34,
         DeveloperDeclareCityPattern = 35,
         DeveloperUseCharacterCard = 36,
+
+        // —— 挂起行动（行动事件） ——
+        /// <summary>卡牌效果授予的「移除 1 个影响力」。</summary>
+        RemoveInfluence = 37,
+
+        /// <summary>放弃一条没有合法目标的挂起行动（自动收尾 / 开发者调试）。</summary>
+        AbandonPendingAction = 38,
+
+        /// <summary>开发者模式：直接登记一条挂起行动，用来测试行动事件流程。</summary>
+        DeveloperQueuePendingAction = 39,
+
+        /// <summary>建设的第三步：设施落地后结算入场效果（弹窗点选分支 / 落点）。</summary>
+        ResolveFacilityEntryEffect = 40,
     }
 }

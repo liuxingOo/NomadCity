@@ -18,7 +18,7 @@ namespace NomadCity.UI
     /// 规则判断一概不在这里 —— 非法操作会把引擎给出的中文原因原样显示在 HUD 状态行上，
     /// 界面只负责记住「当前在选什么」（行动模式 + 调度的选点步骤）。
     /// </summary>
-    public sealed class GameScreenController : MonoBehaviour
+    public sealed partial class GameScreenController : MonoBehaviour
     {
         private GameEngine engine;
         private MapStateRenderer renderer;
@@ -36,6 +36,9 @@ namespace NomadCity.UI
         private int revealedSeen;
         private CharacterHandPanel handPanel;
 
+        /// <summary>手牌区「已盖放 / 弃牌区」按钮打开的查看窗（运行时创建，只读状态）。</summary>
+        private CharacterPilePanel pilePanel;
+
         /// <summary>状态栏左侧眼睛按钮弹出的「某位玩家城市面板」（只读）。没接线时点了只会提示。</summary>
         private PlayerCityPopup playerCityPopup;
 
@@ -48,6 +51,9 @@ namespace NomadCity.UI
         /// <summary>开发者模式按钮与面板：只有以开发者模式启动的对局才会创建。</summary>
         private Button developerButton;
         private DeveloperPanel developerPanel;
+
+        /// <summary>带窗口外框、可最小化的确认弹窗（开局停靠这类要一边看地图一边确认的场合）。</summary>
+        private ConfirmWindow confirmWindow;
 
         /// <summary>操作区的「决策」按钮：只有开局启用了感染者扩展才显示。</summary>
         [SerializeField] private Button decisionButton;
@@ -164,6 +170,9 @@ namespace NomadCity.UI
         /// <summary>终局结算窗是否已经弹过 —— <see cref="RefreshAll"/> 会被反复调用，不加标记会重复弹窗。</summary>
         private bool finalPrompted;
 
+        /// <summary>终局结算窗在等命令回调全部走完后再弹（结束回合的调用方事后还会补一次 SetMode，会把窗收掉）。</summary>
+        private bool finalPromptPending;
+
         /// <summary>正在触发的企业特效：座位 / 企业板 id / 合作等级。</summary>
         private int enterpriseSeat = -1;
         private int enterpriseBoardId = -1;
@@ -171,6 +180,12 @@ namespace NomadCity.UI
 
         /// <summary>当前这次收集会话是不是「提升合作等级」（否则是「触发企业特效」）。</summary>
         private bool enterpriseAdvance;
+
+        /// <summary>
+        /// 这次企业特效是开发者面板触发的：跳过「只能在自己行动阶段触发」的时机校验，
+        /// 其余点选流程与正常触发完全一致。
+        /// </summary>
+        private bool enterpriseIgnoreTiming;
 
         // —— 采集阶段（§7）：玩家自选资源点（不再是自动结算） ——
 
@@ -247,6 +262,9 @@ namespace NomadCity.UI
         /// <summary>「7 选 5」已选的第 1 张牌；-1 = 还在选第 1 张。</summary>
         private int setupDiscardFirst = -1;
 
+        /// <summary>「7 选 5」已选的第 2 张牌；-1 = 还在选第 2 张（或已重新选择）。</summary>
+        private int setupDiscardSecond = -1;
+
         /// <summary>正在结算的那个选项下标；结算完回到 -1。</summary>
         private int pendingEventOption = -1;
 
@@ -321,7 +339,12 @@ namespace NomadCity.UI
             if (this.supplyPanel != null) this.supplyPanel.CardClicked -= OnSupplyCardClicked;
             if (this.cityPanel != null) this.cityPanel.SlotClicked -= OnCitySlotClicked;
             if (this.patternPanel != null) this.patternPanel.CardClicked -= OnPatternCardClicked;
-            if (this.handPanel != null) this.handPanel.CardClicked -= OnHandCardClicked;
+            if (this.handPanel != null)
+            {
+                this.handPanel.CardClicked -= OnHandCardClicked;
+                this.handPanel.PlacedCardsClicked -= OnPlacedCardsClicked;
+                this.handPanel.DiscardPileClicked -= OnDiscardPileClicked;
+            }
             if (this.hud != null) this.hud.SeatInspectRequested -= OnSeatInspectRequested;
             if (this.playerCityPopup != null) this.playerCityPopup.SlotClicked -= OnPlayerCitySlotClicked;
 
@@ -345,6 +368,8 @@ namespace NomadCity.UI
             this.lockToLocalSeat = lockToLocalSeat;
             this.playerNames = playerNames ?? new string[0];
             this.finalPrompted = false;
+            this.finalPromptPending = false;
+            if (confirmWindow != null) confirmWindow.Hide();
 
             if (engine != null)
             {
@@ -375,7 +400,14 @@ namespace NomadCity.UI
             if (supplyPanel != null) supplyPanel.CardClicked += OnSupplyCardClicked;
             if (cityPanel != null) cityPanel.SlotClicked += OnCitySlotClicked;
             if (patternPanel != null) patternPanel.CardClicked += OnPatternCardClicked;
-            if (handPanel != null) handPanel.CardClicked += OnHandCardClicked;
+            if (handPanel != null)
+            {
+                handPanel.CardClicked += OnHandCardClicked;
+                handPanel.PlacedCardsClicked += OnPlacedCardsClicked;
+                handPanel.DiscardPileClicked += OnDiscardPileClicked;
+                // 把「已盖放 / 弃牌区」按钮挪到操作区上方，别让它遮行动记录。
+                handPanel.PlacePileButtonsAbove(panel != null ? panel.PopupRoot : null);
+            }
 
             if (hud != null) hud.Bind(engine);
             if (hud != null) hud.SeatInspectRequested += OnSeatInspectRequested;
@@ -540,17 +572,92 @@ namespace NomadCity.UI
 
                 developerPanel = DeveloperPanel.Create(canvas.transform, hud != null ? hud.UiFont : null);
                 developerPanel.Submit = SubmitDeveloperCommand;
+                developerPanel.TriggerEnterpriseEffectRequested = BeginDeveloperEnterpriseTrigger;
             }
 
             int initialSeat = engine.State.ActiveSeat >= 0 ? engine.State.ActiveSeat : localSeat;
             developerPanel.Open(engine.State, initialSeat);
         }
 
+        /// <summary>拿一个带窗口外框的确认弹窗：第一次用时在画布上搭出来，之后复用同一个。</summary>
+        private ConfirmWindow EnsureConfirmWindow()
+        {
+            if (confirmWindow != null) return confirmWindow;
+
+            Canvas canvas = ResolveCanvas();
+            if (canvas == null) return null;
+
+            confirmWindow = ConfirmWindow.Create(canvas.transform, hud != null ? hud.UiFont : null);
+            confirmWindow.SetCollapseAnchor(ResolveOperationBar(canvas));
+            return confirmWindow;
+        }
+
+        /// <summary>
+        /// 统一的「从一组选项里挑一个」弹窗：优先用可折行、可最小化的窗口弹窗；
+        /// 窗口没接线时才退回紧凑的小选择弹窗。返回 false 表示两种弹窗都没接线。
+        /// </summary>
+        private bool ShowChoiceWindow(string title, string prompt, IReadOnlyList<string> options,
+            Action<int> picked, bool allowCancel = true)
+        {
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window != null)
+            {
+                window.Show(title, prompt, options, picked, allowCancel);
+                return true;
+            }
+
+            if (choicePopup != null)
+            {
+                choicePopup.Show(prompt, options, picked, allowCancel);
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 弹出一次引擎给出的选择：企业特效 / 企业升级这类选项带整段效果说明，
+        /// 小选择弹窗的 320×50 按钮装不下，统一改用能折行、可最小化的窗口弹窗。
+        /// 其余选择（事件卡 / 建设 / 角色牌效果）也用同一套窗口，只是标题固定为「请选择」。
+        /// </summary>
+        private void ShowChoiceRequest(ChoiceRequest request, Action<int> picked)
+        {
+            var options = new List<string>(request.Options.Count);
+            foreach (ChoiceOption option in request.Options) options.Add(option.Label);
+
+            ShowChoiceWindow("请选择", request.Prompt, options, picked, request.AllowCancel);
+        }
+
+        /// <summary>
+        /// 操作区（右下角那块按钮格）的矩形：最小化后的确认按钮要贴在它顶边外侧。
+        /// 从「行动记录」按钮往上两级就是它，找不到就退回底部居中。
+        /// </summary>
+        private static RectTransform ResolveOperationBar(Canvas canvas)
+        {
+            if (canvas == null) return null;
+
+            ActionLogPanel log = canvas.GetComponentInChildren<ActionLogPanel>(true);
+            RectTransform toggle = log != null ? log.ToggleRect : null;
+            if (toggle == null) return null;
+
+            // 行动记录按钮 → 按钮格（PanelFill）→ 操作区（OperationBar）
+            return toggle.parent is RectTransform fill ? fill.parent as RectTransform : null;
+        }
+
+        /// <summary>有确认窗（或小选择窗）开着时不许换行动：否则弹窗还留在屏幕上，答案会落进已经换掉的流程。</summary>
+        private bool HasPromptOpen =>
+            (choicePopup != null && choicePopup.IsVisible) || (confirmWindow != null && confirmWindow.IsVisible);
+
         /// <summary>开发者面板的提交入口：走和正式流程相同的命令通道，并把结果显示到状态行。</summary>
         public CommandResult SubmitDeveloperCommand(ICommand command)
         {
             CommandResult result = DispatchToEngine(command);
             SetStatus(result.Ok ? $"开发者：{command.Name}" : result.Error);
+
+            // 开发者指定建设：设施落地后，像手动建设一样弹窗外结算入场效果。
+            if (result.Ok && command is DeveloperBuildFacilityCommand devBuild)
+                BeginFacilityEntryEffect(devBuild.ActorSeat, devBuild.FacilityId, devBuild.PanelSlot);
+
             return result;
         }
 
@@ -669,34 +776,85 @@ namespace NomadCity.UI
         {
             SetMode(ActionMode.None);
             RefreshAll();
+            if (confirmWindow != null) confirmWindow.Hide();
 
             string summary = DescribeFinal(state);
             SetStatus(summary);
 
-            // 终局结算窗：与「结束回合」等确认窗同一套规格（遮罩 + 标题 + 单个关闭选项）。
-            if (finalPrompted || choicePopup == null) return;
-            finalPrompted = true;
-            choicePopup.Show(BuildFinalPrompt(state, summary),
-                new[] { "查看最终地图" },
-                _ => SetStatus("终局已结算：可以查看最终地图，或退出本局。"),
-                allowCancel: false);
+            if (finalPrompted) return;
+
+            // 终局结算窗不能在这里直接弹：结束回合的调用方在命令派发完之后还会补一次 SetMode，
+            // 而 SetMode 会收起小选择窗 —— 当场弹出来的终局窗会被这一句立刻收掉，玩家什么都看不到。
+            // 所以先记下，等这一帧的命令回调全部走完，再由 Update 弹。
+            finalPromptPending = true;
+            if (developerPanel != null) developerPanel.Close(); // 别让开发者面板盖在终局窗前面
         }
 
-        /// <summary>终局结算窗正文：胜者与名次在前，随后按分数从高到低列出每位玩家。</summary>
+        /// <summary>终局结算窗：与「结束回合」等确认窗同一套规格（半透明窗口 + 名次明细 + 单个关闭按钮）。</summary>
+        private void TryShowFinalPrompt()
+        {
+            if (!finalPromptPending || finalPrompted) return;
+            if (engine == null || !engine.State.IsGameOver) return;
+
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window == null && choicePopup == null) return;
+
+            finalPromptPending = false;
+            finalPrompted = true;
+            string prompt = BuildFinalPrompt(engine.State, DescribeFinal(engine.State));
+            Action<int> picked = _ => SetStatus("终局已结算：可以查看最终地图，或退出本局。");
+
+            if (window != null)
+            {
+                window.Show("终局结算", prompt, new[] { "查看最终地图" }, picked, allowCancel: false);
+                return;
+            }
+
+            choicePopup.Show(prompt, new[] { "查看最终地图" }, _ => picked(0), allowCancel: false);
+        }
+
+        /// <summary>终局结算窗正文：胜者与名次在前，随后按分数从高到低列出每位玩家，并附上区域控制加分明细。</summary>
         private static string BuildFinalPrompt(GameState state, string summary)
         {
             var order = new List<int>();
             for (int seat = 0; seat < state.Players.Count; seat++) order.Add(seat);
             order.Sort((a, b) => state.Players[b].Score.CompareTo(state.Players[a].Score));
 
+            IReadOnlyList<DistrictControl> controls = FinalScoring.EvaluateDistricts(state);
+
             var sb = new StringBuilder(summary);
             sb.Append("\n\n最终名次：");
+            int rank = 0;
+            int lastScore = int.MinValue;
             for (int i = 0; i < order.Count; i++)
             {
-                PlayerState player = state.Players[order[i]];
-                sb.Append($"\n{i + 1}. 玩家{order[i] + 1} —— {player.Score} 分");
+                int seat = order[i];
+                PlayerState player = state.Players[seat];
+                if (player.Score != lastScore)
+                {
+                    rank = i + 1;
+                    lastScore = player.Score;
+                }
+
+                string districtInfo = DescribeDistrictContribution(controls, seat);
+                sb.Append($"\n{rank}. 玩家{seat + 1} —— {player.Score} 分（{districtInfo}）");
             }
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// 把某位玩家在终局控制的区块及其加分列出来，形如「A 区 +3、E 区 +4」；
+        /// 一个区块都没控制时返回「无区域控制」。
+        /// </summary>
+        private static string DescribeDistrictContribution(IReadOnlyList<DistrictControl> controls, int seat)
+        {
+            var parts = new List<string>();
+            foreach (DistrictControl control in controls)
+            {
+                if (control.Controller != seat) continue;
+                parts.Add($"{control.District} 区 +{control.Score}");
+            }
+            return parts.Count == 0 ? "无区域控制" : string.Join("、", parts);
         }
 
         // —— 面板事件 ——
@@ -705,9 +863,23 @@ namespace NomadCity.UI
         {
             if (engine == null) return;
 
+            // 卡牌效果授予的行动必须做完，不能中途换别的行动（换掉就会绕开效果给的行动）。
+            if (requested != ActionMode.None && activeRequest != null && requested != mode)
+            {
+                SetStatus($"「{PendingAction.LabelOf(activeRequest.Kind)}」是卡牌效果授予的，必须做完才能换行动。");
+                return;
+            }
+
+            // 操作区的「关闭」也不能把正在进行的行动事件清掉：清掉了下一帧又得从头重开一遍。
+            if (requested == ActionMode.None && activeRequest != null)
+            {
+                SetStatus($"「{PendingAction.LabelOf(activeRequest.Kind)}」还没做完，请按提示继续，或按各步骤的取消键。");
+                return;
+            }
+
             // 「路费付给谁」「入场效果挑一个」这类小选择窗开着时不许换行动：换行动会清掉这次的探索计划或
             // 建设的暂存，弹窗却还留在屏幕上，之后再点它的选项，答案会落进一个已经没有主的流程里。
-            if (choicePopup != null && choicePopup.IsVisible)
+            if (HasPromptOpen)
             {
                 SetStatus("请先答完当前弹出的选择。");
                 return;
@@ -750,35 +922,52 @@ namespace NomadCity.UI
         {
             if (pendingMoves.Count == 0) return;
 
+            var options = new List<string> { "确定执行调度" };
+            if (pendingMoves.Count < 2) options.Add("再走一步");
+
+            Action<int> picked = choice =>
+            {
+                if (choice == 0)
+                {
+                    CommitRelocate();
+                    return;
+                }
+
+                if (choice == 1)
+                {
+                    SetStatus("请继续点击起点与目标空格，排第 2 步。");
+                    UpdateHint();
+                    return;
+                }
+
+                // 卡牌效果授予的调度不能取消：清掉已排的步骤，回到「重新选起点」，效果不会作废。
+                if (activeRequest != null)
+                {
+                    SetMode(ActionMode.Relocate);
+                    SetStatus("这次调度是卡牌效果授予的，必须执行：已清空排定的步骤，请重新点自己的一个影响力。");
+                    return;
+                }
+
+                SetMode(ActionMode.None);
+                SetStatus("已取消调度，排定的步骤一并丢弃。");
+            };
+
+            string prompt = $"已排定 {pendingMoves.Count} 步调度。现在就执行吗？";
+
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window != null)
+            {
+                window.Show("确认调度", prompt, options, picked);
+                return;
+            }
+
             if (choicePopup == null)
             {
                 CommitRelocate();
                 return;
             }
 
-            var options = new List<string> { "执行调度" };
-            if (pendingMoves.Count < 2) options.Add("再走一步");
-
-            choicePopup.Show(
-                $"已排定 {pendingMoves.Count} 步调度。现在就执行吗？",
-                options, choice =>
-                {
-                    if (choice == 0)
-                    {
-                        CommitRelocate();
-                        return;
-                    }
-
-                    if (choice == 1)
-                    {
-                        SetStatus("请继续点击起点与目标空格，排第 2 步。");
-                        UpdateHint();
-                        return;
-                    }
-
-                    SetMode(ActionMode.None);
-                    SetStatus("已取消调度，排定的步骤一并丢弃。");
-                });
+            choicePopup.Show(prompt, options, picked);
         }
 
         /// <summary>把已排定的调度步骤一次性交给引擎。</summary>
@@ -791,8 +980,15 @@ namespace NomadCity.UI
             }
 
             var moves = new List<InfluenceMove>(pendingMoves);
-            if (Dispatch(new RelocateInfluenceCommand(engine.State.ActiveSeat, moves)))
+            int seat = ActionSeat;
+            int pendingId = activeRequest != null && activeRequest.Kind == PendingActionKind.RelocateInfluence
+                ? activeRequest.PendingActionId
+                : 0;
+            if (Dispatch(new RelocateInfluenceCommand(seat, moves, pendingId)))
+            {
                 SetMode(ActionMode.None);
+                if (pendingId > 0) CompleteAction();
+            }
         }
 
         /// <summary>
@@ -803,44 +999,80 @@ namespace NomadCity.UI
         {
             if (exploreTargetNode < 0) return;
 
+            GameState state = engine.State;
+            int toll = TollCalculator.Compute(state, ActionSeat, exploreRoutes, explorePayees).Total;
+            string tag = activeRequest != null ? "（卡牌效果，必须执行）" : string.Empty;
+
+            var options = new[] { "确定探索", "调整路线" };
+            string prompt = $"探索 {state.Map.Node(exploreTargetNode).Code}：走 {exploreRoutes.Count} 条航道、路费 {toll} 金券。{tag}\n确定现在就探索吗？";
+
+            Action<int> picked = choice =>
+            {
+                if (choice == 0)
+                {
+                    CommitExplore();
+                    return;
+                }
+
+                if (choice == 1)
+                {
+                    SetStatus("点航道空格增删路线；选好后点目标资源点再次弹出确认。");
+                    UpdateHint();
+                    return;
+                }
+
+                // 卡牌效果授予的探索不能取消：关掉确认窗就退回到「调整路线」，再来一次。
+                if (activeRequest != null)
+                {
+                    SetStatus("这次探索是卡牌效果授予的，必须执行。点资源点再次弹出确认。");
+                    return;
+                }
+
+                SetMode(ActionMode.None);
+                SetStatus("已取消探索。");
+            };
+
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window != null)
+            {
+                window.Show("确认探索", prompt, options, picked);
+                return;
+            }
+
             if (choicePopup == null)
             {
                 CommitExplore();
                 return;
             }
 
-            GameState state = engine.State;
-            int toll = TollCalculator.Compute(state, state.ActiveSeat, exploreRoutes, explorePayees).Total;
-
-            choicePopup.Show(
-                $"探索 {state.Map.Node(exploreTargetNode).Code}：走 {exploreRoutes.Count} 条航道、路费 {toll} 金券。\n确定现在就探索吗？",
-                new[] { "确定探索", "调整路线" }, choice =>
-                {
-                    if (choice == 0)
-                    {
-                        CommitExplore();
-                        return;
-                    }
-
-                    if (choice == 1)
-                    {
-                        SetStatus("点航道空格增删路线；选好后点目标资源点再次弹出确认。");
-                        UpdateHint();
-                        return;
-                    }
-
-                    SetMode(ActionMode.None);
-                    SetStatus("已取消探索。");
-                });
+            choicePopup.Show(prompt, options, picked);
         }
 
         /// <summary>
-        /// 统一的「执行前确认」小窗：点确定才真的落地，点取消什么都不做。
+        /// 统一的「执行前确认」窗：点确定才真的落地，点取消什么都不做。
         /// 行动区顶部的确定 / 取消已经去掉，部署 / 城市移动 / 宣告 / 特殊行动 / 角色牌都改由这里问一句。
         /// </summary>
         private void ConfirmAction(string title, Action onConfirm, string confirmLabel = "确定")
         {
             if (onConfirm == null) return;
+
+            string action = string.IsNullOrEmpty(confirmLabel) ? "确定" : confirmLabel;
+
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window != null)
+            {
+                // 窗口标题用「确认 XX」，整句话放进正文：行动确认的句子常常两三行，
+                // 塞进标题行会被截断或压到按钮上。
+                string head = action.Length > 2 && action.StartsWith("确定", StringComparison.Ordinal)
+                    ? "确认" + action.Substring(2)
+                    : "请确认";
+                window.Show(head, title, new[] { action }, choice =>
+                {
+                    if (choice >= 0) onConfirm();
+                    else SetStatus("已取消。");
+                });
+                return;
+            }
 
             if (choicePopup == null)
             {
@@ -848,7 +1080,7 @@ namespace NomadCity.UI
                 return;
             }
 
-            choicePopup.Show(title, new[] { confirmLabel }, choice =>
+            choicePopup.Show(title, new[] { action }, choice =>
             {
                 if (choice >= 0) onConfirm();
                 else SetStatus("已取消。");
@@ -864,7 +1096,7 @@ namespace NomadCity.UI
             if (engine == null) return;
             GameState state = engine.State;
 
-            if (choicePopup != null && choicePopup.IsVisible)
+            if (HasPromptOpen)
             {
                 SetStatus("请先答完当前弹出的选择。");
                 return;
@@ -881,6 +1113,13 @@ namespace NomadCity.UI
                 || characterStep != CharacterStep.None || specialStep != SpecialStep.None)
             {
                 SetStatus("当前行动还没走完：先点「关闭」退出当前行动，再结束回合。");
+                return;
+            }
+
+            // 卡牌效果授予的行动还没做完（效果给的行动必须执行，引擎那边也会拒绝结束回合）。
+            if (activeRequest != null)
+            {
+                SetStatus($"「{PendingAction.LabelOf(activeRequest.Kind)}」是卡牌效果授予的，必须做完才能结束回合。");
                 return;
             }
 
@@ -908,7 +1147,7 @@ namespace NomadCity.UI
                 () =>
                 {
                     if (Dispatch(new EndTurnCommand(seat))) SetMode(ActionMode.None);
-                }, "结束回合");
+                }, "确定结束回合");
         }
 
         /// <summary>
@@ -919,7 +1158,7 @@ namespace NomadCity.UI
         {
             // 小选择窗开着时，「取消」只作用于那个窗口：否则会把正在进行的探索整段作废，
             // 而窗口还留在屏幕上，看上去像「点了取消却什么都没发生」。
-            if (choicePopup != null && choicePopup.IsVisible)
+            if (HasPromptOpen)
             {
                 SetStatus("请先答完当前弹出的选择（要放弃这次探索就点那个窗口的取消）。");
                 return;
@@ -999,6 +1238,14 @@ namespace NomadCity.UI
 
             if (mode == ActionMode.None) return;
 
+            // 卡牌效果授予的行动退不出去：关掉只会回到「重新选点」，效果必须执行完。
+            if (activeRequest != null)
+            {
+                SetStatus($"「{PendingAction.LabelOf(activeRequest.Kind)}」是卡牌效果授予的，必须做完。");
+                SetMode(ModeOf(activeRequest.Kind));
+                return;
+            }
+
             SetMode(ActionMode.None); // 内部会清空 relocateFrom 与 pendingMoves
             SetStatus("已取消当前行动。");
         }
@@ -1042,8 +1289,9 @@ namespace NomadCity.UI
                 return;
             }
 
-            // 建设 L4 的「点地图」选择：与部署 / 调度 / 城市移动同源，直接点地图上的合法位置作答。
-            if (mode == ActionMode.Build && buildStep == BuildStep.Effect && HandleBuildMapPick(hit)) return;
+            // 设施入场效果里的「点地图」选择：与部署 / 调度 / 城市移动同源，直接点地图上的合法位置作答。
+            // 不要求 mode == Build —— 开发者模式指定建设落地后也会问入场效果，此时并不在建设模式里。
+            if (buildStep == BuildStep.Effect && HandleBuildMapPick(hit)) return;
 
             // 开局入场（§4.3）：第 1 回合的角色牌盖放阶段，点绿色资源点本体即为「决定初始资源点」。
             // 此时还没有行动模式，所以放在最前面单独处理。
@@ -1078,6 +1326,9 @@ namespace NomadCity.UI
                     // 宣告只发生在弹窗里，地图点击不参与；遮罩正常时不一定会走到这里，兜一句提示。
                     SetHint("宣告城市样式：请从弹出的 6 张样式牌里点一张。");
                     break;
+                case ActionMode.RemoveInfluence:
+                    HandleRemoveInfluence(hit, state);
+                    break;
             }
         }
 
@@ -1088,7 +1339,7 @@ namespace NomadCity.UI
         /// <summary>
         /// 开局入场选初始资源点：点绿色资源点本体，把当前该选的玩家的移动城市停靠上去。
         /// 「轮到谁」由引擎按「起始玩家起顺时针」决定，不是按谁点的算（同屏热座）。
-        /// 点中后先高亮并弹「确定放置 / 取消」，确认才真正提交 —— 停靠位置一旦定下就会翻事件牌。
+        /// 点中后先高亮并弹「确定停靠 / 取消」，确认才真正提交 —— 停靠位置一旦定下就会翻事件牌。
         /// </summary>
         private void HandleChooseStartNode(MapHit hit, GameState state)
         {
@@ -1137,9 +1388,32 @@ namespace NomadCity.UI
             pendingStartNodeId = hit.NodeId;
             RefreshStartNodeHighlight();
 
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window != null)
+            {
+                window.Show(
+                    "初始停靠",
+                    $"把 {SeatLabel(seat)} 的移动城市停靠到 {code}？\n确认后才会翻出落脚点的事件牌；可以先把窗口最小化，对照地图看清周围再决定。",
+                    "确定停靠",
+                    () =>
+                    {
+                        int confirmedNode = pendingStartNodeId;
+                        pendingStartNodeId = -1;
+                        RefreshStartNodeHighlight();
+                        CommitStartNode(seat, confirmedNode);
+                    },
+                    () =>
+                    {
+                        pendingStartNodeId = -1;
+                        RefreshStartNodeHighlight();
+                        SetStatus($"已取消：{SeatLabel(seat)} 请重新点一个绿色资源点作为初始资源点。");
+                    });
+                return;
+            }
+
             choicePopup.Show(
-                $"{SeatLabel(seat)} 的移动城市停靠在 {code}？",
-                new[] { "确定放置" },
+                $"把{SeatLabel(seat)} 的移动城市停靠到 {code}？",
+                new[] { "确定停靠" },
                 choice =>
                 {
                     if (choice != 0)
@@ -1216,7 +1490,25 @@ namespace NomadCity.UI
             if (choicePopup != null && choicePopup.IsVisible) return;
 
             GameState state = engine.State;
-            if (mode != ActionMode.None || !IsSetupPhase(state)) return;
+            if (mode != ActionMode.None || !IsSetupPhase(state))
+            {
+                // 行动里点到海面 / 空地也算「点了没反应」，按当前模式说一句该点什么。
+                string hint = mode switch
+                {
+                    ActionMode.Explore => "请点一个高亮的未探索资源点本体作为目标地点（点海面或已探索区域不算）。",
+                    ActionMode.MoveCity => "请点一个高亮的相邻资源点本体（点海面不算）。",
+                    ActionMode.Place => "请点地图上高亮的影响力空格。",
+                    ActionMode.Relocate => "请点自己的一个影响力，再点目标空格。",
+                    ActionMode.RemoveInfluence => "请点高亮的影响力格。",
+                    ActionMode.Build => buildStep == BuildStep.Effect
+                        ? "请按提示点地图上的合法位置；没有高亮位置时点「取消」换一个选项。"
+                        : "这一步在右侧面板里选，地图上暂时不用点。",
+                    _ => string.Empty,
+                };
+
+                if (hint.Length > 0) SetStatus(hint);
+                return;
+            }
 
             // 开局选点：底图上印的资源点圆圈比命中圆大得多，点在圈里却没命中时按「最近的绿色资源点」算，
             // 别让玩家觉得「明明点到绿色区域了却毫无反应」。其余情况才提示该点哪儿。
@@ -1425,15 +1717,15 @@ namespace NomadCity.UI
 
             pendingEventOption = optionIndex;
 
-            // 没有条件段（或没接线弹窗）就直接执行结果段。
-            if (!option.HasCost || choicePopup == null)
+            // 没有条件段（或两种弹窗都没接线）就直接执行结果段。
+            if (!option.HasCost || (choicePopup == null && EnsureConfirmWindow() == null))
             {
                 BeginEventEffects(option, acceptCost: true);
                 return;
             }
 
             // 条件式选项：先让玩家决定要不要做「→」前那一段；返回则什么都不做，可以改选别的选项。
-            choicePopup.Show(
+            ShowChoiceWindow("事件选项",
                 $"这个选项要先完成：{DescribeOps(option.Cost)}\n完成之后才能拿到结果段；放弃则结束这个效果。",
                 new[] { "执行条件段", "放弃效果" }, choice =>
                 {
@@ -1477,7 +1769,7 @@ namespace NomadCity.UI
             pendingEventAcceptCost = acceptCost;
 
             // 没接线弹窗就退回自动结算，别把玩家卡在流程里。
-            if (choicePopup == null)
+            if (choicePopup == null && EnsureConfirmWindow() == null)
             {
                 ResolveEventOption(acceptCost, answers: null);
                 return;
@@ -1520,10 +1812,7 @@ namespace NomadCity.UI
             }
 
             EffectChoiceSession session = eventSession;
-            var options = new List<string>(request.Options.Count);
-            foreach (ChoiceOption item in request.Options) options.Add(item.Label);
-
-            choicePopup.Show(request.Prompt, options, choice =>
+            ShowChoiceRequest(request, choice =>
             {
                 if (session != eventSession) return; // 会话已作废（例如中途换了行动）
 
@@ -1645,12 +1934,15 @@ namespace NomadCity.UI
             }
 
             // 探索·步 3：事件结算完，在目标资源点放 1 个自己的影响力（走完这步才占用主要行动名额）。
-            var place = new ExploreInfluenceCommand(seat, nodeId);
+            int exploreId = explorePendingId;
+            var place = new ExploreInfluenceCommand(seat, nodeId, exploreId);
             CommandResult result = DispatchToEngine(place);
             SetMode(ActionMode.None);
             SetStatus(result.Ok
                 ? $"{DescribeEventStep(command)}；[探索] 已在目标资源点放置 1 个影响力。"
                 : $"{DescribeEventStep(command)}；[探索] 放置影响力失败：{result.Error}");
+
+            if (exploreId > 0) CompleteAction();
         }
 
         /// <summary>
@@ -1700,11 +1992,14 @@ namespace NomadCity.UI
             }
 
             // 探索·步 3：目标资源点放 1 个影响力。客户端同样只是提交，结果等主机再回放。
-            CommandResult result = DispatchToEngine(new ExploreInfluenceCommand(applied.ActorSeat, applied.NodeId));
+            int exploreId = explorePendingId;
+            CommandResult result = DispatchToEngine(new ExploreInfluenceCommand(applied.ActorSeat, applied.NodeId, exploreId));
             SetMode(ActionMode.None);
             SetStatus(result.Ok
                 ? $"{DescribeEventStep(applied)}；[探索] 已提交在目标资源点放置 1 个影响力。"
                 : $"{DescribeEventStep(applied)}；[探索] 放置影响力失败：{result.Error}");
+
+            if (exploreId > 0) CompleteAction();
         }
 
         /// <summary>关事件卡时一并复位「正在结算哪张牌」的全部暂存字段。</summary>
@@ -1757,11 +2052,20 @@ namespace NomadCity.UI
                 return;
             }
 
-            var probe = new ExploreCommand(state.ActiveSeat, nodeId);
+            int seat = ActionSeat;
+            PendingActionLimits limits = ExploreLimits();
+
+            var probe = new ExploreCommand(seat, nodeId, null, null, explorePendingId);
             CommandResult check = probe.Validate(state);
             if (!check.Ok)
             {
                 SetStatus(check.Error);
+                return;
+            }
+
+            if (explorePendingId > 0 && !PendingActionRules.CanExplore(state, seat, nodeId, limits))
+            {
+                SetStatus("这个资源点不在本次效果允许探索的范围里（路费上限 / 距离限制）。");
                 return;
             }
 
@@ -1771,7 +2075,7 @@ namespace NomadCity.UI
             // 先给一套默认最省方案，玩家再按需点航道空格增删。
             exploreRoutes.Clear();
             IReadOnlyList<int> defaultPath = TollCalculator.FindCheapestPath(
-                state, state.ActiveSeat, state.Player(state.ActiveSeat).MobileCityNodeId, nodeId);
+                state, seat, state.Player(seat).MobileCityNodeId, nodeId);
             if (defaultPath != null) exploreRoutes.AddRange(defaultPath);
 
             RefreshExploreHighlight();
@@ -1824,7 +2128,8 @@ namespace NomadCity.UI
             // 弹窗在本次调用里填充，派发也在本次调用里完成，中间没有第二次「确认」插进来的机会。
             explorePayees.Clear();
 
-            var probe = new ExploreCommand(state.ActiveSeat, exploreTargetNode, exploreRoutes, explorePayees);
+            var probe = new ExploreCommand(ActionSeat, exploreTargetNode, exploreRoutes, explorePayees,
+                explorePendingId);
             CommandResult check = probe.Validate(state);
             if (!check.Ok)
             {
@@ -1840,12 +2145,12 @@ namespace NomadCity.UI
 
             foreach (int routeId in probe.PlanRoutes(state))
             {
-                int cost = TollCalculator.RouteCost(state, state.ActiveSeat, routeId);
+                int cost = TollCalculator.RouteCost(state, ActionSeat, routeId);
 
                 // 参数顺序是 (routeId, seat) —— 反着写编译器不会报错（两个都是 int），
                 // 引擎却会去查「第 ActiveSeat 条航道」并把 routeId 当成座位号，
                 // 于是这条航道永远算出 0～1 位对手，收款方窗口一次也弹不出来。
-                IReadOnlyList<int> opponents = TollCalculator.OpponentsOnRoute(state, routeId, state.ActiveSeat);
+                IReadOnlyList<int> opponents = TollCalculator.OpponentsOnRoute(state, routeId, ActionSeat);
                 bool needsChoice = cost != 0 && opponents.Count >= minimumOpponents;
 
                 if (needsChoice) payeeQueue.Enqueue(new PayeeChoice(routeId, opponents));
@@ -1877,12 +2182,12 @@ namespace NomadCity.UI
                 return;
             }
 
-            if (choicePopup == null)
+            if (choicePopup == null && EnsureConfirmWindow() == null)
             {
                 // 需要挑收款方却没接弹窗：退回默认（该航道第一位对手），并在状态行 + Console 里点名，避免静默失效。
                 payeePopupMissing = true;
                 Debug.LogError($"[探索] 航道 {RouteLabel(routeId)} 需要选择收款方，" +
-                               "但 GameScreenController 没有拿到 ChoicePopup。请检查 GameBootstrap 物体上的 " +
+                               "但 GameScreenController 没有拿到任何选择弹窗。请检查 GameBootstrap 物体上的 " +
                                "「Choice Popup」字段是否拖入了场景里的 ChoicePopup 物体（且该物体是激活状态）。", this);
                 AdvancePayeeChoice();
                 return;
@@ -1891,10 +2196,20 @@ namespace NomadCity.UI
             var labels = new List<string>(opponents.Count);
             for (int i = 0; i < opponents.Count; i++) labels.Add($"付给 {SeatLabel(opponents[i])}");
 
-            choicePopup.Show($"航道 {RouteLabel(routeId)} 上有 {opponents.Count} 位对手，路费付给谁？", labels, index =>
-            {
+            ShowChoiceWindow("探索：选择收款方",
+                $"航道 {RouteLabel(routeId)} 上有 {opponents.Count} 位对手，路费付给谁？", labels, index =>
+                {
                 if (index < 0)
                 {
+                    // 卡牌效果授予的探索不能取消：把这条选择放回队列重新问，直到选出一个收款方。
+                    if (activeRequest != null)
+                    {
+                        SetStatus("这次探索是卡牌效果授予的，必须执行：请选一个路费收款方。");
+                        payeeQueue.Enqueue(new PayeeChoice(routeId, opponents));
+                        AdvancePayeeChoice();
+                        return;
+                    }
+
                     AbortExplore();
                     return;
                 }
@@ -1908,10 +2223,12 @@ namespace NomadCity.UI
         private void ExecuteExplore()
         {
             GameState state = engine.State;
-            int seat = state.ActiveSeat;
+            int seat = ActionSeat;
             int nodeId = exploreTargetNode;
+            int pendingId = explorePendingId;
 
-            var command = new ExploreCommand(seat, nodeId, new List<int>(exploreRoutes), new Dictionary<int, int>(explorePayees));
+            var command = new ExploreCommand(seat, nodeId, new List<int>(exploreRoutes),
+                new Dictionary<int, int>(explorePayees), pendingId);
             if (!Dispatch(command))
             {
                 SetMode(ActionMode.None); // 失败原因已由 Dispatch 写进状态行，这里只把选点与高亮清掉
@@ -1975,6 +2292,7 @@ namespace NomadCity.UI
 
         private void AbortExplore()
         {
+            explorePendingId = 0;
             SetMode(ActionMode.None);
             SetStatus("已取消探索。");
         }
@@ -2059,12 +2377,16 @@ namespace NomadCity.UI
                 return;
             }
 
-            int seat = state.ActiveSeat;
+            int seat = ActionSeat;
             int nodeId = hit.NodeId;
+            int pendingId = activeRequest != null && activeRequest.Kind == PendingActionKind.CityMove
+                ? activeRequest.PendingActionId
+                : 0;
+            bool free = pendingId > 0 && cityMoveFree;
 
             // 和目标点选择同理：先按规则校验（红色区域未开放、源石不足、不相邻、对手城市占着…），
             // 不合法就直接说原因，别先弹「停靠到这里？」再报错。
-            CommandResult moveCheck = new MoveMobileCityCommand(seat, nodeId).Validate(state);
+            CommandResult moveCheck = new MoveMobileCityCommand(seat, nodeId, pendingId).Validate(state);
             if (!moveCheck.Ok)
             {
                 SetStatus(moveCheck.Error);
@@ -2074,9 +2396,10 @@ namespace NomadCity.UI
             // 出发点：派发前先记下来 —— 联机客户端在命令回放之前，state.CityMoveOriginNodeId 还是旧值。
             int originNode = state.Player(seat).MobileCityNodeId;
             string target = state.Map.Node(nodeId).Code;
+            string cost = free ? "本次免费，不用付源石" : "需付 3 源石";
 
             ConfirmAction(
-                $"把移动城市停靠到 {target}？\n需付 3 源石；目标点若没有指示物会先翻出事件牌。",
+                $"把移动城市停靠到 {target}？\n{cost}；目标点若没有指示物会先翻出事件牌。",
                 () => DoMoveCity(seat, nodeId, originNode), "确定移动");
         }
 
@@ -2086,7 +2409,10 @@ namespace NomadCity.UI
             if (engine == null) return;
 
             // 步 1–2（§6.4d）：付 3 源石、移动、清对手影响力，目标点没有指示物就翻牌补上。它不占行动名额。
-            if (!Dispatch(new MoveMobileCityCommand(seat, nodeId))) return;
+            int pendingId = activeRequest != null && activeRequest.Kind == PendingActionKind.CityMove
+                ? activeRequest.PendingActionId
+                : 0;
+            if (!Dispatch(new MoveMobileCityCommand(seat, nodeId, pendingId))) return;
 
             SetMode(ActionMode.None);
 
@@ -2117,13 +2443,16 @@ namespace NomadCity.UI
         /// </summary>
         private void FinishCityMove(int seat, int originNodeId, string prefix)
         {
-            CommandResult result = DispatchToEngine(new MoveCityInfluenceCommand(seat, originNodeId));
+            int pendingId = cityMovePendingId;
+            CommandResult result = DispatchToEngine(new MoveCityInfluenceCommand(seat, originNodeId, pendingId));
             SetMode(ActionMode.None);
 
             string lead = string.IsNullOrEmpty(prefix) ? "[城市移动]" : prefix + "；[城市移动]";
             SetStatus(result.Ok
                 ? $"{lead} 已在出发点放置 1 个影响力。"
                 : $"{lead} 放置影响力失败：{result.Error}");
+
+            if (result.Ok && pendingId > 0) CompleteAction();
         }
 
         // —— 建设（§6.4e）——
@@ -2159,7 +2488,23 @@ namespace NomadCity.UI
             int cardId = SupplyCardAt(state, index);
             if (cardId < 0) return;
 
-            buildSeat = ViewSeat(state);
+            // 卡牌效果授予的建设：只接受这次限制之内的牌（金券上限 / 供应区 / 面板空位）。
+            if (activeRequest != null && activeRequest.Kind == PendingActionKind.Build)
+            {
+                if (!PendingActionRules.BuildableFacilityIds(state, activeRequest.Seat, activeRequest.Limits)
+                        .Contains(cardId))
+                {
+                    SetStatus($"这张牌不符合本次效果的建设限制（金券费用上限 {activeRequest.Limits.MaxVoucherSpend}）。请换一张。");
+                    return;
+                }
+
+                buildSeat = activeRequest.Seat;
+            }
+            else
+            {
+                buildSeat = ViewSeat(state);
+            }
+
             buildCardId = cardId;
 
             // 选牌窗的收起交给 EnterBuildPay：付得起的牌才收起面板，
@@ -2198,7 +2543,17 @@ namespace NomadCity.UI
             bool hasResources = card.ResourceCost.Count > 0;
             bool hasVouchers = card.VoucherCost > 0;
 
-            if (card.IsFree || (!hasResources && !hasVouchers))
+            // 卡牌效果给的建设可能免费，也可能限了金券费用上限（见 PendingActionLimits）。
+            PendingActionLimits limits = BuildLimits();
+
+            // 上限是「这次效果只能建多贵的设施」，与用哪种方式付款无关：超了直接换牌。
+            if (limits.MaxVoucherSpend >= 0 && card.VoucherCost > limits.MaxVoucherSpend)
+            {
+                SetStatus($"这次效果只能建设金券费用不超过 {limits.MaxVoucherSpend} 的设施，请换一张。");
+                return;
+            }
+
+            if (limits.Free || card.IsFree || (!hasResources && !hasVouchers))
             {
                 buildPayment = FacilityPayment.None;
                 EnterBuildSlot();
@@ -2218,7 +2573,8 @@ namespace NomadCity.UI
 
             bool canPayResources = hasResources
                                    && FacilityCardDef.CanPayWithResources(resourceCost, player.Resources, player.Vouchers);
-            bool canPayVouchers = hasVouchers && player.Vouchers >= card.VoucherCost;
+            bool voucherWithinLimit = limits.MaxVoucherSpend < 0 || card.VoucherCost <= limits.MaxVoucherSpend;
+            bool canPayVouchers = hasVouchers && voucherWithinLimit && player.Vouchers >= card.VoucherCost;
 
             // 两种付费方式都付不起：直接停在这里报「资源不足」，不要把人放进选位置那一步 ——
             // 否则要一路点到最后确认时才被拒，还以为是自己选错了格子。
@@ -2239,7 +2595,10 @@ namespace NomadCity.UI
             }
 
             string resourceText = hasResources ? $"选项一 · 资源：{DescribeCost(resourceCost)}" : string.Empty;
-            string voucherText = hasVouchers ? $"选项二 · 金券：{card.VoucherCost} 张" : string.Empty;
+            string voucherText = hasVouchers
+                ? $"选项二 · 金券：{card.VoucherCost} 张" +
+                  (limits.MaxVoucherSpend >= 0 ? $"（本次效果上限 {limits.MaxVoucherSpend}）" : string.Empty)
+                : string.Empty;
 
             // 付得起才收起选牌窗，把位置让给「放大卡面 + 选费用」。
             if (supplyPanel != null) supplyPanel.SetOpen(false);
@@ -2353,6 +2712,23 @@ namespace NomadCity.UI
 
             buildStep = BuildStep.Confirm;
 
+            string title = $"在此处建造《{card.Name}》？\n得分 {card.Score:+0;-0;0}；获得：{DescribeEntryEffects(card)}";
+
+            Action<int> picked = choice =>
+            {
+                if (engine == null) return;
+
+                if (choice == 0) BeginBuildEffects();
+                else EnterBuildSlot();
+            };
+
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window != null)
+            {
+                window.Show("确认建造", title, new[] { "确定建造" }, picked);
+                return;
+            }
+
             if (choicePopup == null)
             {
                 SetStatus("建设确认弹窗没接线，直接按「确定」处理。");
@@ -2360,43 +2736,64 @@ namespace NomadCity.UI
                 return;
             }
 
-            string title = $"在此处建造《{card.Name}》？\n得分 {card.Score:+0;-0;0}；获得：{DescribeEntryEffects(card)}";
-
-            choicePopup.Show(title, new[] { "确定建造" }, choice =>
-            {
-                if (engine == null) return;
-
-                if (choice == 0) BeginBuildEffects();
-                else EnterBuildSlot();
-            });
+            choicePopup.Show(title, new[] { "确定建造" }, picked);
         }
 
         /// <summary>
-        /// L4：先确认好了「在此处建造」，再逐个问清入场效果里要玩家点选的节点，最后正式派发建设命令。
-        /// 建到「面板正在显示的那名玩家」名下，保证建完当场就能在面板上看到（§6.4e）。
+        /// L4：确认「在此处建造」后，**先让设施落地**（扣费 + 上板 + 得分），
+        /// 再弹窗外结算入场效果（有选项就给选项，没有就给一个「确定」）。
+        /// 这样玩家能先看到设施进入城市面板，再处理入场效果，顺序与桌游一致。
         /// </summary>
         private void BeginBuildEffects()
         {
             if (engine == null) return;
 
-            GameState state = engine.State;
-            FacilityCardDef card = state.Catalog.Facility(buildCardId);
-            IReadOnlyList<RewardOp> effects = card != null ? card.EntryEffects : null;
+            // 步 1–2：只做扣费 + 上板，不结算入场效果。
+            var buildCommand = new BuildFacilityCommand(buildSeat, buildCardId, buildSlot, buildPayment,
+                new RecordedChoices(Array.Empty<int>(), strict: false),
+                pendingActionId: buildPendingId, runEntryEffects: false);
 
-            buildStep = BuildStep.Effect;
-
-            // 没有入场效果（或没接线弹窗）就直接建，省掉一轮无意义的会话。
-            if (effects == null || effects.Count == 0 || choicePopup == null)
+            if (!Dispatch(buildCommand))
             {
-                DispatchBuild(Array.Empty<int>());
+                // 引擎拒绝（费用不够、与「唯一」冲突、格子被占……）：原因已写进状态行，退回 L3 让玩家改。
+                BackToBuildConfirm();
                 return;
             }
 
-            // 在状态副本上试跑整串入场效果：跑到需要选择处就停下，等玩家点完再继续。
-            // 部分效果会连锁（二选一里再挑落点、探索翻出的事件选项、结算他牌的入场效果……），
-            // 每轮都从副本重跑，所以后面几步的候选清单永远是基于前面答案的真实状态（§11）。
+            // 设施已落地：接着结算入场效果。
+            BeginFacilityEntryEffect(buildSeat, buildCardId, buildSlot);
+        }
+
+        /// <summary>
+        /// 设施落地后结算入场效果：有需要点选的内容就开会话（弹窗 / 点地图），
+        /// 没有就弹一个「确定」窗让玩家确认结算。供手动建设与开发者建设共用。
+        /// </summary>
+        private void BeginFacilityEntryEffect(int seat, int facilityId, int panelSlot)
+        {
+            if (engine == null) return;
+
+            GameState state = engine.State;
+            FacilityCardDef card = state.Catalog.Facility(facilityId);
+            IReadOnlyList<RewardOp> effects = card != null ? card.EntryEffects : null;
+
+            buildStep = BuildStep.Effect;
+            buildSeat = seat;
+            buildCardId = facilityId;
+            buildSlot = panelSlot;
+
+            // 没有入场效果：也弹一个窗，点「确定」才结算（给玩家一个明确的「入场效果结算完毕」反馈）。
+            if (effects == null || effects.Count == 0)
+            {
+                string name = card != null ? card.Name : "设施";
+                if (!ShowChoiceWindow($"《{name}》入场效果", "这张设施没有入场效果，点「确定」结束建设。",
+                        new[] { "确定" }, _ => FinishBuild(), allowCancel: false))
+                    FinishBuild();
+                return;
+            }
+
+            // 设施已经在板上，在状态副本上试跑整串入场效果：跑到需要选择处就停下，等玩家点完再继续。
             buildSession = new EffectChoiceSession(state,
-                (sandbox, choices) => EffectResolver.Execute(sandbox, buildSeat, effects, choices,
+                (sandbox, choices) => EffectResolver.Execute(sandbox, seat, effects, choices,
                     EnterpriseEffectExtension.Instance));
             buildSession.Advance();
             ContinueBuildChoices();
@@ -2405,7 +2802,7 @@ namespace NomadCity.UI
         /// <summary>
         /// 抛出 / 点选入场效果的下一个待答选择：
         /// 候选是地图位置（放 / 移 / 拿走影响力、选资源点）的走「点地图」，与主要行动同源；
-        /// 其余抽象选项走弹窗。两边的返回键都是「退回上一个选择」，退无可退回 L3 确认。
+        /// 其余抽象选项走弹窗。设施已经落地，所以这里不能再退回建设确认，只能在入场效果的答案之间回退。
         /// </summary>
         private void ContinueBuildChoices()
         {
@@ -2415,7 +2812,7 @@ namespace NomadCity.UI
             {
                 IReadOnlyList<int> answers = buildSession.Answers;
                 buildSession = null;
-                DispatchBuild(answers);
+                DispatchEntryEffect(answers);
                 return;
             }
 
@@ -2429,11 +2826,8 @@ namespace NomadCity.UI
                 return;
             }
 
-            var options = new List<string>(request.Options.Count);
-            foreach (ChoiceOption option in request.Options) options.Add(option.Label);
-
             EffectChoiceSession session = buildSession;
-            choicePopup.Show(request.Prompt, options, choice =>
+            ShowChoiceRequest(request, choice =>
             {
                 if (session != buildSession) return; // 会话已被作废（例如中途换了行动）
 
@@ -2444,10 +2838,49 @@ namespace NomadCity.UI
                     return;
                 }
 
-                // 返回键（弹窗上的取消）：退掉最近一个答案；退无可退就回 L3 确认。
+                // 取消键：只能在入场效果的答案之间回退；设施已落地，不能再退回建设确认。
                 if (session.Back()) ContinueBuildChoices();
-                else BackToBuildConfirm();
+                else ContinueBuildChoices();
             });
+        }
+
+        /// <summary>入场效果的答案收齐：派发「结算设施入场效果」命令，结束本次建设。</summary>
+        private void DispatchEntryEffect(IReadOnlyList<int> answers)
+        {
+            if (engine == null) return;
+
+            var command = new ResolveFacilityEntryEffectCommand(buildSeat, buildSlot,
+                new RecordedChoices(answers, strict: false));
+
+            if (!Dispatch(command))
+            {
+                // 极少失败（格子被改掉了）：原因写进状态行，直接结束建设流程。
+                FinishBuild();
+                return;
+            }
+
+            FinishBuild(command.Report);
+        }
+
+        /// <summary>一次建设（落地 + 入场效果）全部走完：退出建设模式、交还控制权。</summary>
+        private void FinishBuild(EffectReport entryReport = null)
+        {
+            int seat = buildSeat;
+            int cardId = buildCardId;
+            int slot = buildSlot;
+            buildStep = BuildStep.NotBuilding;
+            SetMode(ActionMode.None);
+
+            // 把入场效果的结果也念一遍：效果里「没有合法目标、已自动跳过」这类信息原先只留在报告里，
+            // 界面看起来就是「选完之后什么都没发生」，难以判断是卡住还是跳过。
+            string detail = entryReport != null ? entryReport.Describe() : string.Empty;
+            if (!string.IsNullOrEmpty(detail)) detail = "；入场效果：" + detail;
+
+            SetStatus($"[建设] 玩家{seat + 1} 建造了《{FacilityName(engine.State, cardId)}》" +
+                      $"，放在城市面板第 {slot + 1} 格，入场效果已结算{detail}");
+
+            // 卡牌效果授予的建设走完：交还控制权，下一条挂起行动（例如载具仓库给的探索）下一帧接管。
+            CompleteAction();
         }
 
         /// <summary>L4 退到 L3：丢弃本次入场效果的收集，重新显示确认弹窗（再确定会重新开始收集）。</summary>
@@ -2519,34 +2952,6 @@ namespace NomadCity.UI
             buildSession.Answer(index);
             ContinueBuildChoices();
             return true;
-        }
-
-        /// <summary>照暂存的选择派发建设命令；成功后退出建设模式并把结果写进状态行。</summary>
-        private void DispatchBuild(IReadOnlyList<int> answers)
-        {
-            if (engine == null) return;
-
-            // 把玩家点出来的答案交给引擎重放一遍：引擎是确定性的，正式执行会得到与试跑一致的结果。
-            var command = new BuildFacilityCommand(buildSeat, buildCardId, buildSlot, buildPayment,
-                new RecordedChoices(answers, strict: false));
-
-            if (!Dispatch(command))
-            {
-                // 引擎拒绝（费用不够、与「唯一」冲突、格子被占……）：原因已写进状态行，退回 L3 让玩家改。
-                BackToBuildConfirm();
-                return;
-            }
-
-            int seat = buildSeat;
-            int cardId = buildCardId;
-            int slot = buildSlot;
-            SetMode(ActionMode.None);
-
-            string suffix = command.Report != null && command.Report.Entries.Count > 0
-                ? $"；入场效果：{command.Report.Describe()}"
-                : string.Empty;
-            SetStatus($"[建设] 玩家{seat + 1} 建造了《{FacilityName(engine.State, cardId)}》" +
-                      $"，放在城市面板第 {slot + 1} 格{suffix}");
         }
 
         /// <summary>点已建成的设施格子时弹出放大卡面；空格子不响应。取牌座位必须与所显示的面板一致。</summary>
@@ -2708,7 +3113,7 @@ namespace NomadCity.UI
 
             // 凑不出（或条件还没录入）就直接派发，让引擎给出准确原因；
             // 只有一组摆法也不必问，直接用它。
-            if (matches.Count <= 1 || choicePopup == null)
+            if (matches.Count <= 1 || (choicePopup == null && EnsureConfirmWindow() == null))
             {
                 ConfirmDeclare(cardId, matches.Count > 1 ? 0 : -1);
                 return;
@@ -2718,8 +3123,8 @@ namespace NomadCity.UI
             for (int i = 0; i < matches.Count; i++)
                 labels.Add($"摆法 {i + 1}：{DescribePatternSlots(matches[i])}（旋转 {matches[i].RotationDegrees}°）");
 
-            choicePopup.Show(
-                $"《{PatternName(state, cardId)}》有 {matches.Count} 组摆法，你想用哪几格？\n（用过的设施不能再用于下一次宣告）",
+            ShowChoiceWindow($"《{PatternName(state, cardId)}》选摆法",
+                $"这张牌有 {matches.Count} 组摆法，你想用哪几格？\n（用过的设施不能再用于下一次宣告）",
                 labels, choice =>
                 {
                     if (choice >= 0) ConfirmDeclare(cardId, choice);
@@ -2817,8 +3222,8 @@ namespace NomadCity.UI
 
             if (panel != null) panel.SetLocked(true);
 
-            // 没有要玩家点选的选择（或没接线弹窗）就直接派发，省掉一轮无意义的会话。
-            if (choicePopup == null)
+            // 没有要玩家点选的选择（或两种弹窗都没接线）就直接派发，省掉一轮无意义的会话。
+            if (choicePopup == null && EnsureConfirmWindow() == null)
             {
                 DispatchSpecialAction(Array.Empty<int>());
                 return;
@@ -2863,11 +3268,8 @@ namespace NomadCity.UI
                 return;
             }
 
-            var options = new List<string>(request.Options.Count);
-            foreach (ChoiceOption option in request.Options) options.Add(option.Label);
-
             EffectChoiceSession session = specialSession;
-            choicePopup.Show(request.Prompt, options, choice =>
+            ShowChoiceRequest(request, choice =>
             {
                 if (session != specialSession) return; // 会话已被作废（例如中途换了行动）
 
@@ -2881,7 +3283,7 @@ namespace NomadCity.UI
                 // 返回键：退掉最近一个答案；退无可退就放弃这次使用（标记未动、费用未扣）。
                 if (session.Back()) ContinueSpecialChoices();
                 else ExitSpecialFlow("已返回，没有使用任何城市样式特殊行动。");
-            }, request.AllowCancel);
+            });
         }
 
         /// <summary>特殊行动效果里「点地图」的那一次选择：照候选清单把点击翻译成选项下标。</summary>
@@ -2972,6 +3374,7 @@ namespace NomadCity.UI
 
             EnterpriseState enterprises = state.Enterprises;
             if (enterprises.DraftDone) return;
+            if (state.DeveloperMode) return;       // 开发者模式可以跳过企业抽选，别弹窗挡住测试
             if (pendingEventNodeId >= 0) return;   // 事件卡开着时让位
             if (onlineSubmitPending) return;       // 联机：上一条命令还在等主机回放
 
@@ -2991,17 +3394,19 @@ namespace NomadCity.UI
 
         /// <summary>
         /// 企业扩展开局入场：每名玩家从 7 张手牌里选 2 张放回游戏盒（EnterpriseExpansion.md §4.2）。
-        /// 开局入场（选点 + 结算事件牌）走完后，用选择弹窗连问两次；完成后才能盖放角色牌。
+        /// 开局入场（选点 + 结算事件牌）走完后，用统一窗口弹窗连问两次并要求确认；
+        /// 完成后才能盖放角色牌。
         /// </summary>
         private void TryBeginSetupDiscard(GameState state)
         {
-            if (engine == null || choicePopup == null) return;
+            if (engine == null) return;
             if (!state.Setup.IsEnterpriseEnabled) return;
             if (state.TurnNumber != 1 || state.Phase != TurnPhase.CharacterPlacement) return;
-            if (!state.Enterprises.DraftDone) return;                       // 先决定初始企业
+            // 先决定初始企业；开发者模式可以跳过企业抽选，直接做「7 选 5」。
+            if (!state.Enterprises.DraftDone && !state.DeveloperMode) return;
             if (ChooseStartNodeCommand.CurrentOperator(state) >= 0) return; // 开局入场还没走完
             if (pendingEventNodeId >= 0) return;                             // 事件卡开着时让位
-            if (choicePopup.IsVisible) return;                               // 已有别的选择
+            if (IsChoicePromptOpen()) return;                                // 已有别的选择
 
             int seat = ViewSeat(state);
             if (seat < 0 || seat >= state.Players.Count) return;
@@ -3012,54 +3417,166 @@ namespace NomadCity.UI
             {
                 setupDiscardSeat = -1;
                 setupDiscardFirst = -1;
+                setupDiscardSecond = -1;
                 return;
             }
-            if (player.HandCharacterCards.Count < 2) return;
+            if (player.HandCharacterCards.Count <= 2) return;
 
             if (setupDiscardSeat != seat)
             {
                 setupDiscardSeat = seat;
                 setupDiscardFirst = -1;
+                setupDiscardSecond = -1;
             }
 
             ShowSetupDiscardPrompt(state, player, seat);
         }
 
-        /// <summary>「7 选 5」的一次选择：先选第 1 张，再选第 2 张，然后下发命令。</summary>
+        /// <summary>「7 选 5」：选第 1 张 → 选第 2 张 → 确认放回（可重新选择）。</summary>
         private void ShowSetupDiscardPrompt(GameState state, PlayerState player, int seat)
         {
+            // 选完第 2 张后先进确认窗；确认窗里选「重新选择」会退回这一步。
+            if (setupDiscardFirst >= 0 && setupDiscardSecond >= 0)
+            {
+                ShowSetupDiscardConfirm(state, player, seat);
+                return;
+            }
+
+            bool firstPick = setupDiscardFirst < 0;
             var ids = new List<int>();
             var labels = new List<string>();
             foreach (int cardId in player.HandCharacterCards)
             {
-                if (cardId == setupDiscardFirst) continue; // 第 2 次选择时排除已选的第 1 张
+                if (cardId == setupDiscardFirst || cardId == setupDiscardSecond) continue;
                 ids.Add(cardId);
-                CharacterCardDef def = state.Catalog.Character(cardId);
-                labels.Add(def != null ? def.Name : $"角色牌 {cardId}");
+                CharacterCardDef def = state.Catalog != null ? state.Catalog.Character(cardId) : null;
+                labels.Add(DescribeSetupCard(def, cardId));
             }
 
             if (ids.Count == 0) return;
 
-            string title = $"{SeatLabel(seat)}：从手牌选 2 张放回游戏盒（{(setupDiscardFirst < 0 ? "1/2" : "2/2")}）。";
-            choicePopup.Show(title, labels, choice =>
+            string title = firstPick ? "开局选牌：放回第 1 张" : "开局选牌：放回第 2 张";
+            string prompt = firstPick
+                ? $"{SeatLabel(seat)}：开局拿到 {player.HandCharacterCards.Count} 张角色牌，本局只用 5 张。\n"
+                  + "请选 2 张放回游戏盒 —— 选中的牌本局不会再出现。"
+                : $"{SeatLabel(seat)}：第 1 张选的是《{SetupCardName(state, setupDiscardFirst)}》，再选 1 张。";
+
+            Action<int> picked = choice =>
             {
                 if (choice < 0 || choice >= ids.Count) return;
-                int cardId = ids[choice];
+                if (setupDiscardFirst < 0) setupDiscardFirst = ids[choice];
+                else setupDiscardSecond = ids[choice];
+                ShowSetupDiscardPrompt(state, player, seat);
+            };
 
-                if (setupDiscardFirst < 0)
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window != null)
+            {
+                window.Show(title, prompt, labels, picked, allowCancel: false);
+                return;
+            }
+
+            if (choicePopup != null)
+                choicePopup.Show(title, labels, picked, allowCancel: false);
+        }
+
+        /// <summary>「7 选 5」最后一步：确认把这两张放回游戏盒，或退回去重选。</summary>
+        private void ShowSetupDiscardConfirm(GameState state, PlayerState player, int seat)
+        {
+            string a = SetupCardName(state, setupDiscardFirst);
+            string b = SetupCardName(state, setupDiscardSecond);
+            string title = "确认开局选牌";
+            string prompt = $"{SeatLabel(seat)}：把《{a}》《{b}》放回游戏盒，本局不再出现。\n"
+                            + $"确认后手牌只剩 {player.HandCharacterCards.Count - 2} 张。";
+            var options = new[] { "确定放回", "重新选择" };
+
+            Action<int> picked = choice =>
+            {
+                if (choice == 0)
                 {
-                    setupDiscardFirst = cardId;
-                    ShowSetupDiscardPrompt(state, player, seat);
+                    int first = setupDiscardFirst;
+                    int second = setupDiscardSecond;
+
+                    // 先把本地步骤清掉：Dispatch 会立刻刷新，下一次「7 选 5」不能被当成还没选。
+                    setupDiscardSeat = -1;
+                    setupDiscardFirst = -1;
+                    setupDiscardSecond = -1;
+
+                    var command = new DiscardSetupHandCardsCommand(seat, first, second);
+                    if (Dispatch(command))
+                    {
+                        SetStatus($"{SeatLabel(seat)} 已把《{a}》《{b}》放回游戏盒，可以盖放角色牌了。");
+                        return;
+                    }
+
+                    // 罕见情况（状态刚被别处改动）：把选择放回去，让玩家再确认一次。
+                    setupDiscardSeat = seat;
+                    setupDiscardFirst = first;
+                    setupDiscardSecond = second;
+                    ShowSetupDiscardConfirm(state, player, seat);
                     return;
                 }
 
-                var command = new DiscardSetupHandCardsCommand(seat, setupDiscardFirst, cardId);
-                if (!Dispatch(command)) return;
-
-                setupDiscardSeat = -1;
+                // 重新选择：从第 1 张开始。
                 setupDiscardFirst = -1;
-                SetStatus($"{SeatLabel(seat)} 已把 2 张角色牌放回游戏盒，可以盖放角色牌了。");
-            }, allowCancel: false);
+                setupDiscardSecond = -1;
+                ShowSetupDiscardPrompt(state, player, seat);
+            };
+
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window != null)
+            {
+                window.Show(title, prompt, options, picked, allowCancel: false);
+                return;
+            }
+
+            if (choicePopup != null)
+                choicePopup.Show(prompt, options, picked, allowCancel: false);
+        }
+
+        /// <summary>开局选牌列表里的「卡名 + 策略 / 计谋」，长文本交给窗口自动折行。</summary>
+        private static string DescribeSetupCard(CharacterCardDef def, int cardId)
+        {
+            if (def == null) return $"角色牌 {cardId}";
+            string strategy = string.IsNullOrEmpty(def.StrategyName) ? "—" : def.StrategyName;
+            string tactics = string.IsNullOrEmpty(def.TacticsName) ? "—" : def.TacticsName;
+            return $"《{def.Name}》策略：{strategy} ｜ 计谋：{tactics}";
+        }
+
+        private static string SetupCardName(GameState state, int cardId)
+        {
+            CharacterCardDef def = state.Catalog != null ? state.Catalog.Character(cardId) : null;
+            return def != null ? def.Name : $"角色牌 {cardId}";
+        }
+
+        /// <summary>小选择弹窗或窗口弹窗是否已经开着（开局步骤不要抢别人的弹窗）。</summary>
+        private bool IsChoicePromptOpen()
+        {
+            if (choicePopup != null && choicePopup.IsVisible) return true;
+            return confirmWindow != null && confirmWindow.IsVisible;
+        }
+
+        /// <summary>手牌区「已盖放」：看所有玩家当前盖放在场上的角色牌。</summary>
+        private void OnPlacedCardsClicked() => ShowCharacterPiles(placed: true);
+
+        /// <summary>手牌区「弃牌区」：看所有玩家的角色牌弃牌区（按进入弃牌区的顺序）。</summary>
+        private void OnDiscardPileClicked() => ShowCharacterPiles(placed: false);
+
+        private void ShowCharacterPiles(bool placed)
+        {
+            if (engine == null || engine.State == null) return;
+
+            if (pilePanel == null)
+            {
+                Canvas canvas = ResolveCanvas();
+                if (canvas == null) return;
+                pilePanel = CharacterPilePanel.Create(canvas.transform,
+                    hud != null ? hud.UiFont : null,
+                    handPanel != null ? handPanel.CardFaces : null);
+            }
+
+            if (placed) pilePanel.ShowPlaced(engine.State);
+            else pilePanel.ShowDiscards(engine.State);
         }
 
         /// <summary>盖放阶段点手牌里的第 index 张：把它盖放到本机玩家面前（§10.1.1）。</summary>
@@ -3149,6 +3666,12 @@ namespace NomadCity.UI
                 return;
             }
 
+            if (confirmWindow != null && confirmWindow.IsVisible)
+            {
+                SetStatus("请先答完当前弹出的选择。");
+                return;
+            }
+
             GameState state = engine.State;
 
             // 「使用角色牌」是玩家行动阶段的快速行动。
@@ -3188,14 +3711,14 @@ namespace NomadCity.UI
                 return;
             }
 
-            if (choicePopup == null)
+            characterSeat = seat;
+            characterCardId = player.PlacedCharacterCard;
+
+            if (choicePopup == null && EnsureConfirmWindow() == null)
             {
                 SetStatus("使用角色牌的弹窗没接线，无法选策略 / 计谋。");
                 return;
             }
-
-            characterSeat = seat;
-            characterCardId = player.PlacedCharacterCard;
 
             var options = new List<string>(2);
             var kinds = new List<CharacterEffectKind>(2);
@@ -3210,7 +3733,13 @@ namespace NomadCity.UI
                 kinds.Add(CharacterEffectKind.Tactics);
             }
 
-            choicePopup.Show($"使用《{def.Name}》的哪个效果？", options, choice =>
+            // 起始玩家（或企业扩展放开限制的玩家）两种效果都能发；普通玩家二选一 —— 文案与引擎判定保持一致。
+            bool bothEffects = state.FirstPlayerSeat == seat || player.BothCharacterEffectsThisTurn;
+            string prompt = bothEffects
+                ? $"《{def.Name}》：本回合你是起始玩家，策略与计谋可以各发动一次。\n请选择先发动哪一种。"
+                : $"《{def.Name}》：本回合你只能发动其中一种效果，请选择。";
+
+            Action<int> picked = choice =>
             {
                 if (choice < 0 || choice >= kinds.Count)
                 {
@@ -3218,10 +3747,17 @@ namespace NomadCity.UI
                     return;
                 }
 
-                string picked = options[choice];
-                CharacterEffectKind kind = kinds[choice];
-                ConfirmAction($"对《{def.Name}》使用「{picked}」？", () => BeginCharacterEffect(kind), "确定使用");
-            });
+                BeginCharacterEffect(kinds[choice]);
+            };
+
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window != null)
+            {
+                window.Show("使用角色牌", prompt, options, picked);
+                return;
+            }
+
+            choicePopup.Show(prompt, options, picked);
         }
 
         /// <summary>
@@ -3242,7 +3778,7 @@ namespace NomadCity.UI
 
             if (panel != null) panel.SetLocked(true);
 
-            if (ops == null || ops.Count == 0 || choicePopup == null)
+            if (ops == null || ops.Count == 0 || (choicePopup == null && EnsureConfirmWindow() == null))
             {
                 DispatchCharacterEffect(Array.Empty<int>());
                 return;
@@ -3277,11 +3813,8 @@ namespace NomadCity.UI
                 return;
             }
 
-            var options = new List<string>(request.Options.Count);
-            foreach (ChoiceOption option in request.Options) options.Add(option.Label);
-
             EffectChoiceSession session = characterSession;
-            choicePopup.Show(request.Prompt, options, choice =>
+            ShowChoiceRequest(request, choice =>
             {
                 if (session != characterSession) return; // 会话已被作废（例如中途换了行动）
 
@@ -3298,7 +3831,7 @@ namespace NomadCity.UI
                 {
                     ExitCharacterFlow("已返回，牌还在盖放位；可以重新点「使用角色牌」。");
                 }
-            }, request.AllowCancel);
+            });
         }
 
         /// <summary>角色牌效果里「点地图」的那一次选择：照候选清单把点击翻译成选项下标。</summary>
@@ -3346,12 +3879,50 @@ namespace NomadCity.UI
             else ExitCharacterFlow(null);
         }
 
-        /// <summary>起始玩家用掉一种效果后：问「继续用另一种 / 结束」，期间不得插入其他行动（§10.1.2）。</summary>
+        /// <summary>起始玩家用掉一种效果后：问「继续发动另一种 / 结束使用」，期间不得插入其他行动（§10.1.2）。</summary>
         private void BeginSecondEffectPrompt()
         {
             if (engine == null) return;
 
             characterStep = CharacterStep.Second;
+
+            PlayerState player = engine.State.Player(characterSeat);
+            CharacterCardDef def = engine.State.Catalog.Character(characterCardId);
+            string cardName = def != null ? def.Name : "这张角色牌";
+
+            // 还没用的那一种（与引擎「另一种是否还在」的判定同源）。
+            bool nextIsTactics = player.UsedCharacterStrategyThisTurn;
+            string nextName = def == null
+                ? (nextIsTactics ? "计谋" : "策略")
+                : $"{(nextIsTactics ? "计谋" : "策略")} · {(nextIsTactics ? def.TacticsName : def.StrategyName)}";
+
+            string prompt =
+                $"《{cardName}》还可以按任意顺序发动另一种效果：{nextName}。\n" +
+                "两种效果之间不能插入别的行动；也可以就此结束使用，把牌移入弃牌区。";
+
+            var options = new[] { "继续发动另一种", "结束使用" };
+            Action<int> picked = choice =>
+            {
+                if (choice == 0)
+                {
+                    PlayerState p = engine.State.Player(characterSeat);
+                    CharacterEffectKind other = p.UsedCharacterStrategyThisTurn
+                        ? CharacterEffectKind.Tactics
+                        : CharacterEffectKind.Strategy;
+                    BeginCharacterEffect(other);
+                }
+                else
+                {
+                    EndCharacterUse();
+                }
+            };
+
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window != null)
+            {
+                window.Show("角色牌：还可以发动另一种", prompt, options, picked, allowCancel: false);
+                return;
+            }
 
             if (choicePopup == null)
             {
@@ -3360,24 +3931,7 @@ namespace NomadCity.UI
                 return;
             }
 
-            choicePopup.Show(
-                "当前玩家可以按任意顺序连续发动策略与计谋；两种效果之间不能插入别的行动（§10.1.2）。",
-                new[] { "继续使用另一种效果", "结束角色牌使用" },
-                choice =>
-                {
-                    if (choice == 0)
-                    {
-                        PlayerState p = engine.State.Player(characterSeat);
-                        CharacterEffectKind other = p.UsedCharacterStrategyThisTurn
-                            ? CharacterEffectKind.Tactics
-                            : CharacterEffectKind.Strategy;
-                        BeginCharacterEffect(other);
-                    }
-                    else
-                    {
-                        EndCharacterUse();
-                    }
-                });
+            choicePopup.Show(prompt, options, picked);
         }
 
         /// <summary>结束角色牌使用：把盖放牌移入弃牌区（§10.1.3）。</summary>
@@ -3516,6 +4070,25 @@ namespace NomadCity.UI
             payeeQueue.Clear();
             RefreshExploreHighlight();
 
+            // 退出行动时把「移除影响力」的候选也丢掉；留在该模式则按当前限制重新填一遍。
+            removeCandidates.Clear();
+            if (engine != null)
+            {
+                if (next == ActionMode.RemoveInfluence)
+                {
+                    int removeSeat = activeRequest != null ? activeRequest.Seat : engine.State.ActiveSeat;
+                    PendingInfluenceScope scope = activeRequest != null
+                        ? activeRequest.Limits.Scope
+                        : PendingInfluenceScope.Any;
+                    removeCandidates.AddRange(PendingActionRules.RemoveCandidates(engine.State, removeSeat, scope));
+                }
+
+                if (renderer != null)
+                    renderer.SetHighlightedSlots(next == ActionMode.RemoveInfluence ? removeCandidates : null);
+            }
+
+            buildPendingId = next == ActionMode.Build ? buildPendingId : 0;
+
             // 退出采集选点（或换模式）时把采集流程整个丢掉：换模式后再点地图不该还留在采集语义里。
             if (next != ActionMode.Harvest)
             {
@@ -3554,6 +4127,9 @@ namespace NomadCity.UI
             // 万一还有「付给谁」的小窗留在屏幕上（例如中途换了行动），一并收掉：
             // 否则它的回调会在这次探索作废之后才被打进来，把某个过期选择写进已经没人管的计划里。
             if (choicePopup != null && choicePopup.IsVisible) choicePopup.Hide();
+
+            // 行动确认窗同理：换了行动还留着旧确认，点下去会把过期答案交给已经换掉的流程。
+            if (confirmWindow != null && confirmWindow.IsVisible) confirmWindow.Hide();
 
             if (panel != null)
             {
@@ -3598,6 +4174,14 @@ namespace NomadCity.UI
                 // 第 2 回合起没有开局入场，盖放阶段直接开始；所有人盖放完由引擎自动进入玩家行动。
                 if (mode == ActionMode.None && state.Phase == TurnPhase.CharacterPlacement)
                 {
+                    // 企业扩展：开局入场后先逐位做「7 选 5」，完成后才允许盖放（§4.2）。
+                    int setupDiscardSeat = FirstSeatNeedingSetupDiscard(state);
+                    if (setupDiscardSeat >= 0)
+                    {
+                        SetHint($"{SeatLabel(setupDiscardSeat)} 开局拿到 7 张角色牌：请先在弹窗里选 2 张放回游戏盒，本局只用 5 张。");
+                        return;
+                    }
+
                     // 企业扩展：红区开放回合先让每名玩家提升 1 级，再开始盖放（§3.2）。
                     if (state.Enterprises != null && state.Enterprises.RedZoneAdvanceSeat >= 0)
                     {
@@ -3625,7 +4209,7 @@ namespace NomadCity.UI
 
                 if (characterStep == CharacterStep.Second)
                 {
-                    panel.SetHint("角色牌：请在弹出的窗口里选「继续使用另一种效果」或「结束角色牌使用」（§10.1.2）。");
+                    panel.SetHint("角色牌：请在弹出的窗口里选「继续发动另一种」或「结束使用」（§10.1.2）。");
                     return;
                 }
 
@@ -3655,6 +4239,19 @@ namespace NomadCity.UI
             {
                 case ActionMode.None:
                 {
+                    // 企业牌面要求「选择 1 家企业提升 1 级」时，结束回合会被引擎拦下。
+                    // 先把原因和入口写进提示，别让玩家对着点不动的按钮猜。
+                    GameState pendingState = engine != null ? engine.State : null;
+                    if (pendingState != null && pendingState.Enterprises != null
+                        && pendingState.Enterprises.PendingAdvanceSeat >= 0)
+                    {
+                        string advanceReason = pendingState.Enterprises.PendingAdvanceReason;
+                        panel.SetHint($"{SeatLabel(pendingState.Enterprises.PendingAdvanceSeat)} "
+                                      + (string.IsNullOrEmpty(advanceReason) ? "还有企业要提升合作等级：" : advanceReason + " ")
+                                      + "点「企业」按钮选择 1 家企业提升 1 级。");
+                        break;
+                    }
+
                     // 主要行动做完后回合**不会**自动结束：玩家还能继续做快速行动，或点「结束回合」。
                     string baseHint = engine != null && engine.State.Phase == TurnPhase.PlayerActions
                                       && engine.State.MainActionTakenThisRound
@@ -3713,13 +4310,13 @@ namespace NomadCity.UI
                     GameState exploreState = engine != null ? engine.State : null;
                     if (exploreState == null || exploreTargetNode < 0)
                     {
-                        panel.SetHint("探索：请点击一个没有资源点指示物、且已开放探索的资源点本体。");
+                        panel.SetHint("探索第 1 步：请点击一个没有资源点指示物、且已开放探索的资源点本体，作为目标地点。");
                         break;
                     }
 
-                    int toll = TollCalculator.Compute(exploreState, exploreState.ActiveSeat, exploreRoutes, explorePayees).Total;
-                    panel.SetHint($"探索目标：{exploreState.Map.Node(exploreTargetNode).Code}；已选 {exploreRoutes.Count} 条航道、路费 {toll} 券。" +
-                                  "可点航道空格增删路线；点目标资源点会弹出确认窗再执行。");
+                    int toll = TollCalculator.Compute(exploreState, ActionSeat, exploreRoutes, explorePayees).Total;
+                    panel.SetHint($"探索第 2 步：目标 {exploreState.Map.Node(exploreTargetNode).Code}，默认 {exploreRoutes.Count} 条航道、路费 {toll} 券。" +
+                                  "点航道空格可增删路线；第 3 步再点目标资源点，在确认窗里执行。");
                     break;
                 }
             }
@@ -3900,7 +4497,8 @@ namespace NomadCity.UI
         /// </summary>
         private void ShowHarvestCommit()
         {
-            if (choicePopup == null) return;
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window == null && choicePopup == null) return;
 
             int seat = HarvestSeat;
             string title;
@@ -3921,7 +4519,7 @@ namespace NomadCity.UI
                 title = $"采集（{who}）：已选 {plan.Nodes.Count} 个点〔{list}〕，路费 {plan.Toll.Total} / 手上 {plan.Budget} 金券。\n确定提交这份选择吗？";
             }
 
-            choicePopup.Show(title, new[] { "确定提交" }, choice =>
+            Action<int> picked = choice =>
             {
                 if (choice >= 0)
                 {
@@ -3930,7 +4528,15 @@ namespace NomadCity.UI
                 }
 
                 SetStatus("继续选点：点地图上的资源点加入或移除，再决定何时提交。");
-            });
+            };
+
+            if (window != null)
+            {
+                window.Show("确认采集", title, new[] { "确定提交" }, picked);
+                return;
+            }
+
+            choicePopup.Show(title, new[] { "确定提交" }, picked);
         }
 
         /// <summary>把某位玩家的采集选择重置为「全部合法资源点」（采集的惯例：能采就采）。</summary>
@@ -3945,8 +4551,18 @@ namespace NomadCity.UI
         /// <summary>采集选点期间把当前选中的资源点亮到地图上；退出采集时清空。</summary>
         private void RefreshHarvestHighlight()
         {
-            if (renderer != null)
-                renderer.SetHighlightedNodes(mode == ActionMode.Harvest ? harvestCurrent : null);
+            if (renderer == null) return;
+
+            if (mode == ActionMode.Harvest)
+            {
+                renderer.SetHighlightedNodes(harvestCurrent);
+                return;
+            }
+
+            // 卡牌效果授予的探索：高亮它允许的那几个资源点，让玩家一眼看出能点哪里。
+            renderer.SetHighlightedNodes(mode == ActionMode.Explore && exploreGrantedCandidates.Count > 0
+                ? exploreGrantedCandidates
+                : null);
         }
 
         /// <summary>点地图资源点：合法就加入 / 移除当前选择，提示行实时显示已选点与路费。</summary>
@@ -4117,6 +4733,12 @@ namespace NomadCity.UI
         /// </summary>
         private void Update()
         {
+            // 卡牌效果授予的行动：等界面空下来后（延后一帧）自动接管，走完整流程。
+            TryBeginPendingAction();
+
+            // 终局结算窗同样延后一帧：结束回合的调用方事后还会补一次 SetMode，会把当场弹出的窗收掉。
+            TryShowFinalPrompt();
+
             if (!onlineClient || !onlineSubmitPending) return;
             if (Time.unscaledTime < onlineSubmitDeadline) return;
 
@@ -4367,7 +4989,7 @@ namespace NomadCity.UI
             enterpriseLevel = -1;
             enterpriseAdvance = true;
 
-            if (choicePopup == null)
+            if (choicePopup == null && EnsureConfirmWindow() == null)
             {
                 DispatchEnterpriseAdvance(Array.Empty<int>());
                 return;
@@ -4534,13 +5156,15 @@ namespace NomadCity.UI
                 return;
             }
 
+            // 标题只写「要做什么」，把「为什么（哪张牌 / 红区要求）」放进副标题，
+            // 免得标题里套两三层冒号（例：「玩家1：罗德岛 1 级：选择 1 家其他企业…」）。
             string reason = string.IsNullOrEmpty(enterprises.PendingAdvanceReason)
-                ? "选择 1 家企业提升 1 级合作等级。"
-                : enterprises.PendingAdvanceReason;
+                ? string.Empty
+                : enterprises.PendingAdvanceReason + " ";
 
             browser.OpenAdvance(engine.State, seat,
-                $"{SeatLabel(seat)}：{reason}",
-                "点一张放大看牌面，确认后合作等级 +1。");
+                $"{SeatLabel(seat)}：选择 1 家企业提升合作等级",
+                reason + "点一张放大看牌面，确认后合作等级 +1。");
         }
 
         /// <summary>把这名玩家当前可触发（已解锁、本回合没用过）的企业特效列出来。</summary>
@@ -4597,17 +5221,40 @@ namespace NomadCity.UI
                 return;
             }
 
+            Action<int> picked = choice =>
+            {
+                if (choice < 0 || choice >= boardIds.Count) return;
+                BeginEnterpriseTrigger(seat, boardIds[choice], levels[choice]);
+            };
+
+            string prompt = $"{SeatLabel(seat)}：{title}\n同一特效一回合只能触发 1 次。";
+
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window != null)
+            {
+                window.Show("触发企业特效", prompt, labels, picked);
+                return;
+            }
+
             if (choicePopup == null)
             {
                 SetStatus("没接小选择弹窗，暂时没法触发企业特效。");
                 return;
             }
 
-            choicePopup.Show($"{SeatLabel(seat)}：{title}", labels, choice =>
-            {
-                if (choice < 0 || choice >= boardIds.Count) return;
-                BeginEnterpriseTrigger(seat, boardIds[choice], levels[choice]);
-            });
+            choicePopup.Show(prompt, labels, picked);
+        }
+
+        /// <summary>
+        /// 开发者面板的「触发 Lx」：跳过时机校验，但和正常触发走同一套点选会话 ——
+        /// 需要选目标 / 选牌的特效会正常弹窗，不会用默认答案静默结算。
+        /// </summary>
+        private void BeginDeveloperEnterpriseTrigger(int seat, int boardId, int level)
+        {
+            if (engine == null) return;
+
+            enterpriseIgnoreTiming = true;
+            BeginEnterpriseTrigger(seat, boardId, level);
         }
 
         /// <summary>触发某个企业特效：带点选的效果先走收集会话，收集完再派发命令。</summary>
@@ -4617,7 +5264,11 @@ namespace NomadCity.UI
 
             EnterpriseBoardDef def = EnterpriseCatalog.Board(boardId);
             EnterpriseLevel entry = def?.Level(level);
-            if (entry == null) return;
+            if (entry == null)
+            {
+                enterpriseIgnoreTiming = false;
+                return;
+            }
 
             enterpriseSeat = seat;
             enterpriseBoardId = boardId;
@@ -4626,7 +5277,7 @@ namespace NomadCity.UI
 
             // 一律走收集会话：即使这一级没有可执行的效果段，会话也会立刻「跑完」再派发命令；
             // 而带点选的特效（如罗德岛 4 级从弃牌区选牌）只有试跑同一条结算路径才会弹出选择窗。
-            if (choicePopup == null)
+            if (choicePopup == null && EnsureConfirmWindow() == null)
             {
                 DispatchEnterpriseEffect(Array.Empty<int>());
                 return;
@@ -4660,7 +5311,10 @@ namespace NomadCity.UI
             if (request.Pick != null && request.Pick.Kind != ChoicePickKind.None)
             {
                 if (choicePopup != null && choicePopup.IsVisible) choicePopup.Hide();
-                SetStatus("企业特效：请在地图上点击要选择的目标。");
+                if (confirmWindow != null && confirmWindow.IsVisible) confirmWindow.Hide();
+                SetStatus(enterpriseAdvance
+                    ? "提升合作等级：请在地图上点击要选择的目标。"
+                    : "企业特效：请在地图上点击要选择的目标。");
                 UpdateHint();
                 return;
             }
@@ -4669,7 +5323,7 @@ namespace NomadCity.UI
             foreach (ChoiceOption option in request.Options) options.Add(option.Label);
 
             EffectChoiceSession session = enterpriseSession;
-            choicePopup.Show(request.Prompt, options, choice =>
+            Action<int> picked = choice =>
             {
                 if (session != enterpriseSession) return;
 
@@ -4681,8 +5335,27 @@ namespace NomadCity.UI
                 }
 
                 if (session.Back()) ContinueEnterpriseChoices();
-                else ExitEnterpriseFlow("已取消这次企业特效（没有结算）。");
-            }, request.AllowCancel);
+                else ExitEnterpriseFlow(enterpriseAdvance
+                    ? "已取消这次企业升级：合作等级没变，需要时再点「企业」重新选择。"
+                    : "已取消这次企业特效（没有结算）。");
+            };
+
+            // 企业特效 / 升级奖励的选项常带整段效果说明，统一用能折行、可最小化的窗口弹窗。
+            ConfirmWindow window = EnsureConfirmWindow();
+            if (window != null)
+            {
+                window.Show(enterpriseAdvance ? "提升合作等级" : "触发企业特效",
+                    request.Prompt, options, picked, request.AllowCancel);
+                return;
+            }
+
+            if (choicePopup == null)
+            {
+                ExitEnterpriseFlow("没接选择弹窗，企业效果无法继续结算。");
+                return;
+            }
+
+            choicePopup.Show(request.Prompt, options, picked, request.AllowCancel);
         }
 
         /// <summary>企业特效里「点地图」的那一次选择：照候选清单把点击翻译成选项下标。</summary>
@@ -4707,7 +5380,8 @@ namespace NomadCity.UI
 
             EnterpriseBoardDef def = EnterpriseCatalog.Board(enterpriseBoardId);
             var command = new TriggerEnterpriseEffectCommand(enterpriseSeat, enterpriseBoardId, enterpriseLevel,
-                new RecordedChoices(answers, strict: false));
+                new RecordedChoices(answers, strict: false), enterpriseIgnoreTiming);
+            enterpriseIgnoreTiming = false;
 
             bool dispatched = Dispatch(command);
             enterpriseSession = null;
@@ -4739,6 +5413,7 @@ namespace NomadCity.UI
             enterpriseSession = null;
             enterpriseSeat = -1;
             enterpriseAdvance = false;
+            enterpriseIgnoreTiming = false;
             if (panel != null) panel.SetLocked(false);
             if (!string.IsNullOrEmpty(status)) SetStatus(status);
             UpdateHint();
@@ -4834,7 +5509,7 @@ namespace NomadCity.UI
             // 企业扩展：所有玩家先完成「7 选 5」，2 人局的弃设施牌窗才打开。
             // 没启用企业扩展时这条不适用（弃设施牌是 2 人局的基础变体规则）。
             bool enterprisesReady = state.Setup == null || !state.Setup.IsEnterpriseEnabled
-                                    || state.Enterprises.DraftDone;
+                                    || state.Enterprises.DraftDone || state.DeveloperMode;
             bool allSetupDiscardDone = enterprisesReady && FirstSeatNeedingSetupDiscard(state) < 0;
             bool discard = state.Phase == TurnPhase.CharacterPlacement
                            && state.SupplyDiscardRemaining > 0 && setupDone && allSetupDiscardDone
@@ -4898,13 +5573,13 @@ namespace NomadCity.UI
         /// </summary>
         private void TryBeginPersistentCleanup(GameState state)
         {
-            if (state.Phase != TurnPhase.Cleanup || choicePopup == null)
+            if (state.Phase != TurnPhase.Cleanup || (choicePopup == null && EnsureConfirmWindow() == null))
             {
                 persistentCleanupPrompting = false;
                 return;
             }
 
-            if (persistentCleanupPrompting || cleanupSession != null || choicePopup.IsVisible) return;
+            if (persistentCleanupPrompting || cleanupSession != null || IsChoicePromptOpen()) return;
 
             var candidates = new List<PersistentTacticState>();
             foreach (PersistentTacticState tactic in state.PersistentTactics)
@@ -4929,20 +5604,22 @@ namespace NomadCity.UI
             labels.Add("跳过收尾");
 
             persistentCleanupPrompting = true;
-            choicePopup.Show("收尾阶段：可以发动场上的持续计谋（§9.9）", labels, index =>
-            {
-                persistentCleanupPrompting = false;
-                if (index < 0 || index >= candidates.Count)
+            ShowChoiceWindow("收尾阶段：发动持续计谋",
+                "场上的持续计谋可以各发动 1 次；不发动就点「跳过收尾」，直接进入下一回合。",
+                labels, index =>
                 {
-                    // 跳过：引擎在确认没有别的收尾能力后会自动进入下一回合。
-                    if (engine != null && engine.State.Phase == TurnPhase.Cleanup)
-                        Dispatch(new AdvancePhaseCommand());
-                    return;
-                }
+                    persistentCleanupPrompting = false;
+                    if (index < 0 || index >= candidates.Count)
+                    {
+                        // 跳过：引擎在确认没有别的收尾能力后会自动进入下一回合。
+                        if (engine != null && engine.State.Phase == TurnPhase.Cleanup)
+                            Dispatch(new AdvancePhaseCommand());
+                        return;
+                    }
 
-                PersistentTacticState picked = candidates[index];
-                BeginPersistentCleanup(picked);
-            }, allowCancel: false);
+                    PersistentTacticState picked = candidates[index];
+                    BeginPersistentCleanup(picked);
+                }, allowCancel: false);
         }
 
         /// <summary>
@@ -4954,7 +5631,7 @@ namespace NomadCity.UI
             if (engine == null || tactic == null) return;
 
             // 没接弹窗就退回引擎默认答案，别把玩家卡在流程里。
-            if (choicePopup == null)
+            if (choicePopup == null && EnsureConfirmWindow() == null)
             {
                 Dispatch(new UsePersistentTacticCleanupCommand(tactic.Seat, tactic.Kind));
                 return;
@@ -4997,11 +5674,8 @@ namespace NomadCity.UI
                 return;
             }
 
-            var options = new List<string>(request.Options.Count);
-            foreach (ChoiceOption option in request.Options) options.Add(option.Label);
-
             EffectChoiceSession session = cleanupSession;
-            choicePopup.Show(request.Prompt, options, choice =>
+            ShowChoiceRequest(request, choice =>
             {
                 if (session != cleanupSession) return;
 
@@ -5024,7 +5698,7 @@ namespace NomadCity.UI
                 persistentCleanupPrompting = false;
                 SetStatus("已取消这次收尾发动，可以重新选择。");
                 if (engine != null) TryBeginPersistentCleanup(engine.State);
-            }, request.AllowCancel);
+            });
         }
 
         /// <summary>收尾能力里「点地图」的那一次选择：照候选清单把点击翻译成选项下标。</summary>
@@ -5049,7 +5723,8 @@ namespace NomadCity.UI
         {
             if (state == null || !state.Setup.IsEnterpriseEnabled) return -1;
             if (state.TurnNumber != 1 || state.Phase != TurnPhase.CharacterPlacement) return -1;
-            if (!state.Enterprises.DraftDone) return -1;                     // 先决定初始企业
+            // 先决定初始企业；开发者模式可以跳过企业抽选，别把它当成「7 选 5 还没开始」。
+            if (!state.Enterprises.DraftDone && !state.DeveloperMode) return -1;
             if (ChooseStartNodeCommand.CurrentOperator(state) >= 0) return -1; // 开局入场还没走完
 
             int count = state.Players.Count;

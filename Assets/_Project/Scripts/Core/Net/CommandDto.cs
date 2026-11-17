@@ -23,6 +23,12 @@ namespace NomadCity.Core.Net
         /// <summary>bool 参数按位打包：bit0 = AcceptCost，bit1 = GrantRewards（当前仅 ResolveEventOptionCommand 用到）。</summary>
         public uint Flags;
 
+        /// <summary>
+        /// 这条命令为哪条挂起行动（行动事件）服务；0 = 正常主要行动 / 无挂起。
+        /// 单独开一个字段，因为 BuildFacility / Explore 的四个槽位已经占满了。
+        /// </summary>
+        public int PendingActionId;
+
         /// <summary>变长 int 列表；无内容时为 null。</summary>
         public int[] Items;
 
@@ -30,7 +36,8 @@ namespace NomadCity.Core.Net
         public bool Equals(CommandDto other) =>
             Kind == other.Kind && Seat == other.Seat &&
             P0 == other.P0 && P1 == other.P1 && P2 == other.P2 && P3 == other.P3 &&
-            Flags == other.Flags && ItemsEqual(Items, other.Items);
+            Flags == other.Flags && PendingActionId == other.PendingActionId &&
+            ItemsEqual(Items, other.Items);
 
         public override bool Equals(object obj) => obj is CommandDto other && Equals(other);
 
@@ -58,6 +65,7 @@ namespace NomadCity.Core.Net
                 h = h * 397 ^ P2;
                 h = h * 397 ^ P3;
                 h = h * 397 ^ (int)Flags;
+                h = h * 397 ^ PendingActionId;
                 if (Items != null)
                 {
                     for (int i = 0; i < Items.Length; i++) h = h * 397 ^ Items[i];
@@ -67,6 +75,6 @@ namespace NomadCity.Core.Net
         }
 
         public override string ToString() =>
-            $"{Kind}(seat={Seat}, P=[{P0},{P1},{P2},{P3}], flags={Flags}, items={(Items == null ? "null" : Items.Length.ToString())})";
+            $"{Kind}(seat={Seat}, P=[{P0},{P1},{P2},{P3}], flags={Flags}, pending={PendingActionId}, items={(Items == null ? "null" : Items.Length.ToString())})";
     }
 }

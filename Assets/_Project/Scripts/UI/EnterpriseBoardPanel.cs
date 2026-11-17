@@ -920,7 +920,7 @@ namespace NomadCity.UI
             if (mode == Mode.View || mode == Mode.Codex) return;
 
             Button confirm = CreateButton("Confirm", card.rectTransform,
-                mode == Mode.Draft ? "选择这家企业" : "提升这家企业", 20f);
+                mode == Mode.Draft ? "确定选择" : "确定提升", 20f);
             RectTransform cf = confirm.GetComponent<RectTransform>();
             cf.anchorMin = cf.anchorMax = new Vector2(0.5f, 0f);
             cf.pivot = new Vector2(0.5f, 0f);

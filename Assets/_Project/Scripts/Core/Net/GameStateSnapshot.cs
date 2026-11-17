@@ -18,7 +18,7 @@ namespace NomadCity.Core.Net
     public sealed class GameStateSnapshot
     {
         /// <summary>当前快照格式版本；协议握手时与对方比对。</summary>
-        public const int Version = 10;
+        public const int Version = 11;
 
         public int PlayerCount;
         public ExpansionFlags Expansions;
@@ -84,6 +84,27 @@ namespace NomadCity.Core.Net
 
         /// <summary>持续留在场上的干员计谋（∞ 计谋）。</summary>
         public readonly List<PersistentTacticSnapshot> PersistentTactics = new();
+
+        /// <summary>卡牌效果授予、等待界面执行的挂起行动。</summary>
+        public readonly List<PendingActionSnapshot> PendingActions = new();
+
+        /// <summary>下一条挂起行动的 id。</summary>
+        public int NextPendingActionId = 1;
+
+        /// <summary>一条挂起行动的纯数据镜像。</summary>
+        public sealed class PendingActionSnapshot
+        {
+            public int Id;
+            public int Seat;
+            public int Kind;
+            public int Remaining;
+            public bool Free;
+            public int MaxVoucherSpend;
+            public int Scope;
+            public int NodeScope;
+            public int SourceCardId;
+            public string SourceLabel = string.Empty;
+        }
 
         /// <summary>延迟到收尾阶段结算的效果队列（按入队顺序）。</summary>
         public readonly List<DeferredEffectSnapshot> DeferredEffects = new();
@@ -175,6 +196,7 @@ namespace NomadCity.Core.Net
                 PendingStartMarkerSeat = state.PendingStartMarkerSeat,
                 LastCityMoveRouteId = state.LastCityMoveRouteId,
                 ActiveSpecialActionPatternId = state.ActiveSpecialActionPatternId,
+                NextPendingActionId = state.NextPendingActionId,
             };
 
             foreach (PlayerState player in state.Players) snapshot.Players.Add(PlayerSnapshot.Capture(player));
@@ -263,6 +285,23 @@ namespace NomadCity.Core.Net
                 snapshot.PersistentTactics.Add(entry);
             }
 
+            foreach (PendingAction pending in state.PendingActions)
+            {
+                snapshot.PendingActions.Add(new PendingActionSnapshot
+                {
+                    Id = pending.Id,
+                    Seat = pending.Seat,
+                    Kind = (int)pending.Kind,
+                    Remaining = pending.Remaining,
+                    Free = pending.Limits.Free,
+                    MaxVoucherSpend = pending.Limits.MaxVoucherSpend,
+                    Scope = (int)pending.Limits.Scope,
+                    NodeScope = (int)pending.Limits.NodeScope,
+                    SourceCardId = pending.SourceCardId,
+                    SourceLabel = pending.SourceLabel ?? string.Empty,
+                });
+            }
+
             foreach (DeferredEffect deferred in state.DeferredEffects)
             {
                 var entry = new DeferredEffectSnapshot { Seat = deferred.Seat };
@@ -333,6 +372,7 @@ namespace NomadCity.Core.Net
                 PendingStartMarkerSeat = PendingStartMarkerSeat,
                 LastCityMoveRouteId = LastCityMoveRouteId,
                 ActiveSpecialActionPatternId = ActiveSpecialActionPatternId,
+                NextPendingActionId = NextPendingActionId < 1 ? 1 : NextPendingActionId,
             };
 
             foreach (PlayerSnapshot player in Players) state.Players.Add(player.Restore());
@@ -421,6 +461,20 @@ namespace NomadCity.Core.Net
 
             foreach (DeferredEffectSnapshot entry in DeferredEffects)
                 state.DeferredEffects.Add(new DeferredEffect(entry.Seat, RestoreOps(entry.Ops)));
+
+            foreach (PendingActionSnapshot entry in PendingActions)
+            {
+                state.PendingActions.Add(new PendingAction(
+                    entry.Id, entry.Seat, (PendingActionKind)entry.Kind, entry.Remaining,
+                    new PendingActionLimits
+                    {
+                        Free = entry.Free,
+                        MaxVoucherSpend = entry.MaxVoucherSpend,
+                        Scope = (PendingInfluenceScope)entry.Scope,
+                        NodeScope = (PendingNodeScope)entry.NodeScope,
+                    },
+                    entry.SourceCardId, entry.SourceLabel));
+            }
 
             return state;
         }

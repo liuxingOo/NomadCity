@@ -33,13 +33,21 @@ namespace NomadCity.Core.Engine
         /// </summary>
         public readonly IReadOnlyDictionary<int, int> Payees;
 
+        /// <summary>
+        /// 这次探索由哪条挂起行动授予（0 = 正常主要行动）。
+        /// 大于 0 时不占主要行动名额，并由 <see cref="ExploreInfluenceCommand"/> 消费这条挂起行动。
+        /// </summary>
+        public readonly int PendingActionId;
+
         public ExploreCommand(int seat, int nodeId,
-            IReadOnlyList<int> routeIds = null, IReadOnlyDictionary<int, int> payees = null)
+            IReadOnlyList<int> routeIds = null, IReadOnlyDictionary<int, int> payees = null,
+            int pendingActionId = 0)
         {
             ActorSeat = seat;
             NodeId = nodeId;
             SelectedRouteIds = routeIds;
             Payees = payees;
+            PendingActionId = pendingActionId;
         }
 
         public int ActorSeat { get; }
@@ -72,7 +80,18 @@ namespace NomadCity.Core.Engine
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
 
-            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat);
+            PendingAction pending = null;
+            if (PendingActionId > 0)
+            {
+                CommandResult check = PendingActionRules.ValidatePending(state, ActorSeat,
+                    PendingActionKind.Explore, PendingActionId);
+                if (!check.Ok) return check;
+                pending = state.FindPending(PendingActionId);
+            }
+
+            // 挂起行动不占主要行动名额；正常探索才查名额。
+            CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat,
+                isContinuation: PendingActionId > 0);
             if (!quota.Ok) return quota;
 
             PlayerState player = state.Player(ActorSeat);
@@ -131,9 +150,12 @@ namespace NomadCity.Core.Engine
                 }
             }
 
+            PendingActionLimits limits = pending?.Limits ?? PendingActionLimits.Unlimited;
             int total = TollCalculator.Compute(state, ActorSeat, path, Payees).Total;
-            if (player.Vouchers < total)
+            if (!limits.Free && player.Vouchers < total)
                 return CommandResult.Fail($"路费需要 {total} 金券，你只有 {player.Vouchers}。");
+            if (limits.MaxVoucherSpend >= 0 && total > limits.MaxVoucherSpend)
+                return CommandResult.Fail($"这次效果最多只能支付 {limits.MaxVoucherSpend} 金券路费，当前路线需要 {total}。");
 
             return CommandResult.Success;
         }
@@ -147,11 +169,18 @@ namespace NomadCity.Core.Engine
             // 该航道上有对手影响力就付给那名对手，否则退给无限的公共池（不记账）。
             RouteIds = PlanRoutes(state);
             Toll = TollCalculator.Compute(state, ActorSeat, RouteIds, Payees);
-            foreach (TollCalculator.Payment payment in Toll.Payments)
+
+            // 卡牌效果可能让这次探索免费（PendingActionLimits.Free）：路费照算给界面显示，但不扣钱。
+            PendingAction pending = state.FindPending(PendingActionId);
+            bool free = pending != null && pending.Limits.Free;
+            if (!free)
             {
-                player.Vouchers -= payment.Amount;
-                if (payment.PayeeSeat != TollCalculator.SupplyPayee)
-                    state.Player(payment.PayeeSeat).Vouchers += payment.Amount;
+                foreach (TollCalculator.Payment payment in Toll.Payments)
+                {
+                    player.Vouchers -= payment.Amount;
+                    if (payment.PayeeSeat != TollCalculator.SupplyPayee)
+                        state.Player(payment.PayeeSeat).Vouchers += payment.Amount;
+                }
             }
 
             // 步 2（前半）：翻开对应颜色的事件牌堆顶，把对应的资源点指示物放到目标点。
@@ -239,20 +268,33 @@ namespace NomadCity.Core.Engine
         /// <summary>探索的目标资源点 id。</summary>
         public readonly int NodeId;
 
-        public ExploreInfluenceCommand(int seat, int nodeId)
+        /// <summary>授予这次探索的挂起行动 id（0 = 正常主要行动）。走完这一步时消费它。</summary>
+        public readonly int PendingActionId;
+
+        public ExploreInfluenceCommand(int seat, int nodeId, int pendingActionId = 0)
         {
             ActorSeat = seat;
             NodeId = nodeId;
+            PendingActionId = pendingActionId;
         }
 
         public int ActorSeat { get; }
         public string Name => "探索·放置影响力";
-        public bool ConsumesAction => true;
+
+        /// <summary>挂起行动不占主要行动名额，只有正常探索才在这里记账。</summary>
+        public bool ConsumesAction => PendingActionId == 0;
 
         public CommandResult Validate(GameState state)
         {
             CommandResult turn = ActionRules.ValidateActivePlayer(state, ActorSeat);
             if (!turn.Ok) return turn;
+
+            if (PendingActionId > 0)
+            {
+                CommandResult check = PendingActionRules.ValidatePending(state, ActorSeat,
+                    PendingActionKind.Explore, PendingActionId);
+                if (!check.Ok) return check;
+            }
 
             // 这是三步里的收尾步：名额在步 1 就已经算在这次探索上了，这里不再查（见 ValidateMainActionAvailable）。
             CommandResult quota = ActionRules.ValidateMainActionAvailable(state, ActorSeat, isContinuation: true);
@@ -289,6 +331,8 @@ namespace NomadCity.Core.Engine
             state.Player(ActorSeat).MarkersInSupply--;
 
             node.ExplorePending = false; // 三步走完，这次探索结清
+
+            if (PendingActionId > 0) state.ConsumePending(PendingActionId);
         }
     }
 }

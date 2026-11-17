@@ -27517,6 +27517,7 @@ MonoBehaviour:
   - {fileID: -5777739403161424140, guid: b295bec8f4d0c654eacada302f1008ad, type: 3}
   - {fileID: -3999383484899937616, guid: 7cb6fb1d33f61794ab6f068368a04190, type: 3}
   - {fileID: 3620961125254409305, guid: 911d5ebbca4d1e843a1458e82f112544, type: 3}
+  firstPlayerMarkSprite: {fileID: 2007035375851905323, guid: 96fc90465e6b7a6438cecac161fd0d8b, type: 3}
   voucherIcon: {fileID: 5670732621190257608, guid: 7d5b8f4d1511d524ab5162635ccea63d, type: 3}
   resourceIcons:
   - {fileID: 1662910832356577875, guid: f15795a3a0081ae4ea2751e661a8ba27, type: 3}

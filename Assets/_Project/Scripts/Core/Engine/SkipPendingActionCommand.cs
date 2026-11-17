@@ -257,6 +257,21 @@ namespace NomadCity.Core.Engine
                 return false;
             }
 
+            // 卡牌效果授予的行动必须先做完：没有合法目标时代它放弃，有目标时不能替它草率结算。
+            foreach (PendingAction pending in state.PendingActions)
+            {
+                if (pending.Seat != seat) continue;
+
+                if (PendingActionRules.HasAnyLegalTarget(state, seat, pending.Kind, pending.Limits))
+                {
+                    error = $"该玩家还有卡牌效果授予的「{pending.Label}」没完成。";
+                    return false;
+                }
+
+                command = new AbandonPendingActionCommand(seat, pending.Id);
+                return true;
+            }
+
             // 城市移动的第三步还没放影响力：先补上，再跳过行动。
             if (state.CityMoveOriginNodeId >= 0)
             {
@@ -336,6 +351,10 @@ namespace NomadCity.Core.Engine
                 return CommandResult.Fail("现在不是玩家行动阶段，不能放弃行动。");
             if (state.ActiveSeat != ActorSeat)
                 return CommandResult.Fail("还没轮到该玩家行动。");
+
+            // 卡牌效果授予的行动必须执行，不能用「放弃主要行动」绕过。
+            if (state.HasPending(ActorSeat))
+                return CommandResult.Fail("还有卡牌效果授予的行动没有完成，先把它做完。");
 
             return CommandResult.Success;
         }

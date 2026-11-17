@@ -65,6 +65,16 @@ namespace NomadCity.UI
         /// <summary>点了第几个牌位（0 起）。</summary>
         public event Action<int> CardClicked;
 
+        /// <summary>点了「已盖放」小按钮：查看所有玩家当前盖放在场上的角色牌。</summary>
+        public event Action PlacedCardsClicked;
+
+        /// <summary>点了「弃牌区」小按钮：查看所有玩家的角色牌弃牌区。</summary>
+        public event Action DiscardPileClicked;
+
+        /// <summary>手牌区旁边的两个查看按钮（运行时按小标签的样子复制出来，不改场景）。</summary>
+        private Button placedButton;
+        private Button discardButton;
+
         /// <summary>
         /// 每个牌位 Image 在场景里原本的 sprite（占位贴图）。刷新时若该牌位没有卡面就退回它，
         /// 而不是把 Image 关掉 —— 关掉会连带关掉 Button 的 Target Graphic，那个牌位就点不动了。
@@ -123,6 +133,8 @@ namespace NomadCity.UI
 
             ApplyVisibility();   // 开局默认收起：点击小标签才显示
 
+            EnsurePileButtons();
+
             for (int i = 0; i < cardButtons.Length; i++)
             {
                 Button button = cardButtons[i];
@@ -133,6 +145,85 @@ namespace NomadCity.UI
                 int index = i; // 闭包捕获：每个按钮绑定自己的下标
                 button.onClick.AddListener(() => CardClicked?.Invoke(index));
             }
+        }
+
+        /// <summary>
+        /// 在小标签上方叠两个查看按钮（「已盖放」「弃牌区」）：直接按小标签的样子复制，
+        /// 位置相对小标签往上排，所以不用在场景里手动摆，也不会因为手牌收起而消失。
+        /// </summary>
+        private void EnsurePileButtons()
+        {
+            if (toggleButton == null) return;
+
+            placedButton = CloneSideButton("Btn_PlacedCards", "已盖放", 1, () => PlacedCardsClicked?.Invoke());
+            discardButton = CloneSideButton("Btn_DiscardPile", "弃牌区", 2, () => DiscardPileClicked?.Invoke());
+        }
+
+        private Button CloneSideButton(string name, string label, int slot, Action onClick)
+        {
+            Button clone = Instantiate(toggleButton, toggleButton.transform.parent);
+            clone.name = name;
+
+            var rect = (RectTransform)clone.transform;
+            var template = (RectTransform)toggleButton.transform;
+            rect.anchorMin = template.anchorMin;
+            rect.anchorMax = template.anchorMax;
+            rect.pivot = template.pivot;
+            rect.sizeDelta = template.sizeDelta;
+            rect.anchoredPosition = template.anchoredPosition
+                                    + new Vector2(0f, (template.sizeDelta.y + 8f) * slot);
+
+            clone.onClick.RemoveAllListeners();
+            clone.onClick.AddListener(() => onClick());
+
+            TMP_Text text = clone.GetComponentInChildren<TMP_Text>(true);
+            if (text != null) text.text = label;
+
+            NeutralizeDisabledTint(clone);
+            UiButtonTint.Ensure(clone);
+            clone.gameObject.SetActive(true);
+            clone.interactable = true;
+            return clone;
+        }
+
+        /// <summary>
+        /// 把「已盖放 / 弃牌区」两个按钮挪到指定面板（操作区弹窗）的正上方、左右并排，
+        /// 避免它们待在手牌区时遮住行动记录。GameScreenController 拿到操作区面板后调用一次；
+        /// 没调用时按钮仍按小标签的位置向上叠（回退到旧布局）。
+        /// </summary>
+        public void PlacePileButtonsAbove(RectTransform actionPanelContent)
+        {
+            if (placedButton == null || discardButton == null || actionPanelContent == null) return;
+            if (toggleButton == null) return;
+            if (!(actionPanelContent.parent is RectTransform parent)) return;
+
+            // 操作区顶边离画布顶端只剩一小条，所以按钮做得比小标签矮一点，刚好塞进操作区与状态栏之间。
+            Vector2 templateSize = ((RectTransform)toggleButton.transform).sizeDelta;
+            var size = new Vector2(templateSize.x, 56f);
+            const float aboveGap = 8f;      // 按钮底边离操作区顶边的距离
+            const float buttonSpacing = 12f; // 两个按钮之间的间距
+
+            float topY = actionPanelContent.anchoredPosition.y + actionPanelContent.rect.height * 0.5f;
+            float centerY = topY + size.y * 0.5f + aboveGap;
+            float halfGap = size.x * 0.5f + buttonSpacing * 0.5f;
+            float centerX = actionPanelContent.anchoredPosition.x;
+
+            ApplyPileButtonRect((RectTransform)placedButton.transform, parent,
+                new Vector2(centerX - halfGap, centerY), size);
+            ApplyPileButtonRect((RectTransform)discardButton.transform, parent,
+                new Vector2(centerX + halfGap, centerY), size);
+        }
+
+        private static void ApplyPileButtonRect(RectTransform rect, RectTransform parent,
+            Vector2 anchoredPos, Vector2 size)
+        {
+            rect.SetParent(parent, false);
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = size;
+            rect.anchoredPosition = anchoredPos;
+            rect.SetAsLastSibling();
         }
 
         /// <summary>

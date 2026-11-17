@@ -423,9 +423,24 @@ namespace NomadCity.Tests
             EffectReport report = EffectResolver.Execute(state, 0, Role(JijingCard).TacticsOps);
 
             Assert.IsTrue(report.AnyApplied, report.Describe());
+            Assert.AreEqual(0, player.Resources.Get(ResourceType.Oriron), "三异铁照常付掉");
+
+            // 「免费城市移动」交给界面走完整流程：候选只剩「相邻且有自己的影响力」的资源点。
+            PendingAction pending = state.FindPending(0, PendingActionKind.CityMove);
+            Assert.IsNotNull(pending, "应当登记一条待执行的城市移动");
+            Assert.IsTrue(pending.Limits.Free, "这次移动免费");
+            Assert.AreEqual(PendingNodeScope.OwnInfluence, pending.Limits.NodeScope,
+                "只能停靠在自己有影响力的资源点");
+            Assert.AreEqual(0, player.MobileCityNodeId, "还没真的移动");
+
+            CommandResult moved = engine.Dispatch(new MoveMobileCityCommand(0, 1, pending.Id));
+            Assert.IsTrue(moved.Ok, moved.Error);
+            CommandResult placed = engine.Dispatch(new MoveCityInfluenceCommand(0, 0, pending.Id));
+            Assert.IsTrue(placed.Ok, placed.Error);
+
             Assert.AreEqual(1, player.MobileCityNodeId);
-            Assert.AreEqual(0, player.Resources.Get(ResourceType.Oriron));
             Assert.AreEqual(0, state.Map.Node(0).Slots.OwnerOf(0), "出发点放下 1 个影响力");
+            Assert.AreEqual(29, player.MarkersInSupply);
         }
 
         [Test]
