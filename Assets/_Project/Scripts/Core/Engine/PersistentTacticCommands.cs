@@ -39,6 +39,10 @@ namespace NomadCity.Core.Engine
             if (state.Phase != TurnPhase.Cleanup)
                 return CommandResult.Fail("只有在收尾阶段才能发动持续计谋的这个能力。");
 
+            // 收尾按本回合行动顺序逐个座位结算：还没轮到这位玩家时不能先发动。
+            if (state.CleanupIndex >= 0 && state.CleanupSeat != ActorSeat)
+                return CommandResult.Fail("收尾阶段按行动顺序结算，现在还没轮到你。");
+
             PersistentTacticState tactic = state.FindPersistentTactic(ActorSeat, Kind);
             if (tactic == null) return CommandResult.Fail("你没有这张持续计谋牌。");
             if (tactic.UsedCleanupThisTurn) return CommandResult.Fail("这个收尾阶段已经发动过它了。");
@@ -52,6 +56,41 @@ namespace NomadCity.Core.Engine
         {
             PersistentTacticState tactic = state.FindPersistentTactic(ActorSeat, Kind);
             PersistentTacticRules.UseCleanup(state, tactic, choices);
+
+            // 这位玩家没有别的可选效果了：把收尾推进到下一位（全部轮完则进入下一回合）。
+            CleanupResolver.AdvanceIfDone(state);
+        }
+    }
+
+    /// <summary>
+    /// 收尾阶段「我这一位没有要发动的效果了」：只把自己这一格跳过，轮到行动顺序里的下一位。
+    /// 与 <see cref="AdvancePhaseCommand"/> 不同 —— 它不会替别人把整个收尾一起跳过。
+    /// </summary>
+    public sealed class EndCleanupSeatCommand : ICommand
+    {
+        public EndCleanupSeatCommand(int seat) => ActorSeat = seat;
+
+        public int ActorSeat { get; }
+        public string Name => "结束自己的收尾阶段";
+        public bool ConsumesAction => false;
+        public IEffectChoices EffectChoices => null;
+
+        public CommandResult Validate(GameState state)
+        {
+            if (state.Phase != TurnPhase.Cleanup)
+                return CommandResult.Fail("现在不是收尾阶段。");
+            if (state.CleanupIndex < 0)
+                return CommandResult.Fail("收尾阶段已经结算完了。");
+            if (state.CleanupSeat != ActorSeat)
+                return CommandResult.Fail("现在不是你在结算收尾。");
+
+            return CommandResult.Success;
+        }
+
+        public void Apply(GameState state)
+        {
+            state.CleanupIndex++;
+            CleanupResolver.Advance(state);
         }
     }
 }

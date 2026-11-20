@@ -2245,6 +2245,18 @@ namespace NomadCity.Core.Engine
         // —— 条件段可行性试算 ——
 
         /// <summary>
+        /// 条件段能不能被完整支付（只读试算，供命令校验 / 界面在派发前拦下）。
+        /// 条件不满足时应该停在「选选项」这一步让玩家改选，而不是把事件当作已结算。
+        /// </summary>
+        public static bool OptionCostFeasible(GameState state, int seat, EventOption option,
+            int anchorNodeId, IEffectExtension extension, out string reason)
+        {
+            reason = null;
+            if (state == null || option == null || !option.HasCost) return true;
+            return CostFeasible(state, seat, option.Cost, anchorNodeId, extension, out reason);
+        }
+
+        /// <summary>
         /// 条件段可否被**完整**执行（只读试算，不改 state，§11.2.2）。
         /// 用局部副本累计消耗，避免「多步条件段里前面几步把钱花光、后面几步才发现不够」的漏判。
         /// </summary>

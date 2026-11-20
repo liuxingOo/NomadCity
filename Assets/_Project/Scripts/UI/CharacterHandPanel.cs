@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -102,6 +103,22 @@ namespace NomadCity.UI
             ApplyVisibility();
         }
 
+        /// <summary>
+        /// 强制展开 / 收起：开局「7 选 5」这类必须对着牌面做选择的步骤由控制器直接摊开手牌，
+        /// 不再要求玩家先点一下小标签（默认是收起的）。
+        /// </summary>
+        public void SetExpanded(bool value)
+        {
+            if (expanded == value)
+            {
+                ApplyVisibility();
+                return;
+            }
+
+            expanded = value;
+            ApplyVisibility();
+        }
+
         /// <summary>真正切显隐。宿主容器始终激活（避免 Awake 里的按钮绑定失效），只切 Root 的显隐。</summary>
         private void ApplyVisibility()
         {
@@ -123,6 +140,8 @@ namespace NomadCity.UI
             {
                 NeutralizeDisabledTint(toggleButton);
                 UiButtonTint.Ensure(toggleButton);
+                // 小标签克隆自白色点击区，配色统一成操作区那块深色；否则点亮时是一块白板。
+                UiButtonTint.ApplyImagePalette(toggleButton, operationPalette);
                 toggleButton.onClick.AddListener(ToggleExpanded);
             }
             else
@@ -155,9 +174,34 @@ namespace NomadCity.UI
         {
             if (toggleButton == null) return;
 
-            placedButton = CloneSideButton("Btn_PlacedCards", "已盖放", 1, () => PlacedCardsClicked?.Invoke());
-            discardButton = CloneSideButton("Btn_DiscardPile", "弃牌区", 2, () => DiscardPileClicked?.Invoke());
+            // 只建一次：这个方法会被开局摆放再调一次，重复克隆会出现两套「已盖放 / 弃牌区」。
+            if (placedButton != null && discardButton != null) return;
+
+            placedButton = CloneSideButton("Btn_PlacedCards", "盖放", 1,
+                () => { if (pileButtonsLocked) LockedClicked?.Invoke("盖放"); else PlacedCardsClicked?.Invoke(); });
+            discardButton = CloneSideButton("Btn_DiscardPile", "弃牌", 2,
+                () => { if (pileButtonsLocked) LockedClicked?.Invoke("弃牌"); else DiscardPileClicked?.Invoke(); });
+
+            // 先用隐藏占位：开局（企业家 / 企业抽选）时它们还没被摆到状态栏下方，
+            // 直接显示会叠在操作区第一列上（那里原本是手牌小标签的上方）。
+            placedButton.gameObject.SetActive(false);
+            discardButton.gameObject.SetActive(false);
         }
+
+        /// <summary>
+        /// 操作区按钮的底色：与场景里「聊天 / 设施 / 图鉴」等按钮的 Normal Color 完全一致。
+        /// 手牌小标签本身就是操作区的 Btn_Cards，「盖放 / 弃牌」也是照它克隆出来的，
+        /// 三颗按钮都按这同一个值染色，才不会出现「比别人浅一块」。
+        /// </summary>
+        private static readonly Color operationPalette = new Color(0.22745098f, 0.25490198f, 0.28235295f, 1f);
+
+        /// <summary>开局准备期间「盖放 / 弃牌」被锁：按钮照常可点（不改色），点了只弹提示。</summary>
+        public void SetPileButtonsLocked(bool locked) => pileButtonsLocked = locked;
+
+        /// <summary>被锁住时点了「盖放 / 弃牌」：把按钮名交给界面层去弹提示。</summary>
+        public Action<string> LockedClicked;
+
+        private bool pileButtonsLocked;
 
         private Button CloneSideButton(string name, string label, int slot, Action onClick)
         {
@@ -179,50 +223,54 @@ namespace NomadCity.UI
             TMP_Text text = clone.GetComponentInChildren<TMP_Text>(true);
             if (text != null) text.text = label;
 
+            // 克隆自手牌小标签：换成和操作区一致的深色底，文字保持浅色；
+            // 禁用色也一并拉平，避免禁用后整块变白 / 变浅。
             NeutralizeDisabledTint(clone);
             UiButtonTint.Ensure(clone);
+            UiButtonTint.ApplyImagePalette(clone, operationPalette);
+
             clone.gameObject.SetActive(true);
             clone.interactable = true;
             return clone;
         }
 
         /// <summary>
-        /// 把「已盖放 / 弃牌区」两个按钮挪到指定面板（操作区弹窗）的正上方、左右并排，
-        /// 避免它们待在手牌区时遮住行动记录。GameScreenController 拿到操作区面板后调用一次；
-        /// 没调用时按钮仍按小标签的位置向上叠（回退到旧布局）。
+        /// 把「已盖放 / 弃牌区」两个按钮挂到最后一排玩家状态栏的下面、左右并排。
+        ///
+        /// 直接作为那一行的子物体、按行的锚点摆 —— 不做世界坐标换算，也不去挪状态栏本身，
+        /// 行在哪里它们就跟到哪里，之间只留 8px。
         /// </summary>
-        public void PlacePileButtonsAbove(RectTransform actionPanelContent)
+        public void PlacePileButtonsAbove(RectTransform lastStatusRow)
         {
-            if (placedButton == null || discardButton == null || actionPanelContent == null) return;
-            if (toggleButton == null) return;
-            if (!(actionPanelContent.parent is RectTransform parent)) return;
+            if (lastStatusRow == null) return;
 
-            // 操作区顶边离画布顶端只剩一小条，所以按钮做得比小标签矮一点，刚好塞进操作区与状态栏之间。
-            Vector2 templateSize = ((RectTransform)toggleButton.transform).sizeDelta;
-            var size = new Vector2(templateSize.x, 56f);
-            const float aboveGap = 8f;      // 按钮底边离操作区顶边的距离
-            const float buttonSpacing = 12f; // 两个按钮之间的间距
+            EnsurePileButtons();
+            if (placedButton == null || discardButton == null || toggleButton == null) return;
 
-            float topY = actionPanelContent.anchoredPosition.y + actionPanelContent.rect.height * 0.5f;
-            float centerY = topY + size.y * 0.5f + aboveGap;
-            float halfGap = size.x * 0.5f + buttonSpacing * 0.5f;
-            float centerX = actionPanelContent.anchoredPosition.x;
+            var size = new Vector2(((RectTransform)toggleButton.transform).sizeDelta.x, 56f);
+            const float gap = 8f;     // 与状态栏底边的距离
+            const float spacing = 12f; // 两个按钮之间的间距
+            float halfGap = size.x * 0.5f + spacing * 0.5f;
 
-            ApplyPileButtonRect((RectTransform)placedButton.transform, parent,
-                new Vector2(centerX - halfGap, centerY), size);
-            ApplyPileButtonRect((RectTransform)discardButton.transform, parent,
-                new Vector2(centerX + halfGap, centerY), size);
+            PlaceBelowRow((RectTransform)placedButton.transform, lastStatusRow,
+                new Vector2(-halfGap, -gap), size);
+            PlaceBelowRow((RectTransform)discardButton.transform, lastStatusRow,
+                new Vector2(halfGap, -gap), size);
+
+            // 摆好位置才显示：开局阶段它们一直是隐藏的，避免叠在操作区上。
+            placedButton.gameObject.SetActive(true);
+            discardButton.gameObject.SetActive(true);
         }
 
-        private static void ApplyPileButtonRect(RectTransform rect, RectTransform parent,
-            Vector2 anchoredPos, Vector2 size)
+        /// <summary>锚到目标行的底边正中，向下伸出去。</summary>
+        private static void PlaceBelowRow(RectTransform rect, RectTransform row, Vector2 offset, Vector2 size)
         {
-            rect.SetParent(parent, false);
-            rect.anchorMin = new Vector2(0.5f, 0.5f);
-            rect.anchorMax = new Vector2(0.5f, 0.5f);
-            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.SetParent(row, false);
+            rect.anchorMin = new Vector2(0.5f, 0f);
+            rect.anchorMax = new Vector2(0.5f, 0f);
+            rect.pivot = new Vector2(0.5f, 1f);
             rect.sizeDelta = size;
-            rect.anchoredPosition = anchoredPos;
+            rect.anchoredPosition = offset;
             rect.SetAsLastSibling();
         }
 
@@ -282,6 +330,41 @@ namespace NomadCity.UI
         }
 
         /// <summary>
+        /// 某张角色牌卡面的 Sprite（与手牌托盘里显示的完全一致）。
+        /// 「7 选 5」弹窗不借手牌区显示，但卡面资源还在这里取，避免两处映射不一致。
+        /// </summary>
+        public Sprite FaceFor(int cardId)
+        {
+            int faceIndex = SpriteIndexOf(cardId);
+            Sprite face = faceIndex >= 0 && faceIndex < cardFaces.Length ? cardFaces[faceIndex] : null;
+            return face != null ? face : OperatorCardArt.SpriteFor(cardId);
+        }
+
+        /// <summary>
+        /// 去掉基本平面以外的字符（emoji 等代理对）：字体里没有这些字形，
+        /// TMP 会刷「Unicode value \uD83D not found」并把它们显示成方框。
+        /// </summary>
+        private static string SafeLabel(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            StringBuilder builder = null;
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (char.IsHighSurrogate(c) || char.IsLowSurrogate(c))
+                {
+                    builder ??= new StringBuilder(text, 0, i, text.Length);
+                    continue;
+                }
+
+                builder?.Append(c);
+            }
+
+            return builder != null ? builder.ToString() : text;
+        }
+
+        /// <summary>
         /// 按当前手牌刷新牌位：写入牌名、按需显示。
         /// <paramref name="interactable"/> 只有盖放阶段才为 true；但牌位**始终可点** ——
         /// 不能盖放的时候点上去只是打开放大卡面看一眼，能盖放时也是先放大、再在放大弹窗里确认，
@@ -324,7 +407,7 @@ namespace NomadCity.UI
 
                 // 卡面自带角色名，有卡面时就不再叠文本（否则名字压在图上）。
                 if (i < cardLabels.Length && cardLabels[i] != null)
-                    cardLabels[i].text = cardId >= 0 && face == null ? NameOf(state, cardId) : string.Empty;
+                    cardLabels[i].text = cardId >= 0 && face == null ? SafeLabel(NameOf(state, cardId)) : string.Empty;
             }
 
             LayoutCards();

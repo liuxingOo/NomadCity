@@ -68,6 +68,56 @@ namespace NomadCity.Core.Engine
         }
 
         /// <summary>
+        /// 开局企业抽选还没完成时给玩家看的说明：按人数算出正确的「抽 N 选 M」
+        /// （3／4 人局抽 2 选 1，2 人局抽 4 选 2），并点名还差谁没选完。
+        /// </summary>
+        public static string DescribeDraftPending(GameState state)
+        {
+            EnterpriseState enterprises = state.Enterprises;
+            var pending = new List<string>();
+            for (int seat = 0; seat < enterprises.ChosenBoards.Count; seat++)
+            {
+                if (enterprises.SeatDraftDone(seat)) continue;
+                int left = enterprises.PicksPerPlayer - enterprises.ChosenCount(seat);
+                if (left < 1) left = 1;
+                pending.Add($"玩家 {seat + 1}（还差 {left} 张）");
+            }
+
+            string who = pending.Count > 0 ? string.Join("、", pending) : "其他玩家";
+            return $"请先完成合作企业的「抽 {enterprises.OffersPerSeat} 选 {enterprises.PicksPerPlayer}」："
+                   + $"{who} 还没选完，之后才能决定初始资源点。";
+        }
+
+        /// <summary>
+        /// 开局抽选的「半完成」自愈：所有座位都已经选满，但 <see cref="EnterpriseState.DraftDone"/>
+        /// 仍为 false（历史原因是最后一次选择没能走完收尾这一步）。
+        /// 这种状态下谁都不能再选（都选满了），也选不了初始资源点，整局就卡死在开局。
+        /// 返回是否补完了状态。
+        /// </summary>
+        public static bool RepairDraftCompletionIfNeeded(GameState state)
+        {
+            if (!Enabled(state)) return false;
+
+            EnterpriseState enterprises = state.Enterprises;
+            if (enterprises.DraftDone || enterprises.ChosenBoards.Count == 0) return false;
+
+            for (int seat = 0; seat < enterprises.ChosenBoards.Count; seat++)
+                if (!enterprises.SeatDraftDone(seat)) return false;
+
+            // 选完的座位把这几张没被选中的牌还回牌堆（正常流程在最后一次选择里做，这里补齐）。
+            for (int seat = 0; seat < enterprises.Offers.Count; seat++)
+            {
+                foreach (int offered in enterprises.Offers[seat]) enterprises.Deck.Add(offered);
+                enterprises.Offers[seat].Clear();
+            }
+
+            enterprises.DraftDone = true;
+            CompleteBoardSet(state);
+            EnterpriseEffectResolver.PickInitialRhineDepartmentIfNeeded(state);
+            return true;
+        }
+
+        /// <summary>
         /// 企业板上场时，每名玩家在这块板的 0 级位置各放 1 个玩家标记。
         /// 这些标记来自每人 30 个的供应堆（<see cref="PlayerState.MarkersInSupply"/>），放上去就要扣掉。
         /// </summary>
@@ -85,7 +135,8 @@ namespace NomadCity.Core.Engine
         /// <summary>
         /// 结算某一级带来的即时奖励（升级时调用）。
         /// 企业特效（<see cref="EnterpriseLevel.IsEffect"/>）只解锁，不在这里结算；
-        /// 莱茵生命的 2–5 级奖励由当前科室板决定。
+        /// 莱茵生命的 2–5 级奖励由当前科室板决定；其余升级奖励交给企业特效解析器跑一遍，
+        /// 这样「干员特派」这类带特殊结算的即时奖励也能正常生效。
         /// 返回这一级的效果明细（升级命令带点选时，界面状态行用它显示做了什么）。
         /// </summary>
         public static EffectReport SettleLevel(GameState state, int boardId, int seat, int level,
@@ -100,15 +151,7 @@ namespace NomadCity.Core.Engine
 
             if (entry.IsEffect) return null;
 
-            EffectReport report = entry.Option != null
-                ? EffectResolver.ExecuteOption(state, seat, entry.Option, true, choices,
-                    EnterpriseEffectExtension.Instance)
-                : null;
-
-            if (entry.Special == EnterpriseSpecial.OpponentLoseScore)
-                LetOneOpponentLoseScore(state, seat, 1, choices);
-
-            return report;
+            return EnterpriseEffectResolver.Resolve(state, seat, boardId, level, choices);
         }
 
         /// <summary>

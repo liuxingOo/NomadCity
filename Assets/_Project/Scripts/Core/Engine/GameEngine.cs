@@ -84,6 +84,10 @@ namespace NomadCity.Core.Engine
         /// </summary>
         public CommandResult Dispatch(ICommand command)
         {
+            // 开局企业抽选：所有人都已选满却没有收尾（DraftDone 仍为 false）时先补完，
+            // 否则「选择初始资源点」会被一直挡下，整局卡在开局入场。
+            EnterpriseRules.RepairDraftCompletionIfNeeded(State);
+
             TurnPhase beforePhase = State.Phase;
             int beforeTurn = State.TurnNumber;
             int beforeSeat = State.ActiveSeat;

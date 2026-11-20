@@ -95,9 +95,10 @@ namespace NomadCity.Core.Engine
             if (state.Player(ActorSeat).MobileCityNodeId >= 0)
                 return CommandResult.Fail("你已经决定过初始资源点了。");
 
-            // 企业扩展：企业抽选（抽 2 选 1）排在初始资源点之前（§4.3 步 2 与扩展设置）。
+            // 企业扩展：企业抽选排在初始资源点之前（§4.3 步 2 与扩展设置）。
+            // 人数会影响抽选张数（3／4 人「抽 2 选 1」、2 人「抽 4 选 2」），所以说明文字由规则层生成。
             if (EnterpriseRules.Enabled(state) && !state.Enterprises.DraftDone)
-                return CommandResult.Fail("请先完成合作企业的「抽 2 选 1」，再决定初始资源点。");
+                return CommandResult.Fail(EnterpriseRules.DescribeDraftPending(state));
 
             int chooser = NextChooser(state);
             if (chooser != ActorSeat) return CommandResult.Fail($"当前轮到玩家 {chooser + 1} 决定初始资源点。");
@@ -296,6 +297,16 @@ namespace NomadCity.Core.Engine
                 return CommandResult.Fail($"资源点上记录的事件牌 {node.EventCardId} 不是有效的事件牌。");
             if (OptionIndex < 0 || OptionIndex >= card.Options.Count)
                 return CommandResult.Fail($"事件牌「{card.Name}」没有第 {OptionIndex + 1} 个选项。");
+
+            // 条件段付不起时不能结算：一旦结算，资源点就会被标记成「已处理」，
+            // 玩家既拿不到奖励、也没法改选其它选项 —— 只能停在这里让他回退重选。
+            EventOption option = card.Options[OptionIndex];
+            if (GrantRewards && AcceptCost && option.HasCost
+                && !EffectResolver.OptionCostFeasible(state, ActorSeat, option, NodeId,
+                    EnterpriseEffectExtension.Instance, out string reason))
+            {
+                return CommandResult.Fail($"条件不满足：{reason}。可以改选这张事件卡上的其它选项。");
+            }
 
             return CommandResult.Success;
         }

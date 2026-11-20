@@ -79,7 +79,24 @@ namespace NomadCity.UI
             return sprites[index];
         }
 
-        private static Texture2D LoadTexture(string path)
+        /// <summary>
+        /// 打包后程序目录里没有 Assets/ 文件夹，项目相对路径读不到文件。
+        /// 这张拼版图另存了一份在 <c>Assets/StreamingAssets/_Project/Art/…</c>，
+        /// 打包时会原样复制到 <c>&lt;游戏&gt;_Data/StreamingAssets/</c>，这里把路径映射过去。
+        /// 换素材时记得同步覆盖 StreamingAssets 里的那一份。
+        /// </summary>
+        private static string RuntimeFilePath(string projectPath)
+        {
+#if UNITY_EDITOR
+            return projectPath;
+#else
+            const string prefix = "Assets/";
+            string relative = projectPath.StartsWith(prefix) ? projectPath.Substring(prefix.Length) : projectPath;
+            return System.IO.Path.Combine(Application.streamingAssetsPath, relative);
+#endif
+        }
+
+        internal static Texture2D LoadTexture(string path)
         {
 #if UNITY_EDITOR
             Texture2D asset = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>(path);
@@ -90,7 +107,7 @@ namespace NomadCity.UI
 #endif
             try
             {
-                byte[] bytes = System.IO.File.ReadAllBytes(path);
+                byte[] bytes = System.IO.File.ReadAllBytes(RuntimeFilePath(path));
                 if (bytes == null || bytes.Length < 16) return null;
                 var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
                 tex.LoadImage(bytes, false);

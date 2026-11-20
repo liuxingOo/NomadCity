@@ -66,5 +66,8 @@ namespace NomadCity.Core.Net
 
         /// <summary>建设的第三步：设施落地后结算入场效果（弹窗点选分支 / 落点）。</summary>
         ResolveFacilityEntryEffect = 40,
+
+        /// <summary>收尾阶段「我这一位没有要发动的效果了」，只跳过自己这一格。</summary>
+        EndCleanupSeat = 41,
     }
 }

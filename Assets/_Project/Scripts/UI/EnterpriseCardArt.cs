@@ -189,6 +189,23 @@ namespace NomadCity.UI
         }
 
         /// <summary>
+        /// 打包后程序目录里没有 Assets/ 文件夹，项目相对路径读不到文件。
+        /// 这些原始图片另存了一份在 <c>Assets/StreamingAssets/_Project/Art/…</c>，
+        /// 打包时会原样复制到 <c>&lt;游戏&gt;_Data/StreamingAssets/</c>，这里把路径映射过去。
+        /// 换素材时记得同步覆盖 StreamingAssets 里的那一份。
+        /// </summary>
+        private static string RuntimeFilePath(string projectPath)
+        {
+#if UNITY_EDITOR
+            return projectPath;
+#else
+            const string prefix = "Assets/";
+            string relative = projectPath.StartsWith(prefix) ? projectPath.Substring(prefix.Length) : projectPath;
+            return System.IO.Path.Combine(Application.streamingAssetsPath, relative);
+#endif
+        }
+
+        /// <summary>
         /// 通用纹理加载：编辑器里优先用 AssetDatabase（共享纹理，省内存）；
         /// 拿不到时自己解码一份副本，保证 Runtime 也能显示。
         /// </summary>
@@ -203,7 +220,7 @@ namespace NomadCity.UI
 #endif
             try
             {
-                byte[] bytes = System.IO.File.ReadAllBytes(path);
+                byte[] bytes = System.IO.File.ReadAllBytes(RuntimeFilePath(path));
                 if (bytes == null || bytes.Length < 16) return null;
                 var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
                 tex.LoadImage(bytes, false);

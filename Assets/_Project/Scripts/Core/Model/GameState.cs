@@ -132,6 +132,22 @@ namespace NomadCity.Core.Model
         public readonly List<DeferredEffect> DeferredEffects = new();
 
         /// <summary>
+        /// 收尾阶段（§8.1）按本回合行动顺序逐个座位结算：元素是座位号，<see cref="CleanupIndex"/> 指向当前这位。
+        /// 没有可触发效果的座位会被直接跳过，并记进 <see cref="CleanupSkippedSeats"/>。
+        /// </summary>
+        public readonly List<int> CleanupOrder = new();
+
+        /// <summary>收尾阶段的进度下标；-1 = 不在逐个结算（还没进收尾，或已经结算完）。</summary>
+        public int CleanupIndex = -1;
+
+        /// <summary>收尾阶段「没有可以触发的效果」被跳过的座位（供行动记录显示）。</summary>
+        public readonly List<int> CleanupSkippedSeats = new();
+
+        /// <summary>收尾阶段当前停下来等哪一位玩家决定；-1 = 没有在等。</summary>
+        public int CleanupSeat =>
+            CleanupIndex >= 0 && CleanupIndex < CleanupOrder.Count ? CleanupOrder[CleanupIndex] : -1;
+
+        /// <summary>
         /// 本回合收尾阶段「传递起始标记」时，起始玩家改由谁担任（「联邦理事会」的效果）；-1 表示不改变。
         /// 由效果写入，下一回合由 <see cref="Engine.TurnFlow"/> 读取后复位。
         /// </summary>
@@ -277,6 +293,7 @@ namespace NomadCity.Core.Model
                 PendingStartMarkerSeat = PendingStartMarkerSeat,
                 LastCityMoveRouteId = LastCityMoveRouteId,
                 ActiveSpecialActionPatternId = ActiveSpecialActionPatternId,
+                CleanupIndex = CleanupIndex,
                 Enterprises = Enterprises == null ? new EnterpriseState() : Enterprises.Clone(),
                 NextPendingActionId = NextPendingActionId,
             };
@@ -292,6 +309,8 @@ namespace NomadCity.Core.Model
             copy.EventDeckRed.AddRange(EventDeckRed);
             copy.CityPatternCards.AddRange(CityPatternCards);
             copy.DeferredEffects.AddRange(DeferredEffects); // DeferredEffect 是只读结构体，逐项复制即可
+            copy.CleanupOrder.AddRange(CleanupOrder);
+            copy.CleanupSkippedSeats.AddRange(CleanupSkippedSeats);
 
             foreach (CityPatternState pattern in CityPatternStates)
             {

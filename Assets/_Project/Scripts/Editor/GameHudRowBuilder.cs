@@ -63,8 +63,11 @@ namespace NomadCity.EditorTools
         private const float BaseNameWidth = 120f;
         private const float BaseNameHeight = 28f;
 
-        /// <summary>昵称底边距行底：负值就是压到行底以下，正好压在头像框的下沿（现场按 -6 调好）。</summary>
-        private const float BaseNameBottom = -6f;
+        /// <summary>
+        /// 昵称底边距行底：正值表示整个名字都在行内。以前是 -6（压在行底以下），
+        /// 但只要行底画了「正在行动」的描边，金线就会从昵称中间穿过去，所以抬进行内。
+        /// </summary>
+        private const float BaseNameBottom = 8f;
 
         private const float BaseNameFontSize = 20f;
 

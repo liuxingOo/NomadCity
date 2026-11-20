@@ -328,14 +328,12 @@ namespace NomadCity.Core.Model
             // 影响力被移除的玩家各得 1 分，你额外再得 1 分。
             new[] { RewardOp.PlaceHighway() },
 
-            // 玛恩纳·策略「公事公办」：选 1 家企业 → 所有玩家提升 1 级；或 选 1 家企业 → 触发 1 个已解锁企业特效。
+            // 玛恩纳·策略「公事公办」：卡面两行是**按顺序**执行，不是二选一（2026-11-19 核对实卡）：
+            // ① 选 1 家企业，所有玩家提升 1 级；② 再选 1 家企业，触发其 1 个已解锁特效。
             new[]
             {
-                RewardOp.Alternative(
-                    new EffectBranch("所有玩家提升 1 级该企业",
-                        RewardOp.AdvanceEnterpriseAllPlayers()),
-                    new EffectBranch("触发 1 个已解锁的企业特效",
-                        RewardOp.TriggerEnterpriseEffectOnce())),
+                RewardOp.AdvanceEnterpriseAllPlayers(),
+                RewardOp.TriggerEnterpriseEffectOnce(),
             },
         };
 

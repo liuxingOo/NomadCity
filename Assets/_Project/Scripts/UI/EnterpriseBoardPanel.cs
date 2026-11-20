@@ -96,6 +96,7 @@ namespace NomadCity.UI
         private Mode mode = Mode.View;
         private int seat = -1;
         private int zoomBoard = -1;       // 放大的整块企业板
+        private int zoomDepartment = -1;  // 放大的科室板（只在 RhineDepartment 模式下用）
         private int zoomedStripBoard = -1; // 放大的某级效果条（-1=没开）
         private int zoomedStripLevel = -1;
         private string titleText = "合作企业";
@@ -187,7 +188,7 @@ namespace NomadCity.UI
             root.SetActive(true);
             root.transform.SetAsLastSibling();
             state = gameState;
-            zoomBoard = openBoard; zoomedStripBoard = -1; zoomedStripLevel = -1;
+            zoomBoard = openBoard; zoomedStripBoard = -1; zoomedStripLevel = -1; zoomDepartment = -1;
             signature = string.Empty;
             Rebuild();
         }
@@ -292,7 +293,8 @@ namespace NomadCity.UI
             backRect.sizeDelta = new Vector2(84f, 32f);
             backButton.onClick.AddListener(() =>
             {
-                if (zoomedStripBoard >= 0) { zoomedStripBoard = -1; zoomedStripLevel = -1; Rebuild(); }
+                if (zoomDepartment >= 0) { zoomDepartment = -1; Rebuild(); }
+                else if (zoomedStripBoard >= 0) { zoomedStripBoard = -1; zoomedStripLevel = -1; Rebuild(); }
                 else if (zoomBoard >= 0)
                 {
                     // 图鉴的单卡视图没有「一排板」可回，直接退出回图鉴。
@@ -337,7 +339,7 @@ namespace NomadCity.UI
                 hint.rectTransform.sizeDelta = new Vector2(windowWidth - 80f, 24f);
             }
             if (backButton != null)
-                backButton.gameObject.SetActive(zoomBoard >= 0 || zoomedStripBoard >= 0);
+                backButton.gameObject.SetActive(zoomBoard >= 0 || zoomedStripBoard >= 0 || zoomDepartment >= 0);
             // 开局选企业 / 选科室板是必要流程：不给关闭按钮，必须选完才能继续
             if (closeButton != null) closeButton.gameObject.SetActive(!IsMandatory);
 
@@ -350,7 +352,8 @@ namespace NomadCity.UI
 
             if (mode == Mode.RhineDepartment)
             {
-                BuildDepartmentRow();
+                if (zoomDepartment >= 0) BuildZoomedDepartment(zoomDepartment);
+                else BuildDepartmentRow();
                 return;
             }
 
@@ -365,7 +368,7 @@ namespace NomadCity.UI
         /// </summary>
         private void ComputeWindowSize()
         {
-            if (zoomBoard >= 0 || zoomedStripBoard >= 0)
+            if (zoomBoard >= 0 || zoomedStripBoard >= 0 || zoomDepartment >= 0)
             {
                 windowWidth = ZoomWidth;
                 windowHeight = ZoomHeight;
@@ -862,10 +865,9 @@ namespace NomadCity.UI
             open.targetGraphic = graphic;
             open.onClick.AddListener(() =>
             {
-                // 只抛事件：面板由 GameScreenController 决定是关掉还是接着摆下一家。
-                // 这里不要再 Close()——否则会把控制器刚重开的面板又关掉，看起来像直接跳过了选企业阶段。
-                int pickedId = depId;
-                RhineDepartmentPicked?.Invoke(pickedId);
+                // 和企业板二选一保持一致：点一下只是放大看，确定 / 取消在放大视图的右侧。
+                zoomDepartment = depId;
+                Rebuild();
             });
 
             // 科室板名字标签
@@ -876,6 +878,101 @@ namespace NomadCity.UI
             nameLabel.rectTransform.pivot = new Vector2(0.5f, 0f);
             nameLabel.rectTransform.anchoredPosition = new Vector2(0f, -22f);
             nameLabel.rectTransform.sizeDelta = new Vector2(width + 20f, 18f);
+        }
+
+        /// <summary>
+        /// 开局选科室板的放大视图：左边整张科室板，右边说明 + 确定 / 取消。
+        /// 和企业板二选一外观一致：点一下只放大，必须再点「确定选择」才真的选走。
+        /// </summary>
+        private void BuildZoomedDepartment(int depId)
+        {
+            const float aspect = 516f / 1000f;
+            float height = ContentHeight;
+            float width = height * aspect;
+            float maxWidth = ContentWidth * 0.46f;
+            if (width > maxWidth) { width = maxWidth; height = width / aspect; }
+
+            float leftX = -ContentWidth * 0.5f + width * 0.5f;
+
+            GameObject cardObject = new GameObject($"DeptZoom_{depId}", typeof(RectTransform));
+            cardObject.transform.SetParent(content, false);
+            RectTransform cardRect = (RectTransform)cardObject.transform;
+            cardRect.anchorMin = cardRect.anchorMax = new Vector2(0.5f, 0.5f);
+            cardRect.pivot = new Vector2(0.5f, 0.5f);
+            cardRect.anchoredPosition = new Vector2(leftX, 0f);
+            cardRect.sizeDelta = new Vector2(width, height);
+
+            Texture2D tex = EnterpriseCardArt.Department(depId);
+            if (tex != null)
+            {
+                RawImage face = cardObject.AddComponent<RawImage>();
+                face.texture = tex;
+                face.uvRect = new Rect(0f, 0f, 1f, 1f);
+                face.color = Color.white;
+                face.raycastTarget = false;
+            }
+            else
+            {
+                Image bg = cardObject.AddComponent<Image>();
+                bg.color = BoardColor;
+                bg.raycastTarget = false;
+            }
+
+            float sideWidth = ContentWidth - width - 30f;
+            BuildDepartmentPickSide(depId, ContentWidth * 0.5f - sideWidth * 0.5f, sideWidth, ContentHeight);
+        }
+
+        private void BuildDepartmentPickSide(int depId, float centerX, float width, float height)
+        {
+            string depName = EnterpriseCatalog.Department(depId)?.Name ?? $"科室板 {depId + 1}";
+
+            Image card = CreateImage("DeptPickSide", content, BoardColor);
+            RectTransform cr = card.rectTransform;
+            cr.anchorMin = cr.anchorMax = new Vector2(0.5f, 0.5f);
+            cr.pivot = new Vector2(0.5f, 0.5f);
+            cr.anchoredPosition = new Vector2(centerX, 0f);
+            cr.sizeDelta = new Vector2(width, height);
+
+            TMP_Text name = CreateText("Name", cr, depName, 24f, TextAlignmentOptions.Left);
+            name.color = TextColor;
+            name.rectTransform.anchorMin = name.rectTransform.anchorMax = new Vector2(0f, 1f);
+            name.rectTransform.pivot = new Vector2(0f, 1f);
+            name.rectTransform.anchoredPosition = new Vector2(16f, -16f);
+            name.rectTransform.sizeDelta = new Vector2(width - 32f, 32f);
+
+            TMP_Text body = CreateText("Body", cr,
+                "这张科室板决定本局莱茵生命 L5–L2 的效果。\n\n确认后立即生效，本局不能再更换。",
+                15f, TextAlignmentOptions.TopLeft);
+            body.color = MutedColor;
+            body.lineSpacing = 8f;
+            body.rectTransform.anchorMin = Vector2.zero;
+            body.rectTransform.anchorMax = Vector2.one;
+            body.rectTransform.offsetMin = new Vector2(16f, 96f);
+            body.rectTransform.offsetMax = new Vector2(-16f, -60f);
+
+            float buttonWidth = Mathf.Min(width - 32f, 180f);
+            const float gap = 16f;
+
+            Button confirm = CreateButton("Confirm", cr, "确定选择", 20f);
+            RectTransform confirmRect = confirm.GetComponent<RectTransform>();
+            confirmRect.anchorMin = confirmRect.anchorMax = new Vector2(0.5f, 0f);
+            confirmRect.pivot = new Vector2(0.5f, 0f);
+            confirmRect.anchoredPosition = new Vector2((buttonWidth + gap) * 0.5f, 24f);
+            confirmRect.sizeDelta = new Vector2(buttonWidth, 44f);
+            confirm.onClick.AddListener(() =>
+            {
+                // 只抛事件：面板由 GameScreenController 决定是关掉还是接着摆下一家。
+                // 这里不要再 Close()——否则会把控制器刚重开的面板又关掉，看起来像直接跳过了选企业阶段。
+                RhineDepartmentPicked?.Invoke(depId);
+            });
+
+            Button cancel = CreateButton("Cancel", cr, "取消", 18f);
+            RectTransform cancelRect = cancel.GetComponent<RectTransform>();
+            cancelRect.anchorMin = cancelRect.anchorMax = new Vector2(0.5f, 0f);
+            cancelRect.pivot = new Vector2(0.5f, 0f);
+            cancelRect.anchoredPosition = new Vector2(-(buttonWidth + gap) * 0.5f, 24f);
+            cancelRect.sizeDelta = new Vector2(buttonWidth, 44f);
+            cancel.onClick.AddListener(() => { zoomDepartment = -1; Rebuild(); });
         }
 
         // —— 放大侧栏 ——

@@ -112,17 +112,22 @@ namespace NomadCity.Tests
         }
 
         [Test]
-        public void 罗德岛干员特派_放回游戏盒的牌记入公开展示()
+        public void 罗德岛干员特派_升到3级时自动结算并记入公开展示()
         {
             NewEnterpriseGame();
             int board = (int)EnterpriseId.RhodesIsland;
             state.Enterprises.Activate(board);
-            state.Enterprises.SetLevel(board, 0, 3);
+            state.Enterprises.SetLevel(board, 0, 2);
 
             int handBefore = player.HandCharacterCards.Count;
-            CommandResult result = engine.Dispatch(new TriggerEnterpriseEffectCommand(
-                0, board, 3, FirstAvailableChoices.Default));
+
+            // 3 级「干员特派」是升级奖励（牌面上没有锁图标与「企业特效」标签）：
+            // 升到这一级时立即结算，之后不能再手动触发。
+            EnterpriseRules.BeginPendingAdvance(state, 0, -1, "测试：提升 1 级");
+            CommandResult result = engine.Dispatch(new AdvanceEnterpriseLevelCommand(
+                0, board, FirstAvailableChoices.Default));
             Assert.IsTrue(result.Ok, result.Error);
+            Assert.AreEqual(3, state.Enterprises.LevelOf(board, 0));
 
             Assert.AreEqual(1, state.PublicReveals.Count, "放回游戏盒的角色牌应当记一条「向所有玩家展示」。");
             Assert.AreEqual(0, state.PublicReveals[0].Seat);
@@ -153,10 +158,12 @@ namespace NomadCity.Tests
             NewEnterpriseGame();
             int board = (int)EnterpriseId.RhodesIsland;
             state.Enterprises.Activate(board);
-            state.Enterprises.SetLevel(board, 0, 3);
+            state.Enterprises.SetLevel(board, 0, 2);
 
-            Assert.IsTrue(engine.Dispatch(new TriggerEnterpriseEffectCommand(
-                0, board, 3, FirstAvailableChoices.Default)).Ok);
+            // 升到 3 级时由升级奖励自动结算「干员特派」，产生一条公开展示记录。
+            EnterpriseRules.BeginPendingAdvance(state, 0, -1, "测试：提升 1 级");
+            Assert.IsTrue(engine.Dispatch(new AdvanceEnterpriseLevelCommand(
+                0, board, FirstAvailableChoices.Default)).Ok);
             Assert.AreEqual(1, state.PublicReveals.Count);
 
             byte[] bytes = GameStateSnapshotCodec.Write(GameStateSnapshot.Capture(state));
@@ -620,6 +627,62 @@ namespace NomadCity.Tests
 
             Assert.AreEqual(turn + 1, state.TurnNumber);
             Assert.AreEqual(TurnPhase.CharacterPlacement, state.Phase);
+        }
+
+        [Test]
+        public void 收尾_按行动顺序逐个座位结算_没有效果的座位被跳过并记录()
+        {
+            // 4 人局没有收尾效果：从起始玩家起把 4 个座位依次跳过，直接进入下一回合。
+            state.Phase = TurnPhase.Harvest;
+            state.HarvestPending = false;
+            Assert.IsTrue(engine.Dispatch(new AdvancePhaseCommand()).Ok);
+
+            Assert.AreEqual(TurnPhase.CharacterPlacement, state.Phase);
+            Assert.AreEqual(2, state.TurnNumber);
+            CollectionAssert.AreEqual(new[] { 0, 1, 2, 3 }, state.CleanupSkippedSeats);
+            Assert.AreEqual(-1, state.CleanupIndex);
+        }
+
+        [Test]
+        public void 收尾_轮到谁就停在谁那里_结束后才轮到下一位()
+        {
+            player.Resources.Add(ResourceType.Orirock, 2);
+            state.PersistentTactics.Add(new PersistentTacticState
+            {
+                CardId = Mudrock, Seat = 0, Kind = PersistentTacticKind.MudrockSquad,
+            });
+
+            state.Phase = TurnPhase.Harvest;
+            state.HarvestPending = false;
+            Assert.IsTrue(engine.Dispatch(new AdvancePhaseCommand()).Ok);
+
+            // 起始玩家 0 号有可选效果：收尾停在他这里，别人还没轮到。
+            Assert.AreEqual(TurnPhase.Cleanup, state.Phase);
+            Assert.AreEqual(0, state.CleanupSeat);
+            CollectionAssert.IsEmpty(state.CleanupSkippedSeats);
+
+            // 1 号也有可发动的持续计谋，但还没轮到他，不能抢先发动。
+            state.Player(1).Resources.Add(ResourceType.Orirock, 2);
+            state.Player(1).MarkersInSupply = 5;
+            state.PersistentTactics.Add(new PersistentTacticState
+            {
+                CardId = Mudrock, Seat = 1, Kind = PersistentTacticKind.MudrockSquad,
+            });
+            Assert.IsFalse(engine.Dispatch(
+                new UsePersistentTacticCleanupCommand(1, PersistentTacticKind.MudrockSquad)).Ok);
+
+            // 0 号结束自己这一位 → 轮到 1 号，0 号不会把 1 号一起跳过。
+            Assert.IsTrue(engine.Dispatch(new EndCleanupSeatCommand(0)).Ok);
+            Assert.AreEqual(TurnPhase.Cleanup, state.Phase);
+            Assert.AreEqual(1, state.CleanupSeat);
+
+            // 1 号发动完，2、3 号没有效果被跳过，然后才进入下一回合。
+            int turn = state.TurnNumber;
+            Assert.IsTrue(engine.Dispatch(
+                new UsePersistentTacticCleanupCommand(1, PersistentTacticKind.MudrockSquad)).Ok);
+            Assert.AreEqual(turn + 1, state.TurnNumber);
+            Assert.AreEqual(TurnPhase.CharacterPlacement, state.Phase);
+            CollectionAssert.AreEqual(new[] { 2, 3 }, state.CleanupSkippedSeats);
         }
 
         [Test]

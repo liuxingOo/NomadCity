@@ -65,6 +65,80 @@ namespace NomadCity.UI
                 button.targetGraphic.CrossFadeColor(baseColor, colors.fadeDuration, true, true);
         }
 
+        /// <summary>
+        /// 统一一颗按钮的整套配色（正常 / 悬停 / 按下 / 不可点）。
+        ///
+        /// 手牌小标签是从白色点击区克隆出来的：它的 Highlighted Color 是纯白，
+        /// <see cref="SetLit"/> 点亮时会直接变成一块白板。这里把整组颜色都定在同一块深色上，
+        /// 并同步刷新缓存，后续 SetLit 也只会在这块深色上做轻微明暗。
+        /// 不可点色同样取正常色 —— 禁用只拦点击，不改外观。
+        /// </summary>
+        public static void ApplyPalette(Button button, Color baseColor)
+        {
+            if (button == null) return;
+
+            Ensure(button);
+
+            Color highlight = Color.Lerp(baseColor, Color.white, 0.16f);
+            Color pressed = Color.Lerp(baseColor, Color.black, 0.18f);
+
+            ColorBlock colors = button.colors;
+            colors.normalColor = baseColor;
+            colors.selectedColor = baseColor;
+            colors.highlightedColor = highlight;
+            colors.pressedColor = pressed;
+            colors.disabledColor = baseColor;
+            button.colors = colors;
+
+            Originals[button] = colors;
+
+            if (button.targetGraphic != null)
+                button.targetGraphic.CrossFadeColor(baseColor, 0f, true, true);
+        }
+
+        /// <summary>
+        /// 用「操作区按钮的图片底色」来统一配色：图片本身染色，ColorBlock 只负责悬停 / 按下的明暗。
+        /// 这样和场景里那些按钮的来源一致（它们的底色在 Image 上，ColorBlock 基本是白的）。
+        /// </summary>
+        public static void ApplyImagePalette(Button button, Color imageColor)
+        {
+            if (button == null) return;
+
+            Ensure(button);
+
+            if (button.targetGraphic != null) button.targetGraphic.color = imageColor;
+
+            ColorBlock colors = button.colors;
+            colors.normalColor = Color.white;
+            colors.selectedColor = Color.white;
+            colors.disabledColor = Color.white;
+            colors.highlightedColor = new Color(1.14f, 1.14f, 1.14f, 1f);
+            colors.pressedColor = new Color(0.86f, 0.86f, 0.86f, 1f);
+            button.colors = colors;
+
+            Originals[button] = colors;
+
+            if (button.targetGraphic != null)
+                button.targetGraphic.CrossFadeColor(Color.white, 0f, true, true);
+        }
+
+        /// <summary>
+        /// 禁用状态不改外观：只把 Disabled Color 拉平到 Normal Color。
+        /// 操作区的按钮要能点 / 不能点由逻辑决定，颜色保持统一。
+        /// </summary>
+        public static void FlattenDisabledColor(Button button)
+        {
+            if (button == null) return;
+
+            Ensure(button);
+
+            ColorBlock colors = button.colors;
+            if (colors.disabledColor == colors.normalColor) return;
+
+            colors.disabledColor = colors.normalColor;
+            button.colors = colors;
+        }
+
         /// <summary>把场景里所有按钮（含未激活的弹窗里的）都过一遍，消除「点过就一直亮」。</summary>
         public static void EnsureAll()
         {

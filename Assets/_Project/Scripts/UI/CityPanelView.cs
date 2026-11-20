@@ -40,6 +40,15 @@ namespace NomadCity.UI
         /// <summary>点了第几格（0 起）。</summary>
         public event Action<int> SlotClicked;
 
+        /// <summary>点了城市面板上方那块「自己的盖放牌」牌位（参数是角色牌 id）。</summary>
+        public event Action<int> PlacedCardClicked;
+
+        /// <summary>城市面板上方那块盖放牌位的底板（运行时搭在「第一排第三格」正上方，不属于面板本身）。</summary>
+        private Image placedSlotImage;
+        private TMP_Text placedSlotLabel;
+        private Button placedSlotButton;
+        private int placedCardId = -1;
+
         private void Awake()
         {
             for (int i = 0; i < slotButtons.Length; i++)
@@ -56,6 +65,59 @@ namespace NomadCity.UI
             if (slotButtons.Length != PlayerState.CityPanelSlotCount)
                 Debug.LogWarning($"[城市面板] 格子按钮配了 {slotButtons.Length} 个，规则要求 {PlayerState.CityPanelSlotCount} 个（3 列 × 4 行）。" +
                                  "数量不一致时下标会错位，请对照 Art/CityPanel.png 把 12 个格子按顺序拖进「Slot Buttons」。", this);
+
+            EnsurePlacedSlot();
+        }
+
+        /// <summary>
+        /// 在「第一排第三格」正上方的黑色空区里搭一块手牌大小的牌位。
+        /// 位置直接复制目标格子的锚点 / pivot，再往上平移一格 —— 换分辨率也不会跑偏。
+        /// </summary>
+        private void EnsurePlacedSlot()
+        {
+            if (placedSlotButton != null) return;
+            if (slotButtons.Length < 3 || slotButtons[2] == null) return;
+
+            var target = (RectTransform)slotButtons[2].transform;
+            var host = new GameObject("PlacedCharacterSlot", typeof(RectTransform), typeof(Image), typeof(Button));
+            host.transform.SetParent(target.parent, false);
+
+            var rect = (RectTransform)host.transform;
+            rect.anchorMin = target.anchorMin;
+            rect.anchorMax = target.anchorMax;
+            rect.pivot = target.pivot;
+            rect.sizeDelta = new Vector2(96f, 134f); // 手牌大小
+            // 底边与城市面板顶边留 12px：旧写法只加「一格高 + 10」，
+            // 牌位比格子高时会压住面板第一排。
+            float lift = target.sizeDelta.y * 0.5f + 134f * 0.5f + 12f;
+            rect.anchoredPosition = target.anchoredPosition + new Vector2(0f, lift);
+
+            placedSlotImage = host.GetComponent<Image>();
+            placedSlotImage.color = new Color(1f, 1f, 1f, 0f);
+            placedSlotImage.raycastTarget = false;
+
+            placedSlotButton = host.GetComponent<Button>();
+            placedSlotButton.targetGraphic = placedSlotImage;
+            placedSlotButton.transition = Selectable.Transition.None;
+            placedSlotButton.interactable = false;
+            placedSlotButton.onClick.AddListener(() =>
+            {
+                if (placedCardId >= 0) PlacedCardClicked?.Invoke(placedCardId);
+            });
+
+            var labelGo = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+            labelGo.transform.SetParent(host.transform, false);
+            placedSlotLabel = labelGo.GetComponent<TextMeshProUGUI>();
+            placedSlotLabel.fontSize = 16f;
+            placedSlotLabel.alignment = TextAlignmentOptions.Center;
+            placedSlotLabel.color = new Color(0.92f, 0.88f, 0.80f, 1f);
+            placedSlotLabel.raycastTarget = false;
+
+            var labelRect = (RectTransform)labelGo.transform;
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.offsetMin = Vector2.zero;
+            labelRect.offsetMax = Vector2.zero;
         }
 
         /// <summary>
@@ -118,6 +180,33 @@ namespace NomadCity.UI
                 if (i < slotLabels.Length && slotLabels[i] != null)
                     slotLabels[i].text = string.Empty;
             }
+
+            UpdatePlacedSlot(player);
+        }
+
+        /// <summary>
+        /// 城市面板上方的「自己的盖放牌」牌位：有牌就背面朝上显示并变成可点，
+        /// 点一下由控制器弹放大卡面（只有自己看得到正面）；没有牌时整块透明、不可点。
+        /// </summary>
+        private void UpdatePlacedSlot(PlayerState player)
+        {
+            if (placedSlotButton == null) return;
+
+            placedCardId = player != null ? player.PlacedCharacterCard : -1;
+            bool has = placedCardId >= 0;
+
+            // 盖放的是暗牌：直接画这名玩家颜色的卡背（四名玩家颜色不同）。
+            Sprite back = has && player != null ? CharacterCardBackArt.BackFor(player.Color) : null;
+
+            placedSlotImage.sprite = back;
+            placedSlotImage.preserveAspect = true;
+            placedSlotImage.color = has
+                ? (back != null ? Color.white : new Color(0.30f, 0.25f, 0.18f, 1f))
+                : new Color(1f, 1f, 1f, 0f);
+            placedSlotImage.raycastTarget = has;
+            placedSlotButton.interactable = has;
+            if (placedSlotLabel != null)
+                placedSlotLabel.text = has && back == null ? "盖放" : string.Empty;
         }
     }
 }

@@ -38,7 +38,10 @@ namespace NomadCity.UI
     /// 入口按钮**常驻不动** —— 展开、收起都不会把它藏起来，它就一直摆在操作区里，玩家随时能再点。
     /// 弹窗里另有「关闭」键（<see cref="closeButton"/>）也能收起。
     /// 点弹窗里的行动按钮**不会**自动收起 —— 面板停在屏幕边上不挡地图，提示文本全程可读。
-    /// 右上角的「关闭」键与其它弹窗同一个样式：平时收起弹窗；正在展开某个行动的子步骤时，它充当「返回上一步」。
+    ///
+    /// 「关闭」键只负责收起弹窗，不再兼任「返回上一步」—— 一粒按钮同时承担两种语义，
+    /// 玩家想先看看地图时很容易把正在进行的行动误退掉。进入某个行动后，底部那一行会换成
+    /// 「回退一步 / 取消行动」两颗按钮，回退与退出各走各的入口。
     /// </summary>
     public sealed class ActionPanel : MonoBehaviour
     {
@@ -51,7 +54,7 @@ namespace NomadCity.UI
                  "两种都接会一次点击开关两次，看着像没反应。")]
         [SerializeField] private Button openButton;
 
-        [Tooltip("弹窗右上角的「关闭」按钮：平时收起弹窗；正在选行动 / 多步流程锁住面板时当「返回上一步」")]
+        [Tooltip("弹窗右上角的「关闭」按钮：只收起弹窗，不打断正在进行的行动")]
         [SerializeField] private Button closeButton;
 
         [Header("主要行动：引擎已实现")]
@@ -80,11 +83,23 @@ namespace NomadCity.UI
         [Tooltip("结束回合（§6.1）：做完 1 次主要行动后，随时点它把行动权交给下一位。留空时运行时会自动建一颗。")]
         [SerializeField] private Button endTurnButton;
 
+        [Tooltip("回退一步：在行动中把当前这一步退掉（留空时运行时会自动建一颗）。")]
+        [SerializeField] private Button stepBackButton;
+
+        [Tooltip("取消行动：直接退出当前行动（留空时运行时会自动建一颗）。")]
+        [SerializeField] private Button cancelActionButton;
+
         public event Action<ActionMode> ModeRequested;
 
+        /// <summary>点了「回退一步」：只退掉当前这一步，仍在同一个行动里（具体退到哪由控制器决定）。</summary>
+        public event Action StepBackRequested;
+
+        /// <summary>点了「取消行动」：整个退出当前行动并丢弃已做的选点。</summary>
+        public event Action CancelActionRequested;
+
         /// <summary>
-        /// 右上角「关闭」键在子步骤里被按下：交给 GameScreenController 当「返回上一步 / 退出当前行动」。
-        /// 没有子步骤在跑时不会触发，关闭键只是收掉弹窗。
+        /// 兼容旧订阅方：与 <see cref="CancelActionRequested"/> 同时发出。
+        /// 「关闭」键不再触发它 —— 关闭只收起弹窗。
         /// </summary>
         public event Action CancelRequested;
 
@@ -127,6 +142,15 @@ namespace NomadCity.UI
 
             // 「结束回合」是后加的一颗按钮：场景里没接时在运行时补建，保证老场景也能用。
             EnsureEndTurnButton();
+
+            // 行动中的「回退一步 / 取消行动」同理：老场景不用重做 UI 也能用上新流程。
+            EnsureActionStepButtons();
+            On(stepBackButton, () => StepBackRequested?.Invoke());
+            On(cancelActionButton, () =>
+            {
+                CancelActionRequested?.Invoke();
+                CancelRequested?.Invoke();
+            });
             On(endTurnButton, () => EndTurnRequested?.Invoke());
 
             gatedButtons.Add(placeButton);
@@ -148,6 +172,8 @@ namespace NomadCity.UI
             UiButtonTint.Ensure(closeButton);
             for (int i = 0; i < gatedButtons.Count; i++) UiButtonTint.Ensure(gatedButtons[i]);
             UiButtonTint.Ensure(endTurnButton);
+            UiButtonTint.Ensure(stepBackButton);
+            UiButtonTint.Ensure(cancelActionButton);
 
             SetMode(ActionMode.None);
             Hide(); // 弹窗默认收起，主界面上只留那个「行动」按钮
@@ -257,7 +283,22 @@ namespace NomadCity.UI
             // 结束回合不是「行动」，但也得跟着多步流程一起锁死：建设中点它会把这次建设作废。
             if (endTurnButton != null) endTurnButton.interactable = endTurnAvailable && !locked;
 
+            RefreshBottomButtons();
             RefreshModeVisuals();
+        }
+
+        /// <summary>
+        /// 底部那一行跟着模式切换：行动中收起「结束回合」，换成「回退一步 / 取消行动」；
+        /// 退出行动再换回来。多步流程锁住面板时也照样显示这两颗 —— 它们是此时唯一的退出通道，
+        /// 不像行动按钮那样跟着锁死。
+        /// </summary>
+        private void RefreshBottomButtons()
+        {
+            bool inAction = currentMode != ActionMode.None || locked;
+
+            if (endTurnButton != null) endTurnButton.gameObject.SetActive(!inAction);
+            if (stepBackButton != null) stepBackButton.gameObject.SetActive(inAction);
+            if (cancelActionButton != null) cancelActionButton.gameObject.SetActive(inAction);
         }
 
         /// <summary>
@@ -276,17 +317,11 @@ namespace NomadCity.UI
         }
 
         /// <summary>
-        /// 右上角「关闭」：没有子步骤在跑时只是收起弹窗（与其它弹窗一致）；
-        /// 正在选行动、或某个多步流程把面板锁住时，先当成「返回上一步 / 退出当前行动」交给控制器。
+        /// 右上角「关闭」：只收起弹窗，不再充当「返回上一步」。
+        /// 回退与退出分别交给底部的「回退一步 / 取消行动」，两个入口不会互相打架。
         /// </summary>
         private void OnCloseClicked()
         {
-            if (locked || currentMode != ActionMode.None)
-            {
-                CancelRequested?.Invoke();
-                return;
-            }
-
             Hide();
         }
 
@@ -323,6 +358,10 @@ namespace NomadCity.UI
             PlaceButton(buildButton, 100f, -420f);
             PlaceButton(specialActionButton, 250f, -420f);
             PlaceButton(endTurnButton, 175f, -510f, 250f, 56f);
+
+            // 行动中与「结束回合」共用同一条基线：左「回退一步」、右「取消行动」。
+            PlaceButton(stepBackButton, 100f, -510f, 115f, 56f);
+            PlaceButton(cancelActionButton, 250f, -510f, 115f, 56f);
         }
 
         /// <summary>把一颗行动按钮摆到「距弹窗左上角 (x, y)」的位置（y 传负数）。</summary>
@@ -386,6 +425,51 @@ namespace NomadCity.UI
             var button = go.GetComponent<Button>();
             button.targetGraphic = image;
             endTurnButton = button;
+        }
+
+        /// <summary>
+        /// 运行时补建行动中的两颗按钮：左「回退一步」、右「取消行动」。
+        /// 场景里已经接过的沿用场景对象，没接的按子节点名找回来，避免热重载后叠出第二颗。
+        /// </summary>
+        private void EnsureActionStepButtons()
+        {
+            stepBackButton = EnsureBottomButton(stepBackButton, "StepBackButton", "回退一步");
+            cancelActionButton = EnsureBottomButton(cancelActionButton, "CancelActionButton", "取消行动");
+        }
+
+        private Button EnsureBottomButton(Button current, string childName, string label)
+        {
+            if (current != null || popupRoot == null) return current;
+
+            Transform existing = popupRoot.transform.Find(childName);
+            if (existing != null && existing.TryGetComponent(out Button found)) return found;
+
+            var go = new GameObject(childName, typeof(RectTransform), typeof(Image), typeof(Button));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(popupRoot.transform, false);
+
+            var image = go.GetComponent<Image>();
+            image.color = ButtonColor;
+
+            var labelGo = new GameObject("Label", typeof(RectTransform));
+            var labelRect = (RectTransform)labelGo.transform;
+            labelRect.SetParent(rect, false);
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.offsetMin = Vector2.zero;
+            labelRect.offsetMax = Vector2.zero;
+
+            var text = labelGo.AddComponent<TextMeshProUGUI>();
+            text.text = label;
+            text.fontSize = 18f;
+            text.alignment = TextAlignmentOptions.Center;
+            text.color = TextColor;
+            text.raycastTarget = false;
+            if (hintText != null && hintText.font != null) text.font = hintText.font;
+
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = image;
+            return button;
         }
 
         /// <summary>

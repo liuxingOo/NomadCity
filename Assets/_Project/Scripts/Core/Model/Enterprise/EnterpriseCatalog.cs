@@ -229,7 +229,7 @@ namespace NomadCity.Core.Model.Enterprise
             {
                 // ————————————————— 罗德岛 —————————————————
                 new EnterpriseBoardDef(EnterpriseId.RhodesIsland, "罗德岛", "RHODES ISLAND",
-                    "3／5 级：干员特派。1 级：选 1 家其他企业提升 1 级。",
+                    "3／5 级：干员特派（升级奖励，立即结算）。1 级：选 1 家其他企业提升 1 级。",
                     new[]
                     {
                         Note(0, "合作等级 0（标记起点）。"),
@@ -237,11 +237,17 @@ namespace NomadCity.Core.Model.Enterprise
                             EnterpriseSpecial.AdvanceOtherEnterprise),
                         Unlock(2, "企业特效：在航道上，你每有 1 个自己的影响力，获得 1 金券。",
                             RewardOp.VouchersPerCount(CountSource.InfluenceOnRoutes, 1)),
-                        UnlockSpecial(3, "干员特派。", EnterpriseSpecial.OperatorDispatch),
+                        // 卡面上「罗德岛 / 干员特派」这两行没有锁图标与「企业特效」标签，是升级奖励：
+                        // 升到这一级时立即结算（多人同时升级时按行动顺序逐个结算），之后不能再手动触发。
+                        InstantSpecial(3, "干员特派：抽取 2 张干员牌（2 人局 3 张），选 1 张加入手牌，"
+                                           + "然后把 1 张角色牌放回游戏盒。",
+                            Array.Empty<RewardOp>(), EnterpriseSpecial.OperatorDispatch),
                         UnlockSpecial(4,
                             "企业特效：从角色牌弃牌区选择 1 张牌加入手牌，然后把你其余的手牌放到弃牌区，获得 10 金券。",
                             EnterpriseSpecial.RecallDiscardAndDiscardHand),
-                        UnlockSpecial(5, "干员特派。", EnterpriseSpecial.OperatorDispatch),
+                        InstantSpecial(5, "干员特派：抽取 2 张干员牌（2 人局 3 张），选 1 张加入手牌，"
+                                           + "然后把 1 张角色牌放回游戏盒。",
+                            Array.Empty<RewardOp>(), EnterpriseSpecial.OperatorDispatch),
                     }),
 
                 // ————————————————— 海德兄弟 —————————————————

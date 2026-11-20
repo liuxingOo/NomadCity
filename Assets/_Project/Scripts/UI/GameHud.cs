@@ -54,10 +54,23 @@ namespace NomadCity.UI
         private Image localMarkerIcon;
         private readonly TMP_Text[] localResourceValues = new TMP_Text[6];
 
-        // 起始玩家标记：运行时挂在「当前回合起始玩家」那一行状态栏的左边缘，随每回合起始玩家换行。
-        private const float FirstMarkHeight = 112f;
-        private const float FirstMarkWidth = 61f;
+        // 起始玩家标记：运行时挂在「当前回合起始玩家」那一行状态栏的右上角空区，随每回合起始玩家换行。
+        private const float FirstMarkHeight = 55f;
+        private const float FirstMarkWidth = 30f;
         private RectTransform firstPlayerMark;
+
+        /// <summary>正在行动那一行的描边（四根细条做的边框），Update 里做呼吸式脉动。</summary>
+        private CanvasGroup activeRowGlow;
+        private float glowPhase;
+
+        /// <summary>每行状态栏的描边框；懒建一次，之后只改 CanvasGroup 的透明度。</summary>
+        private readonly Dictionary<GameHudRow, CanvasGroup> rowGlows = new Dictionary<GameHudRow, CanvasGroup>();
+
+        private const string GlowRootName = "ActiveGlow";
+        private const float GlowThickness = 2f;
+        private const float GlowInset = 2f;
+
+        private static readonly Color ActiveRowGlowColor = new Color(1f, 0.84f, 0.36f, 1f);
 
         // —— 挂机跳过投票 ——
         // 联机时由 GameBootstrap 打开；过一段时间没人操作，就给「不轮自己」的每个待办座位出一个投票按钮。
@@ -99,10 +112,73 @@ namespace NomadCity.UI
 
             BuildLocalResourceBar();
             BuildFirstPlayerMark();
+            MakeRowsTaller();
         }
 
         /// <summary>
-        /// 起始玩家标记：运行时建一张 firstMark 图片，刷新时挂到「当前回合起始玩家」那一行状态栏的左边缘。
+        /// 每行状态栏额外加高的像素：给昵称腾出一条底栏，避免昵称既压头像、又被行底描边划到。
+        /// </summary>
+        private const float RowExtraHeight = 24f;
+
+        private bool rowExtraHeightApplied;
+
+        /// <summary>
+        /// 把四行状态栏整体加高一点。行是「顶部锚定 + 中心 pivot」手动摆放的（PlayerRows 没有 LayoutGroup），
+        /// 所以这里自己把行序往下顺延，并把居中锚定的内容（头像 / 资源数字 / 查看按钮）上移半格 ——
+        /// 它们看起来留在原地，多出来的高度全部落在底部给昵称。
+        /// </summary>
+        private void MakeRowsTaller()
+        {
+            if (rowExtraHeightApplied) return;
+            rowExtraHeightApplied = true;
+
+            var basePositions = new Vector2[rows.Length];
+            for (int i = 0; i < rows.Length; i++)
+            {
+                if (rows[i] != null && rows[i].Root != null)
+                    basePositions[i] = ((RectTransform)rows[i].Root.transform).anchoredPosition;
+            }
+
+            for (int i = 0; i < rows.Length; i++)
+            {
+                GameHudRow row = rows[i];
+                if (row == null || row.Root == null) continue;
+
+                var root = (RectTransform)row.Root.transform;
+                Vector2 size = root.sizeDelta;
+                size.y += RowExtraHeight;
+                root.sizeDelta = size;
+
+                // 顶部保持不动、只往下加长：中心 pivot 的行先下移半格补回增长量，再按行序顺延 i 格。
+                root.anchoredPosition = new Vector2(
+                    basePositions[i].x,
+                    basePositions[i].y - RowExtraHeight * 0.5f - i * RowExtraHeight);
+
+                foreach (RectTransform child in root)
+                {
+                    if (!Mathf.Approximately(child.anchorMin.y, child.anchorMax.y)) continue;
+
+                    // 昵称故意留在新增出来的底栏里 —— 其余内容都补回行底的下移量，看起来留在原地。
+                    if (child.name == "Name") continue;
+
+                    if (Mathf.Approximately(child.anchorMin.y, 0f))
+                        child.anchoredPosition += new Vector2(0f, RowExtraHeight);
+                    else if (Mathf.Approximately(child.anchorMin.y, 0.5f))
+                        child.anchoredPosition += new Vector2(0f, RowExtraHeight * 0.5f);
+                }
+            }
+
+            // 整列往上收一点：右下角操作区顶边原来会压住最后一行的昵称，
+            // 同时让出最后一排与操作区之间的空档（那里放「已盖放 / 弃牌区」两颗按钮）。
+            if (rows.Length > 0 && rows[0] != null && rows[0].Root != null)
+            {
+                if (rows[0].Root.transform.parent is RectTransform container)
+                    container.anchoredPosition += new Vector2(0f, 80f);
+            }
+        }
+
+        /// <summary>
+        /// 起始玩家标记：运行时建一张 firstMark 图片，刷新时挂到「当前回合起始玩家」那一行状态栏的右上角。
         /// 挂在行底下而不是算屏幕坐标 —— 行的位置 / 显隐变化时它会自己跟着走。
         /// </summary>
         private void BuildFirstPlayerMark()
@@ -124,9 +200,9 @@ namespace NomadCity.UI
             }
             rect.SetParent(host, false);
 
-            rect.anchorMin = rect.anchorMax = new Vector2(0f, 0.5f);
-            rect.pivot = new Vector2(1f, 0.5f);
-            rect.anchoredPosition = new Vector2(-2f, 0f);
+            rect.anchorMin = rect.anchorMax = new Vector2(1f, 1f);
+            rect.pivot = new Vector2(1f, 1f);
+            rect.anchoredPosition = new Vector2(-6f, -6f);
             rect.sizeDelta = new Vector2(FirstMarkWidth, FirstMarkHeight);
 
             var image = go.GetComponent<Image>();
@@ -165,9 +241,10 @@ namespace NomadCity.UI
 
             if (firstPlayerMark.parent != target) firstPlayerMark.SetParent(target, false);
 
-            firstPlayerMark.anchorMin = firstPlayerMark.anchorMax = new Vector2(0f, 0.5f);
-            firstPlayerMark.pivot = new Vector2(1f, 0.5f);
-            firstPlayerMark.anchoredPosition = new Vector2(-2f, 0f);
+            // 放在这一行右上角的空区，不再压住左侧的「查看」眼睛按钮。
+            firstPlayerMark.anchorMin = firstPlayerMark.anchorMax = new Vector2(1f, 1f);
+            firstPlayerMark.pivot = new Vector2(1f, 1f);
+            firstPlayerMark.anchoredPosition = new Vector2(-6f, -6f);
             firstPlayerMark.SetAsLastSibling();
             firstPlayerMark.gameObject.SetActive(true);
         }
@@ -188,11 +265,35 @@ namespace NomadCity.UI
         /// <summary>单机热座下的实际操作者座位（-1 = 直接用引擎的行动座位）。</summary>
         private int operatorSeat = -1;
 
+        /// <summary>
+        /// 联机的开局准备（企业抽选 / 7 选 5 / 盖放）是所有人同时进行的，
+        /// 这时不点亮「正在行动」的描边（只保留昵称后的进度文字），避免误以为要等某个人。
+        /// </summary>
+        public bool SuppressActiveGlow { get; set; }
+
         /// <summary>绑定引擎并刷新一次。之后每次状态变化由 GameScreenController 调 <see cref="Refresh"/>。</summary>
         public void Bind(GameEngine engine)
         {
             this.engine = engine;
             Refresh();
+        }
+
+        /// <summary>
+        /// 当前实际显示的最后一行玩家状态栏（没上场的行是隐藏的）。
+        /// 「已盖放 / 弃牌区」两颗按钮要贴在它下面、操作区上面，所以得取真正的末行。
+        /// </summary>
+        public RectTransform LastPlayerRow
+        {
+            get
+            {
+                for (int i = rows.Length - 1; i >= 0; i--)
+                {
+                    if (rows[i] != null && rows[i].Root != null && rows[i].Root.activeSelf)
+                        return (RectTransform)rows[i].Root.transform;
+                }
+
+                return null;
+            }
         }
 
         /// <summary>准备房间同步来的昵称，按座位号排列。</summary>
@@ -351,6 +452,12 @@ namespace NomadCity.UI
             // 行是从上到下的显示槽位，不是座位号：第 i 行显示本局行动顺序里的第 i 个人。
             // 行动顺序每局随机排定（GameState.SeatOrder），所以谁出现在哪一行由引擎决定，
             // 编辑器里四行保持完全一样即可，运行时再按玩家的颜色 / 企业家换底板与头像。
+            activeRowGlow = null;
+            int actingSeat = operatorSeat >= 0 && operatorSeat < state.Players.Count
+                ? operatorSeat
+                : state.ActiveSeat;
+            int selfSeat = SelfSeat(state);
+
             for (int i = 0; i < rows.Length; i++)
             {
                 GameHudRow row = rows[i];
@@ -365,6 +472,18 @@ namespace NomadCity.UI
                 if (!used) continue;
 
                 PlayerState player = state.Players[seat];
+
+                // 正在行动的玩家：整行描边发光（Update 里做呼吸式脉动），一眼看出轮到谁。
+                CanvasGroup glow = EnsureRowGlow(row);
+                if (glow != null)
+                {
+                    bool acting = !SuppressActiveGlow && !state.IsGameOver && seat == actingSeat;
+                    glow.alpha = acting ? 1f : 0f;
+                    if (acting) activeRowGlow = glow;
+                }
+
+                // 自己的那一行不放「查看」按钮：自己的城市面板就是主面板，昵称也已经标了「（你）」。
+                if (row.Inspect != null) row.Inspect.gameObject.SetActive(seat != selfSeat);
 
                 // 底板现在是场景里的占位色块（StatusBar 那套图已作废），这里不再换图、也不再改颜色，
                 // 免得分不清哪个是生成器摆好的占位。头像仍按企业家换图（绿 / 黄 / 红 / 蓝）。
@@ -536,11 +655,22 @@ namespace NomadCity.UI
 
         private void Update()
         {
+            AnimateActiveRowGlow();
+
             if (!skipVoteEnabled || engine == null) return;
             if (Time.unscaledTime < nextVoteCheck) return;
 
             nextVoteCheck = Time.unscaledTime + 0.25f;
             RebuildSkipVoteBar();
+        }
+
+        /// <summary>正在行动那一行的描边做呼吸式脉动：静止的描边容易被当成选中态，动起来才像「轮到谁」。</summary>
+        private void AnimateActiveRowGlow()
+        {
+            if (activeRowGlow == null) return;
+
+            glowPhase += Time.unscaledDeltaTime;
+            activeRowGlow.alpha = Mathf.Lerp(0.40f, 1f, 0.5f + 0.5f * Mathf.Sin(glowPhase * 3.2f));
         }
 
         private void RebuildSkipVoteBar()
@@ -774,6 +904,9 @@ namespace NomadCity.UI
             // 第 1 回合要先逐个选初始资源点并结算翻出的事件牌，这之前还没轮到盖放。
             if (state.TurnNumber == 1 && ChooseStartNodeCommand.CurrentOperator(state) >= 0) return string.Empty;
 
+            // 企业扩展开局还有「角色牌 7 选 5」：没选完之前连盖放都没开始，不能标成「盖放中」。
+            if (state.Setup.IsEnterpriseEnabled && !player.SetupDiscardDone) return " · 选牌中";
+
             if (state.SupplyDiscardRemaining > 0)
                 return player.SeatIndex == state.SupplyDiscardSeat ? " · 待弃牌" : string.Empty;
 
@@ -825,6 +958,17 @@ namespace NomadCity.UI
         }
 
         /// <summary>座位名：优先用准备房间同步来的昵称；没有时回退成「玩家 1..N」；座位号非法（如 -1）时显示「—」。</summary>
+        /// <summary>
+        /// 本机玩家是哪个座位：联机看 <see cref="localSeat"/>；单机热座没有固定座位，就用当前正在操作的人，
+        /// 这样「（你）」和眼睛按钮的省略会跟着轮到的玩家走。
+        /// </summary>
+        private int SelfSeat(GameState state)
+        {
+            if (localSeat >= 0) return localSeat;
+            if (operatorSeat >= 0 && operatorSeat < state.Players.Count) return operatorSeat;
+            return -1;
+        }
+
         private string SeatName(GameState state, int seat)
         {
             if (seat < 0 || seat >= state.Players.Count) return "—";
@@ -833,7 +977,77 @@ namespace NomadCity.UI
                 ? playerNames[seat]
                 : $"玩家 {seat + 1}";
 
-            return seat == localSeat ? name + "（你）" : name;
+            return seat == SelfSeat(state) ? name + "（你）" : name;
+        }
+
+        /// <summary>
+        /// 给一行补上「正在行动」的描边：四根细条贴在行矩形内侧，抽屉式对齐行的四条边。
+        /// 之前用 UGUI 的 Outline 会沿着整块底板外扩，和肉眼看到的行边框差一圈，所以改成自己画。
+        /// </summary>
+        private CanvasGroup EnsureRowGlow(GameHudRow row)
+        {
+            if (row.Root == null) return null;
+            if (rowGlows.TryGetValue(row, out CanvasGroup cached) && cached != null) return cached;
+
+            var go = new GameObject(GlowRootName, typeof(RectTransform), typeof(CanvasGroup));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(row.Root.transform, false);
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+            // 画在底板上、内容之下：昵称 / 头像这些压住描边的地方就不会被金线划字。
+            rect.SetSiblingIndex(1);
+
+            // 昵称默认贴着行底、甚至探到行外（设计稿里是压在底板下沿上的），
+            // 行底描边会正好从字中间穿过去，所以把它抬到描边内侧。
+            LiftRowNameAboveGlow(row.Root.transform);
+
+            var group = go.GetComponent<CanvasGroup>();
+            group.alpha = 0f;
+            group.interactable = false;
+            group.blocksRaycasts = false;
+
+            float t = GlowThickness;
+            float i = GlowInset;
+            MakeGlowBar(rect, "Top", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(i, -i - t), new Vector2(-i, -i));
+            MakeGlowBar(rect, "Bottom", new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(i, i), new Vector2(-i, i + t));
+            MakeGlowBar(rect, "Left", new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(i, i), new Vector2(i + t, -i));
+            MakeGlowBar(rect, "Right", new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(-i - t, i), new Vector2(-i, -i));
+
+            rowGlows[row] = group;
+            return group;
+        }
+
+        /// <summary>
+        /// 昵称是按设计稿贴在行底边、pivot 在字底、y 为负数（往下探出底板一点点）的。
+        /// 描边一旦画在行底，就会从昵称中间穿过去；这里把它抬到描边内侧，底边保持干净。
+        /// </summary>
+        private static void LiftRowNameAboveGlow(Transform rowRoot)
+        {
+            Transform name = rowRoot.Find("Name");
+            if (name == null) return;
+
+            var rect = (RectTransform)name;
+            float minY = GlowInset + GlowThickness + 3f;
+            if (rect.anchoredPosition.y < minY)
+                rect.anchoredPosition = new Vector2(rect.anchoredPosition.x, minY);
+        }
+
+        private static void MakeGlowBar(RectTransform parent, string name,
+            Vector2 anchorMin, Vector2 anchorMax, Vector2 offsetMin, Vector2 offsetMax)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(parent, false);
+            rect.anchorMin = anchorMin;
+            rect.anchorMax = anchorMax;
+            rect.offsetMin = offsetMin;
+            rect.offsetMax = offsetMax;
+
+            var image = go.GetComponent<Image>();
+            image.color = ActiveRowGlowColor;
+            image.raycastTarget = false;
         }
 
         /// <summary>
@@ -869,7 +1083,21 @@ namespace NomadCity.UI
                            && state.Phase == TurnPhase.CharacterPlacement
                            && ChooseStartNodeCommand.CurrentOperator(state) >= 0;
 
-            return opening ? "开局入场" : PhaseName(state.Phase);
+            if (opening) return "开局入场";
+
+            // 企业扩展的「7 选 5」也发生在第 1 回合盖放之前：这时候还没拿到正式手牌，
+            // 顶栏不能写「角色牌盖放」，否则玩家会以为该去手牌区操作。
+            bool setupDiscard = state.TurnNumber == 1
+                                && state.Phase == TurnPhase.CharacterPlacement;
+            if (setupDiscard && EnterpriseRules.Enabled(state) && state.Enterprises.DraftDone)
+            {
+                foreach (PlayerState player in state.Players)
+                {
+                    if (!player.SetupDiscardDone) return "开局准备 · 角色牌 7 选 5";
+                }
+            }
+
+            return PhaseName(state.Phase);
         }
     }
 

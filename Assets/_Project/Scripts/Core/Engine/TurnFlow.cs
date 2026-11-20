@@ -73,11 +73,14 @@ namespace NomadCity.Core.Engine
                 case TurnPhase.Harvest:
                     // 采集还没结算完（还有人没做选择）时不放行，免得整个采集阶段被跳过（§7）。
                     if (state.HarvestPending) return;
-                    // 进入收尾阶段即执行收尾结算（§8）：样式标记复位、角色牌回收等。
+                    // 进入收尾阶段：按本回合行动顺序逐个座位结算效果（§8.1），
+                    // 全部轮完后由 CleanupResolver.Finish 自动推进到下一回合。
                     state.Phase = TurnPhase.Cleanup;
-                    CleanupResolver.Resolve(state);
+                    CleanupResolver.Begin(state);
                     break;
                 case TurnPhase.Cleanup:
+                    // 收尾按座位逐个结算，还有座位没轮到时不放行（§8.1）。
+                    if (state.CleanupIndex >= 0) return;
                     NextTurn(state);
                     break;
             }
@@ -138,6 +141,9 @@ namespace NomadCity.Core.Engine
         }
 
         /// <summary>收尾 → 下一回合；已是最后一回合则进入终局并结算分数（§9）。</summary>
+        /// <summary>收尾阶段的固定步骤已经做完：进入下一回合的角色牌盖放，或最后一回合的终局结算。</summary>
+        internal static void AdvanceFromCleanup(GameState state) => NextTurn(state);
+
         private static void NextTurn(GameState state)
         {
             if (state.TurnNumber >= TotalTurns)
@@ -192,16 +198,17 @@ namespace NomadCity.Core.Engine
 
             if (state.Phase == TurnPhase.Harvest && !state.HarvestPending)
             {
-                AdvancePhase(state); // → 收尾阶段并执行收尾结算（§8）
-                if (state.Phase == TurnPhase.Cleanup && !PersistentTacticRules.HasCleanupActionsAvailable(state))
-                    AdvancePhase(state); // → 下一回合的角色牌盖放 / 终局结算
+                // → 收尾阶段：逐个座位结算，可能停在某位玩家身上等决定，
+                //   也可能所有人没事、直接推进到下一回合。
+                AdvancePhase(state);
                 return true;
             }
 
-            // 收尾阶段的持续计谋可选操作：还有玩家能发动就停在这里等他自己决定；
-            // 都用完（或不想用、直接发 AdvancePhaseCommand）后自动进入下一回合。
+            // 收尾阶段：还在逐个座位结算（有人在决定 / 还没轮完）就停住；
+            // 全部轮完后由 CleanupResolver.Finish 直接进入下一回合。
             if (state.Phase == TurnPhase.Cleanup)
             {
+                if (state.CleanupIndex >= 0) return false;
                 if (PersistentTacticRules.HasCleanupActionsAvailable(state)) return false;
                 AdvancePhase(state);
                 return true;

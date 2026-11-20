@@ -469,7 +469,7 @@ namespace NomadCity.Tests
         }
 
         [Test]
-        public void 结算事件选项_条件段付不起_整个效果结束()
+        public void 结算事件选项_条件段付不起_拒绝结算并保留事件牌()
         {
             GameEngine engine = EventGame(409);
             PlayerState player = engine.State.Player(0);
@@ -478,11 +478,13 @@ namespace NomadCity.Tests
             var command = new ResolveEventOptionCommand(0, 1, 0);
             CommandResult result = engine.Dispatch(command);
 
-            Assert.IsTrue(result.Ok, result.Error);
-            Assert.AreEqual(3, player.Vouchers, "条件段付不起就不该扣钱。");
+            // 条件不满足要停在「选选项」这一步：既不能扣钱、也不能把事件牌标记成已结算，
+            // 否则玩家拿不到奖励、也没机会改选其它选项。
+            Assert.IsFalse(result.Ok, "条件段付不起时应当拒绝结算。");
+            StringAssert.Contains("条件不满足", result.Error);
+            Assert.AreEqual(3, player.Vouchers, "被拒绝时不该扣任何资源。");
             Assert.AreEqual(29, player.MarkersInSupply, "结果段不应执行（开局 29 个）。");
-            Assert.IsTrue(command.Report.Declined);
-            Assert.IsTrue(engine.State.Map.Node(1).EventResolved, "条件段不可行也视为已结算，避免反复重试。");
+            Assert.IsFalse(engine.State.Map.Node(1).EventResolved, "事件牌要留着，玩家可以改选其它选项。");
         }
 
         [Test]

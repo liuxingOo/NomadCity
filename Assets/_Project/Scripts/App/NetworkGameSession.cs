@@ -22,7 +22,8 @@ namespace NomadCity.App
     /// 拓扑是主机权威：
     /// - 主机：本机命令直接执行；远端命令按主机分配的座位重放执行；两者都把结果广播给所有客户端。
     /// - 客户端：本机命令只发给主机，不本地执行；等主机广播回来后再重放进本机引擎。
-    /// - 流程推进类命令（<see cref="ICommand.ActorSeat"/> = -1，如推进阶段、采集结算）只允许主机发起。
+    /// - 流程推进类命令（<see cref="ICommand.ActorSeat"/> = -1，如推进阶段、采集结算）只允许主机发起；
+    ///   收尾阶段改成按座位逐个结算后，客户端走的是带自己座位号的「结束我的收尾」命令，不再需要例外。
     ///
     /// 它本身不是 MonoBehaviour：由 GameBootstrap 每帧调 <see cref="Poll"/> 驱动收发。
     /// </summary>
@@ -33,6 +34,9 @@ namespace NomadCity.App
 
         /// <summary>对局空闲上限：这么久没有任何命令，视为放弃，上层应关房以节省 Relay 额度。</summary>
         private const float IdleTimeoutSeconds = 30f * 60f;
+
+        /// <summary>收尾阶段轮到的玩家已经掉线时，主机等这么久还没见他回来，就替他结束这一位。</summary>
+        private const float CleanupDisconnectedGraceSeconds = 10f;
 
         /// <summary>先于 Setup 到达的快照先存着，等座位分配好再还原（避免界面拿到 -1 座位）。</summary>
         private byte[] pendingSnapshot;
@@ -165,6 +169,36 @@ namespace NomadCity.App
             if (command is ResolveEventOptionCommand)
                 return state.TurnNumber == 1 && state.Phase == TurnPhase.CharacterPlacement;
 
+            // 企业扩展开局（§4.1 / §4.2）：抽初始企业、7 选 5 都是「各人自己那一份」，
+            // 此时 ActiveSeat 还停在起始玩家身上，不能拿 CanAct 把其余座位拦在门外。
+            if (command is ChooseInitialEnterpriseCommand)
+                return EnterpriseRules.Enabled(state)
+                       && state.TurnNumber == 1
+                       && state.Phase == TurnPhase.CharacterPlacement
+                       && !state.Enterprises.DraftDone;
+
+            if (command is DiscardSetupHandCardsCommand)
+                return EnterpriseRules.Enabled(state)
+                       && state.TurnNumber == 1
+                       && state.Phase == TurnPhase.CharacterPlacement
+                       && state.Enterprises.DraftDone;
+
+            // 莱茵生命初始科室板：紧接在「选莱茵生命」之后各人自己选，此时 ActiveSeat 还停在起始玩家身上。
+            // 漏掉这条会让不坐在起始位的客户端被「还没轮到你行动」挡下 —— 表现就是点「确定选择」毫无反应。
+            if (command is PickRhineDepartmentCommand)
+                return EnterpriseRules.Enabled(state)
+                       && state.TurnNumber == 1
+                       && state.Phase == TurnPhase.CharacterPlacement;
+
+            // 红区提升（§3.2）：轮到谁提升就由谁自己选，和当前行动座位无关。
+            if (command is AdvanceEnterpriseLevelCommand)
+                return EnterpriseRules.Enabled(state)
+                       && state.Enterprises.PendingAdvanceSeat == command.ActorSeat;
+
+            // 收尾阶段（§8.1）：按本回合行动顺序逐个座位结算，轮到谁就由谁自己决定 / 结束。
+            if (command is UsePersistentTacticCleanupCommand || command is EndCleanupSeatCommand)
+                return state.Phase == TurnPhase.Cleanup && state.CleanupSeat == command.ActorSeat;
+
             return false;
         }
 
@@ -190,6 +224,25 @@ namespace NomadCity.App
             if (!transport.IsMultiplayer) return;
             idleSeconds += deltaTime;
             secondsSinceProgress += deltaTime;
+
+            TryEndDisconnectedCleanupSeat();
+        }
+
+        /// <summary>
+        /// 收尾按座位逐个结算后，轮到谁就只有谁能结束自己那一格。若这位玩家已经掉线，
+        /// 整桌会永远停在收尾；主机等一小会儿还没见他回来，就替他结束这一位。
+        /// </summary>
+        private void TryEndDisconnectedCleanupSeat()
+        {
+            if (!IsHost || connectionLost || Engine == null) return;
+
+            GameState state = Engine.State;
+            if (state == null || state.IsGameOver) return;
+            if (state.Phase != TurnPhase.Cleanup || state.CleanupSeat < 0) return;
+            if (IsSeatConnected(state.CleanupSeat)) return;
+            if (secondsSinceProgress < CleanupDisconnectedGraceSeconds) return;
+
+            Submit(new EndCleanupSeatCommand(state.CleanupSeat));
         }
 
         /// <summary>对局已经 30 分钟没有任何命令（额度保险第 3 条）：上层应收房并断开。</summary>
@@ -232,8 +285,14 @@ namespace NomadCity.App
 
             if (!IsHost)
             {
+                // 客户端只能发起「带自己座位号」的命令：收尾阶段轮到谁就由谁提交
+                // 「发动持续计谋」或「结束我的收尾」（EndCleanupSeatCommand），
+                // 不再用没有座位的流程推进命令替别人跳过整段收尾。
                 if (command.ActorSeat < 0)
+                {
+                    // 流程推进类命令没有「座位」，不能落到下面的座位校验里（-1 永远不等于本机座位）。
                     return CommandResult.Fail("流程推进由主机负责，客户端不能直接发起。");
+                }
 
                 if (command.ActorSeat != transport.LocalSeat)
                     return CommandResult.Fail("只能操作自己的座位。");

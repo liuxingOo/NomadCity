@@ -117,10 +117,14 @@ namespace NomadCity.Tests
             state.CityPatternStates[0].PlaceMarker(0, 1);
             state.Players[0].UsedPatternActionsThisTurn.Add(500);
             state.Phase = TurnPhase.Harvest;
+            int turn = state.TurnNumber;
 
             TurnFlow.AdvancePhase(state);
 
-            Assert.AreEqual(TurnPhase.Cleanup, state.Phase);
+            // 没有人有收尾效果：四个座位依次跳过（记进 CleanupSkippedSeats），直接进入下一回合。
+            Assert.AreEqual(turn + 1, state.TurnNumber);
+            Assert.AreEqual(TurnPhase.CharacterPlacement, state.Phase);
+            CollectionAssert.AreEqual(new[] { 0, 1, 2, 3 }, state.CleanupSkippedSeats);
             Assert.AreEqual(0, state.CityPatternStates[0].Markers[0].Position);
             Assert.IsEmpty(state.Players[0].UsedPatternActionsThisTurn);
         }

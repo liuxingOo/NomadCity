@@ -147,6 +147,34 @@ namespace NomadCity.Tests
         }
 
         [Test]
+        public void 半完成状态_所有人都选满但没标记完成_会自愈并允许继续开局()
+        {
+            GameEngine engine = NewEnterpriseGame(2);
+            EnterpriseState enterprises = engine.State.Enterprises;
+
+            for (int seat = 0; seat < 2; seat++)
+            {
+                for (int pick = 0; pick < 2; pick++)
+                {
+                    int boardId = enterprises.Offers[seat][0];
+                    Assert.IsTrue(engine.Dispatch(new ChooseInitialEnterpriseCommand(seat, boardId)).Ok);
+                }
+            }
+
+            // 模拟「最后一次选择的收尾没走完」：牌都选满了，完成标记却还是 false。
+            // 这种状态下谁都选不了，也选不了初始资源点，整局会卡死在开局入场。
+            enterprises.DraftDone = false;
+
+            // 玩家这时点地图会派发命令：派发前的自愈要先把抽选补完。
+            engine.Dispatch(new ChooseInitialEnterpriseCommand(0, -1));
+
+            Assert.IsTrue(enterprises.DraftDone, "所有人都选满了就应该被补成已完成。");
+            Assert.AreEqual(4, enterprises.ActiveBoards.Count, "补完后场上仍是 4 块板。");
+            for (int seat = 0; seat < 2; seat++)
+                Assert.AreEqual(0, enterprises.Offers[seat].Count, "选完的座位不该再留着可选牌。");
+        }
+
+        [Test]
         public void 选完企业_自动补足四块板并把本人提升到一级()
         {
             GameEngine engine = NewEnterpriseGame(3);
@@ -435,7 +463,34 @@ namespace NomadCity.Tests
         }
 
         [Test]
-        public void 公事公办另一分支_触发一个已解锁的企业特效()
+        public void 公事公办_按顺序先让所有玩家提升再触发企业特效()
+        {
+            GameEngine engine = NewExpansionGameAtActions();
+            GameState state = engine.State;
+            EnterpriseState enterprises = state.Enterprises;
+            int boardId = (int)EnterpriseId.Hyde;
+            enterprises.Activate(boardId);
+
+            int cardId = CardIds.CharacterExtensionBase
+                         + (int)state.Players[0].Color * CardCounts.CharacterExtensionRoles + 1;
+            CharacterCardDef def = state.Catalog.Character(cardId);
+            Assert.AreEqual("玛恩纳", def.Name);
+
+            PlayerState player = state.Players[0];
+            int orirock = player.Resources.Get(ResourceType.Orirock);
+
+            // 卡面两行按顺序执行：先「所有玩家提升 1 级」，再「触发 1 个已解锁特效」（海德 1 级 = 4 源岩）。
+            EffectReport report = RunExtension(state, 0, new List<RewardOp>(def.StrategyOps).ToArray());
+
+            Assert.IsTrue(report.AnyApplied, report.Describe());
+            for (int seat = 0; seat < 4; seat++)
+                Assert.AreEqual(1, enterprises.LevelOf(boardId, seat), $"座位 {seat} 应当提升 1 级。");
+            Assert.AreEqual(orirock + 4, player.Resources.Get(ResourceType.Orirock),
+                "第二步应当触发刚解锁的 1 级特效。" + report.Describe());
+        }
+
+        [Test]
+        public void 公事公办第二步_触发一个已解锁的企业特效()
         {
             GameEngine engine = NewExpansionGameAtActions();
             GameState state = engine.State;

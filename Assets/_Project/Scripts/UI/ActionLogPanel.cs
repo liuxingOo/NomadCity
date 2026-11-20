@@ -63,6 +63,9 @@ namespace NomadCity.UI
         private readonly List<LogEntry> entries = new List<LogEntry>();
         private GameEngine engine;
 
+        /// <summary>已经写进记录里的「收尾阶段被跳过」座位，用来避免同一条重复记。</summary>
+        private readonly List<int> reportedCleanupSkips = new List<int>();
+
         /// <summary>当前筛选的座位：-1 = 全部行动记录。</summary>
         private int filterSeat = -1;
 
@@ -114,6 +117,7 @@ namespace NomadCity.UI
             if (engine != null) engine.Dispatcher.CommandApplied += OnCommandApplied;
 
             entries.Clear();
+            reportedCleanupSkips.Clear();
             filterSeat = -1;
             BuildFilters();
             Rebuild();
@@ -131,8 +135,31 @@ namespace NomadCity.UI
             if (engine != null) engine.Dispatcher.CommandApplied -= OnCommandApplied;
         }
 
-        private void OnCommandApplied(GameState state, ICommand command) =>
+        private void OnCommandApplied(GameState state, ICommand command)
+        {
             Append(CommandSeat(command), LocalizePlayerRefs(Describe(state, command)));
+            ReportCleanupSkips(state);
+        }
+
+        /// <summary>
+        /// 收尾阶段按行动顺序逐个座位结算（§8.1）：没有可触发效果的座位会被引擎直接跳过，
+        /// 直接记在 <see cref="GameState.CleanupSkippedSeats"/> 里，这里把它们补写成记录。
+        /// 新一轮收尾开始时清单会清空，所以只要按「已记录的长度」接着读就行。
+        /// </summary>
+        private void ReportCleanupSkips(GameState state)
+        {
+            if (state == null) return;
+
+            if (state.CleanupSkippedSeats.Count < reportedCleanupSkips.Count)
+                reportedCleanupSkips.Clear();
+
+            for (int i = reportedCleanupSkips.Count; i < state.CleanupSkippedSeats.Count; i++)
+            {
+                int seat = state.CleanupSkippedSeats[i];
+                reportedCleanupSkips.Add(seat);
+                Append(seat, $"{SeatName(seat)} 没有可以触发的收尾效果，直接跳过。");
+            }
+        }
 
         /// <summary>这条命令算谁的：开局 / 推进阶段这类全局记录记成 -1，只在「全部」里出现。</summary>
         private static int CommandSeat(ICommand command) =>
@@ -449,6 +476,12 @@ namespace NomadCity.UI
                 case AdvancePhaseCommand:
                     return $"—— 推进阶段：现在进入「{GameHud.StageLabel(state)}」 ——";
 
+                case EndCleanupSeatCommand end:
+                    return $"{SeatName(end.ActorSeat)} 结束了收尾阶段的结算。";
+
+                case UsePersistentTacticCleanupCommand tactic:
+                    return $"{SeatName(tactic.ActorSeat)} 在收尾阶段发动了「{PersistentTacticName(state, tactic)}」。";
+
                 default:
                     return $"{SeatName(command.ActorSeat)} 执行了「{command.Name}」。";
             }
@@ -600,6 +633,26 @@ namespace NomadCity.UI
             RewardKind.OpponentsGainResource => $"所有对手各获得 {ResourceName(op.Resource)}×{op.Amount}",
             _ => op.ToString(),
         };
+
+        /// <summary>持续计谋的名字：牌还在场上就查牌面，牌已耗尽进弃牌区就退回按种类命名的兜底。</summary>
+        private static string PersistentTacticName(GameState state, UsePersistentTacticCleanupCommand command)
+        {
+            PersistentTacticState found =
+                state != null ? state.FindPersistentTactic(command.ActorSeat, command.Kind) : null;
+            CharacterCardDef def = found != null && state.Catalog != null
+                ? state.Catalog.Character(found.CardId)
+                : null;
+            if (def != null) return def.NameOf(CharacterEffectKind.Tactics);
+
+            switch (command.Kind)
+            {
+                case PersistentTacticKind.MudrockSquad: return "泥岩小队";
+                case PersistentTacticKind.ForEveryone: return "为了大家";
+                case PersistentTacticKind.HiddenWarehouse: return "隐蔽仓库";
+                case PersistentTacticKind.EngineeringOrder: return "工程订购";
+                default: return "持续计谋";
+            }
+        }
 
         private string SeatName(int seat)
         {

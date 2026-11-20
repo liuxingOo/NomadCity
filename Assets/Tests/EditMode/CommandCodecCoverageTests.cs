@@ -211,6 +211,9 @@ namespace NomadCity.Tests
             CommandKind.UsePersistentTacticCleanup =>
                 new CommandDto { Kind = kind, Seat = 1, P0 = 1, P3 = 1, Items = new[] { 0 } },
 
+            // 结束自己的收尾阶段：只有座位号。
+            CommandKind.EndCleanupSeat => new CommandDto { Kind = kind, Seat = 2 },
+
             // 移除影响力：P0 = 槽位种类；P1 = 目标 id；P2 = 槽位下标；P3 = 答案个数，Items = 答案；
             // PendingActionId = 授予它的挂起行动。
             CommandKind.RemoveInfluence =>

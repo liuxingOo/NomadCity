@@ -207,6 +207,35 @@ namespace NomadCity.UI
         }
 
         /// <summary>
+        /// 企业扩展开局「7 选 5」：放大看一张角色牌，主操作按钮是「确定移除」。
+        /// 与盖放共用同一套放大卡面，区别只在文案与确认后的动作（放回游戏盒，而不是盖到城市前）。
+        /// </summary>
+        public void ShowForSetupDiscard(GameState state, int cardId, Action onRemove)
+        {
+            int index = CharacterHandPanel.SpriteIndexOf(cardId);
+            Sprite face = index >= 0 && index < characterFaces.Length ? characterFaces[index] : null;
+            if (face == null) face = OperatorCardArt.SpriteFor(cardId);
+
+            ShowFaceSprite(face, CharacterNameOf(state, cardId));
+
+            closeAction = Hide;
+            SetLabel(closeLabel, "取消");
+
+            payVoucherAction = null;
+            if (voucherPayButton != null) voucherPayButton.gameObject.SetActive(false);
+
+            payResourceAction = onRemove;
+            if (resourcePayButton != null)
+            {
+                resourcePayButton.gameObject.SetActive(true);
+                resourcePayButton.interactable = true;
+            }
+
+            SetLabel(resourcePayLabel, "确定移除");
+            SetOpen(true);
+        }
+
+        /// <summary>
         /// 放大展示一张城市样式牌（只看不操作）：卡面取自样式库，两个付费按钮一律隐藏，关闭键只收起。
         /// 给「城市面板在非宣告 / 非特殊行动阶段点牌」用。
         /// </summary>

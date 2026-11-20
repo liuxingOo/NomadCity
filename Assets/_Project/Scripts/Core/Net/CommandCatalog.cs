@@ -52,6 +52,7 @@ namespace NomadCity.Core.Net
             { typeof(AbandonPendingActionCommand), CommandKind.AbandonPendingAction },
             { typeof(DeveloperQueuePendingActionCommand), CommandKind.DeveloperQueuePendingAction },
             { typeof(ResolveFacilityEntryEffectCommand), CommandKind.ResolveFacilityEntryEffect },
+            { typeof(EndCleanupSeatCommand), CommandKind.EndCleanupSeat },
         };
 
         /// <summary>查命令类型对应的 Kind；未登记时抛出异常（有意为之，逼新增命令登记）。</summary>

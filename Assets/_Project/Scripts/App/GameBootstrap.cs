@@ -31,6 +31,9 @@ namespace NomadCity.App
         [SerializeField] private GameHud gameHud;
         [SerializeField] private ActionPanel actionPanel;
 
+        /// <summary>右上角设置入口与设置面板（运行时搭建，未接线时为 null）。</summary>
+        private SettingsPanel settingsPanel;
+
         [Tooltip("开局翻出事件卡时弹出的选项面板")]
         [SerializeField] private EventCardPanel eventCardPanel;
 
@@ -103,6 +106,9 @@ namespace NomadCity.App
             // 所有按钮先去掉「被选中就一直发亮」的默认行为：亮 / 暗只由游戏状态决定
             // （弹窗入口、行动模式键由各自面板显式点亮），点过之后不会留下假的高亮。
             UiButtonTint.EnsureAll();
+
+            // 单机 / 联机都要能从右上角退出去，所以放在身份判断之前。
+            SetupSettingsButton();
 
             if (session == null || mapView == null)
             {
@@ -902,24 +908,44 @@ namespace NomadCity.App
             else OnlineSessionHost.Instance?.ReconnectNow();
         }
 
+        /// <summary>
+        /// 右上角「设置」：单独一层高排序 Canvas，开局选企业家 / 企业抽选 / 角色盖放这些
+        /// 全屏面板都盖不住它，任何阶段都能点开。
+        /// </summary>
+        private void SetupSettingsButton()
+        {
+            if (gameHud == null) return;
+
+            Canvas canvas = gameHud.GetComponentInParent<Canvas>();
+            if (canvas == null) return;
+
+            settingsPanel = SettingsPanel.Create(canvas, gameHud.UiFont);
+            if (settingsPanel != null)
+                settingsPanel.ReturnConfirmed += LeaveToMainMenu;
+        }
+
+        private void LeaveToMainMenu()
+        {
+            // 单机热座没有联机会话，不要多此一举去断线。
+            if (role != OnlineRole.None)
+            {
+                var host = OnlineSessionHost.Instance;
+                if (host != null) host.Leave();
+            }
+
+            UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
+        }
+
         /// <summary>玩家点「退出对局」：卡死时的逃生口，二次确认后断开联机并回主菜单。</summary>
         private void OnExitOnlineGame()
         {
             if (choicePopup != null)
             {
-                choicePopup.Show("退出这局联机并回到主菜单？", new[] { "确定退出对局" }, _ => LeaveOnlineGame());
+                choicePopup.Show("退出这局联机并回到主菜单？", new[] { "确定退出对局" }, _ => LeaveToMainMenu());
                 return;
             }
 
-            LeaveOnlineGame();
-        }
-
-        private void LeaveOnlineGame()
-        {
-            var host = OnlineSessionHost.Instance;
-            if (host != null) host.Leave();
-
-            UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
+            LeaveToMainMenu();
         }
 
         /// <summary>座位显示名：优先用准备房间同步来的昵称，没有时回退成「玩家 N」。</summary>

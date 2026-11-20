@@ -56,8 +56,12 @@ namespace NomadCity.UI
 
         // —— 两种视图 ——
 
-        /// <summary>所有玩家当前盖放在场上的角色牌。</summary>
-        public void ShowPlaced(GameState state)
+        /// <summary>
+        /// 所有玩家当前盖放在场上的角色牌。
+        /// 自己的牌正面朝上；别人的牌在使用之前只显示背面，用掉之后翻开并标记「已使用」，
+        /// 同时它也已经出现在对应玩家的弃牌区里。
+        /// </summary>
+        public void ShowPlaced(GameState state, int localSeat)
         {
             if (state == null) return;
             current = state;
@@ -65,10 +69,23 @@ namespace NomadCity.UI
             for (int seat = 0; seat < state.Players.Count; seat++)
             {
                 PlayerState player = state.Players[seat];
+                bool used = player.UsedCharacterCardThisTurn;
+
+                int cardId = player.PlacedCharacterCard;
+
+                // 用掉之后牌已经进弃牌区：这里把最后进弃牌区的那张翻出来，标成「已使用」。
+                if (cardId < 0 && used && player.DiscardCharacterCards.Count > 0)
+                    cardId = player.DiscardCharacterCards[player.DiscardCharacterCards.Count - 1];
+
                 var cards = new List<int>();
-                if (player.PlacedCharacterCard >= 0) cards.Add(player.PlacedCharacterCard);
-                AddGroup($"玩家 {seat + 1}", player.PlacedCharacterCard >= 0 ? null : "本回合还没有盖放角色牌", cards);
+                if (cardId >= 0) cards.Add(cardId);
+
+                bool reveal = seat == localSeat || used;
+                AddGroup($"玩家 {seat + 1}", cardId >= 0 ? null : "本回合还没有盖放角色牌",
+                    cards, reveal, used && cardId >= 0, player.Color);
             }
+
+            FitWindowToContent();
         }
 
         /// <summary>所有玩家的角色牌弃牌区（按进入弃牌区的先后顺序）。</summary>
@@ -84,6 +101,21 @@ namespace NomadCity.UI
                     player.DiscardCharacterCards.Count == 0 ? "还没有弃牌" : null,
                     new List<int>(player.DiscardCharacterCards));
             }
+
+            FitWindowToContent();
+        }
+
+        /// <summary>
+        /// 按内容高度调整窗口：4 个座位各一组时内容会超过固定的 620 高，
+        /// 固定高度会让最下面一组跑到屏幕外。上限受屏幕高度约束，窗口始终居中。
+        /// </summary>
+        private void FitWindowToContent()
+        {
+            if (window == null) return;
+
+            float needed = -nextRowY + 56f + PadX * 2f + 12f;
+            window.sizeDelta = new Vector2(WindowWidth, Mathf.Clamp(needed, 360f, 1080f));
+            window.anchoredPosition = Vector2.zero;
         }
 
         // —— 搭建与刷新 ——
@@ -146,7 +178,8 @@ namespace NomadCity.UI
 
         private float nextRowY;
 
-        private void AddGroup(string heading, string emptyHint, IReadOnlyList<int> cards)
+        private void AddGroup(string heading, string emptyHint, IReadOnlyList<int> cards,
+            bool reveal = true, bool used = false, PlayerColor? backColor = null)
         {
             float y = nextRowY;
             float rows = 0f;
@@ -155,6 +188,10 @@ namespace NomadCity.UI
             row.rectTransform.anchorMin = new Vector2(0f, 1f);
             row.rectTransform.anchorMax = new Vector2(1f, 1f);
             row.rectTransform.pivot = new Vector2(0.5f, 1f);
+
+            // 别人的盖放牌在「已使用」之前是暗牌，只显示背面。
+            if (!reveal) heading += "（未公开）";
+            if (used) heading += "（已使用）";
 
             TMP_Text header = CreateText("Header", row.rectTransform, heading, 18f, TextAlignmentOptions.Left);
             header.color = TextColor;
@@ -182,7 +219,8 @@ namespace NomadCity.UI
                     int column = i % perRow;
                     rows = Mathf.Floor(i / perRow);
                     AddCard(row.rectTransform, cards[i], i + 1,
-                        new Vector2(14f + column * (CardWidth + CardGap), -34f - rows * (CardHeight + 8f)));
+                        new Vector2(14f + column * (CardWidth + CardGap), -34f - rows * (CardHeight + 8f)),
+                        reveal, backColor);
                 }
 
                 rowHeight = 42f + (rows + 1) * (CardHeight + 8f);
@@ -193,7 +231,8 @@ namespace NomadCity.UI
             nextRowY = y - rowHeight - 10f;
         }
 
-        private void AddCard(RectTransform parent, int cardId, int order, Vector2 position)
+        private void AddCard(RectTransform parent, int cardId, int order, Vector2 position, bool reveal,
+            PlayerColor? backColor = null)
         {
             Image image = CreateImage($"Card{cardId}_{order}", parent, new Color(1f, 1f, 1f, 0f));
             image.rectTransform.anchorMin = image.rectTransform.anchorMax = new Vector2(0f, 1f);
@@ -202,6 +241,27 @@ namespace NomadCity.UI
             image.rectTransform.sizeDelta = new Vector2(CardWidth, CardHeight);
             image.preserveAspect = true;
             image.raycastTarget = false;
+
+            // 别人的未使用盖放牌：只画背面，不显示卡名。
+            if (!reveal)
+            {
+                // 暗牌：能取到卡背就用这名玩家颜色的真卡背，取不到才退回纯色块 + 问号。
+                Sprite backSprite = backColor.HasValue ? CharacterCardBackArt.BackFor(backColor.Value) : null;
+                if (backSprite != null)
+                {
+                    image.sprite = backSprite;
+                    image.color = Color.white;
+                    return;
+                }
+
+                Image backFace = CreateImage("Back", image.rectTransform, new Color(0.32f, 0.27f, 0.20f, 1f));
+                Stretch(backFace.rectTransform);
+
+                TMP_Text mark = CreateText("Mark", image.rectTransform, "?", 34f, TextAlignmentOptions.Center);
+                mark.color = MutedColor;
+                Stretch(mark.rectTransform);
+                return;
+            }
 
             Sprite sprite = CardSprite(cardId);
             if (sprite != null)

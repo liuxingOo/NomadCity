@@ -113,6 +113,8 @@ namespace NomadCity.Game
         // 排序：底图 -10（约定）；往上依次是高亮、空格、指示物、影响力、移动城市、标签。
         private const int SortHighlight = 0;
         private const int SortSlot = 1;
+        // 「已选中」垫在普通空格环之上、影响力标记之下。
+        private const int SortSelected = 2;
         private const int SortTokenBack = 3;
         private const int SortToken = 4;
         private const int SortInfluence = 5;
@@ -120,6 +122,9 @@ namespace NomadCity.Game
         private const int SortCityBack = 9;
         private const int SortCity = 10;
         private const int SortLabel = 20;
+
+        /// <summary>「已选中」圆片的透明度：半透明垫底，不能盖住上面的影响力标记。</summary>
+        private const float SelectedFillAlpha = 0.55f;
 
         // 拾取优先级：数值大的优先（仅在距离相同时起作用）。
         private const int PriorityNodeBody = 0;
@@ -159,6 +164,21 @@ namespace NomadCity.Game
 
         /// <summary>当前高亮的影响力格（「移除影响力」等效果事件选目标用）；空表示没有高亮。</summary>
         private readonly HashSet<InfluenceSlotRef> highlightedSlots = new HashSet<InfluenceSlotRef>();
+
+        /// <summary>高亮色：调用方按「当前行动玩家」的玩家色传入，没传就回落到 Inspector 配的默认色。</summary>
+        private Color nodeHighlightTint;
+        private Color slotHighlightTint;
+
+        /// <summary>「已选中」影响力格 / 资源点（玩家刚点下、正等确认的那个），以及它的玩家色。</summary>
+        private InfluenceSlotRef? selectedSlot;
+        private int selectedNodeId = -1;
+        private Color selectedTint = Color.white;
+
+        private void Awake()
+        {
+            nodeHighlightTint = nodeHighlightColor;
+            slotHighlightTint = slotHighlightColor;
+        }
 
         private struct HitTarget
         {
@@ -232,9 +252,14 @@ namespace NomadCity.Game
             if (IsReady) Refresh();
         }
 
-        /// <summary>高亮若干资源点（采集阶段把当前玩家已选中的采集点亮起来）；传 null 清空。</summary>
-        public void SetHighlightedNodes(IEnumerable<int> nodeIds)
+        /// <summary>
+        /// 高亮若干资源点（采集阶段把当前玩家已选中的采集点亮起来）；传 null 清空。
+        /// <paramref name="color"/> 给定时覆盖 Inspector 里的默认高亮色（按当前行动玩家的玩家色传）。
+        /// </summary>
+        public void SetHighlightedNodes(IEnumerable<int> nodeIds, Color? color = null)
         {
+            nodeHighlightTint = color ?? nodeHighlightColor;
+
             highlightedNodes.Clear();
             if (nodeIds != null)
             {
@@ -244,14 +269,50 @@ namespace NomadCity.Game
             if (IsReady) Refresh();
         }
 
-        /// <summary>高亮若干影响力格（「移除影响力」等效果事件选目标用）；传 null 清空。</summary>
-        public void SetHighlightedSlots(IEnumerable<InfluenceSlotRef> slots)
+        /// <summary>高亮若干影响力格（「移除影响力」等效果事件选目标用）；传 null 清空。颜色规则同上。</summary>
+        public void SetHighlightedSlots(IEnumerable<InfluenceSlotRef> slots, Color? color = null)
         {
+            slotHighlightTint = color ?? slotHighlightColor;
+
             highlightedSlots.Clear();
             if (slots != null)
             {
                 foreach (InfluenceSlotRef slot in slots) highlightedSlots.Add(slot);
             }
+
+            if (IsReady) Refresh();
+        }
+
+        /// <summary>
+        /// 把某个影响力格标成「已选中」：玩家刚点下、正等确认的那一格。
+        /// 用该玩家的颜色垫一块半透明圆片 + 一圈亮环，确认后由控制器清掉。
+        /// </summary>
+        public void SetSelectedSlot(InfluenceSlotRef? slot, Color color)
+        {
+            selectedSlot = slot;
+            selectedNodeId = -1;
+            selectedTint = color;
+
+            if (IsReady) Refresh();
+        }
+
+        /// <summary>把某个资源点标成「已选中」；与 <see cref="SetSelectedSlot"/> 互斥。传负值等同清空。</summary>
+        public void SetSelectedNode(int nodeId, Color color)
+        {
+            selectedSlot = null;
+            selectedNodeId = nodeId;
+            selectedTint = color;
+
+            if (IsReady) Refresh();
+        }
+
+        /// <summary>清掉「已选中」的视觉；本来就没有时不重建标记。</summary>
+        public void ClearSelection()
+        {
+            if (!selectedSlot.HasValue && selectedNodeId < 0) return;
+
+            selectedSlot = null;
+            selectedNodeId = -1;
 
             if (IsReady) Refresh();
         }
@@ -349,8 +410,14 @@ namespace NomadCity.Game
             // 采集阶段：当前玩家已选中的采集点套一圈高亮（排在空格与影响力之下，不挡它们）。
             if (highlightedNodes.Contains(node.Id))
             {
-                Spawn(MapSpriteFactory.Ring(), origin, nodeHighlightSize, nodeHighlightColor, SortHighlight,
+                Spawn(MapSpriteFactory.Ring(), origin, nodeHighlightSize, nodeHighlightTint, SortHighlight,
                     $"NodeHighlight_{node.Code}");
+            }
+
+            // 刚点下、正等确认的资源点：玩家色半透明圆片 + 亮环。
+            if (selectedNodeId == node.Id)
+            {
+                DrawSelection(origin, nodeHighlightSize, $"Node_{node.Code}");
             }
 
             for (int slot = 0; slot < node.Slots.Capacity; slot++)
@@ -361,8 +428,13 @@ namespace NomadCity.Game
 
                 if (highlightedSlots.Contains(slotRef))
                 {
-                    Spawn(MapSpriteFactory.Ring(), world, slotHighlightSize, slotHighlightColor, SortHighlight,
+                    Spawn(MapSpriteFactory.Ring(), world, slotHighlightSize, slotHighlightTint, SortHighlight,
                         $"SlotHighlight_{node.Code}_{slot}");
+                }
+
+                if (selectedSlot.HasValue && selectedSlot.Value.Equals(slotRef))
+                {
+                    DrawSelection(world, slotHighlightSize, $"{node.Code}_{slot}");
                 }
 
                 if (owner >= 0)
@@ -444,8 +516,13 @@ namespace NomadCity.Game
 
                 if (highlightedSlots.Contains(slotRef))
                 {
-                    Spawn(MapSpriteFactory.Ring(), world, slotHighlightSize, slotHighlightColor, SortHighlight,
+                    Spawn(MapSpriteFactory.Ring(), world, slotHighlightSize, slotHighlightTint, SortHighlight,
                         $"SlotHighlight_R{route.Id}_{slot}");
+                }
+
+                if (selectedSlot.HasValue && selectedSlot.Value.Equals(slotRef))
+                {
+                    DrawSelection(world, slotHighlightSize, $"R{route.Id}_{slot}");
                 }
 
                 if (owner >= 0)
@@ -735,6 +812,22 @@ namespace NomadCity.Game
             }
 
             return ordered;
+        }
+
+        /// <summary>
+        /// 「已选中」的视觉：玩家色半透明圆片 + 一圈亮环。圆片比环略小，
+        /// 环的中心本来就是透明的，两层叠着看就是「亮环包着一块底色」。
+        /// </summary>
+        private void DrawSelection(Vector3 world, float size, string name)
+        {
+            Color fill = selectedTint;
+            fill.a = SelectedFillAlpha;
+
+            Color ring = selectedTint;
+            ring.a = 1f;
+
+            Spawn(MapSpriteFactory.Disc(), world, size * 0.8f, fill, SortSelected, $"SelectedFill_{name}");
+            Spawn(MapSpriteFactory.Ring(), world, size, ring, SortSelected, $"SelectedRing_{name}");
         }
 
         private void Spawn(Sprite sprite, Vector3 world, float size, Color color, int sortingOrder, string name)

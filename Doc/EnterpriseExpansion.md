@@ -260,7 +260,7 @@
 
 | 等级 | 效果 |
 |---|---|
-| **3 级 / 5 级** | **干员特派**：玩家可以从干员牌堆**抽 2 张查看**，之后玩家有 2 种选择：<br>a. 在 2 张干员角色牌中**选择 1 张加入手牌**，将未选择的干员角色牌**洗回干员牌堆**。此时，玩家**必须从自己的手牌或角色牌弃牌区中选择 1 张角色牌向所有玩家展示，之后放回游戏盒**。<br>b. 将抽到的干员角色牌**洗回干员牌堆**。之后**获得 1 分**。 |
+| **3 级 / 5 级** | **干员特派（升级奖励，不是企业特效）**：升到这一级时立即结算一次（多人同时升到同一等级时，以当前轮次角色为起点按行动顺序逐个结算）。玩家可以从干员牌堆**抽 2 张查看**，之后玩家有 2 种选择：<br>a. 在 2 张干员角色牌中**选择 1 张加入手牌**，将未选择的干员角色牌**洗回干员牌堆**。此时，玩家**必须从自己的手牌或角色牌弃牌区中选择 1 张角色牌向所有玩家展示，之后放回游戏盒**。<br>b. 将抽到的干员角色牌**洗回干员牌堆**。之后**获得 1 分**。 |
 | **4 级** | 如果玩家角色牌**弃牌区没有牌**，则**不能使用**该特效。<br>玩家在使用该特效时，需要**先从角色牌弃牌区回收 1 张角色牌并向所有玩家展示**。之后，**除了被回收的角色牌，所有手牌面朝上进入弃牌区**。 |
 
 > **补漏记录（2026-10-09）**：3/5 级 a 项的「必须从手牌或弃牌区选 1 张角色牌展示后放回游戏盒」原先遗漏。这是罗德岛「减手牌」的真正来源，也是下一段「角色牌放回游戏盒后遗留效果依旧生效」范例的前提，引擎必须实现。
@@ -308,7 +308,7 @@
 | 开局入场「7 选 5」：`DiscardSetupHandCardsCommand`（放弃 2 张放回游戏盒；未完成不能行动 / 盖放） | `Core/Engine/Actions/CharacterCardCommands.cs`、`ActionRules.cs` |
 | 手牌区运行时补足 7 个牌位；卡面库索引扩到 7（山 = 5、玛恩纳 = 6） | `UI/CharacterHandPanel.cs`、`Editor/CardFaceFiller.cs` |
 | 公路指示物：`RouteState.IsHighway`、覆盖影响力格、探索 / 采集免路费、地图渲染 | `Core/Model/MapState.cs`、`ActionRules.cs`、`TollCalculator.cs`、`Game/MapVisuals/*` |
-| 4 个角色效果：开辟商路 / 商业网络 / 公事公办（二选一）/ 游说赞助 | `Core/Engine/Effects/EnterpriseEffectExtension.cs` |
+| 4 个角色效果：开辟商路 / 商业网络 / 公事公办（两行顺次执行）/ 游说赞助 | `Core/Engine/Effects/EnterpriseEffectExtension.cs` |
 | 状态同步：`PlayerState.SetupDiscardDone`、`RouteState.IsHighway` 进快照（版本 5） | `Core/Net/GameStateSnapshot*.cs` |
 
 ## 9.3 落码（第三阶段：开局自动抽选 + 企业板总览 + 公路素材）
@@ -554,7 +554,7 @@
 - **向所有玩家展示**：罗德岛 3/5 级【干员特派】放回游戏盒的角色牌、4 级从弃牌区回收的角色牌，
   会追加到 `GameState.PublicReveals`；`GameScreenController.ShowPendingPublicReveals` 在刷新时把最新一条
   放大成卡面弹窗（热座下等同把牌亮给所有人看，联机各端按同一份状态各自弹出）。快照版本升到 **10**。
-- 测试：`EnterpriseRemainingFeatureTests.罗德岛干员特派_放回游戏盒的牌记入公开展示` / `罗德岛四级_回收的牌记入公开展示`。
+- 测试：`EnterpriseRemainingFeatureTests.罗德岛干员特派_升到3级时自动结算并记入公开展示` / `罗德岛四级_回收的牌记入公开展示`。
 
 ---
 
@@ -579,7 +579,7 @@
 |---|---|---|---|
 | 山·策略「开辟商路」 | 选 1 条航道，移除其上所有影响力，在该航道放置 1 个公路指示物；**被移除影响力的玩家各得 1 分**，你获得 1 分 | `EnterpriseEffectExtension.TryPlaceHighway`（`Score += op.Amount`，发动者再 +1） | 一致 |
 | 山·计谋「商业网络」 | **支付 2 金券** → 选 1 家企业：提升 1 级 **并**触发 1 个已解锁特效 | `PayVouchers(2)` + `AdvanceAndTriggerEnterprise()` | 一致 |
-| 玛恩纳·策略「公事公办」 | 二选一：① 选 1 家企业，**所有玩家**提升 1 级；② 选 1 家企业，触发 1 个已解锁特效 | `Alternative(AdvanceEnterpriseAllPlayers, TriggerEnterpriseEffectOnce)` | 一致 |
+| 玛恩纳·策略「公事公办」 | 两行**按顺序**执行：① 选 1 家企业，**所有玩家**提升 1 级；② 再选 1 家企业，触发 1 个已解锁特效（卡面无「或」） | `AdvanceEnterpriseAllPlayers()` + `TriggerEnterpriseEffectOnce()` | 一致（2026-11-19 复查实卡，此前的「二选一」记录有误） |
 | 玛恩纳·计谋「游说赞助」 | 选 1 家企业提升 1 级；获得 1 源岩 + 1 源石 + 1 异铁 | `AdvanceOwnEnterpriseLevel(1)` + 三色资源各 1 | 一致 |
 
 **3. 代码现状复核（不采信文档）**

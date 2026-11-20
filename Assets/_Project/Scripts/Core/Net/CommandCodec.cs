@@ -45,6 +45,10 @@ namespace NomadCity.Core.Net
                 case AdvancePhaseCommand c:
                     return new CommandDto { Kind = CommandKind.AdvancePhase, Seat = c.ActorSeat };
 
+                // 收尾阶段跳过自己这一格：Seat = 座位。
+                case EndCleanupSeatCommand c:
+                    return new CommandDto { Kind = CommandKind.EndCleanupSeat, Seat = c.ActorSeat };
+
                 // P0 = NodeId。
                 case ChooseStartNodeCommand c:
                     return new CommandDto { Kind = CommandKind.ChooseStartNode, Seat = c.ActorSeat, P0 = c.NodeId };
@@ -483,6 +487,9 @@ namespace NomadCity.Core.Net
 
                 case CommandKind.AdvancePhase:
                     return new AdvancePhaseCommand();
+
+                case CommandKind.EndCleanupSeat:
+                    return new EndCleanupSeatCommand(dto.Seat);
 
                 case CommandKind.ChooseStartNode:
                     return new ChooseStartNodeCommand(dto.Seat, dto.P0);

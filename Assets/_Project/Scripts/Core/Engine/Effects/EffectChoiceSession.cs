@@ -242,7 +242,18 @@ namespace NomadCity.Core.Engine
                 EnterpriseBoardDef board = EnterpriseCatalog.Board(id);
                 labels.Add(board != null ? board.Name : $"企业 {id}");
             }
-            int pick = Take(candidates.Count, "选择 1 家合作企业", labels, true);
+
+            // 同一张牌里可能要连着选两次企业（玛恩纳·策略：先所有人提升、再企业合作），
+            // 提示文案必须区分开，否则玩家会以为点重复了。
+            string prompt = op.Kind switch
+            {
+                RewardKind.AdvanceEnterpriseAllPlayers => "选择 1 家企业：所有玩家提升 1 级",
+                RewardKind.TriggerEnterpriseEffectOnce => "选择 1 家企业进行「企业合作」",
+                RewardKind.AdvanceAndTriggerEnterprise => "选择 1 家企业：提升 1 级并触发其特效",
+                _ => "选择 1 家合作企业",
+            };
+
+            int pick = Take(candidates.Count, prompt, labels, true);
             return pick < 0 ? -1 : candidates[pick];
         }
 

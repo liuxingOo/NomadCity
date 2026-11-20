@@ -18,7 +18,7 @@ namespace NomadCity.Core.Net
     public sealed class GameStateSnapshot
     {
         /// <summary>当前快照格式版本；协议握手时与对方比对。</summary>
-        public const int Version = 11;
+        public const int Version = 12;
 
         public int PlayerCount;
         public ExpansionFlags Expansions;
@@ -43,6 +43,15 @@ namespace NomadCity.Core.Net
         public int PendingStartMarkerSeat = -1;
         public int LastCityMoveRouteId = -1;
         public int ActiveSpecialActionPatternId = -1;
+
+        /// <summary>收尾阶段按本回合行动顺序逐个座位结算的座位序列（§8.1）。</summary>
+        public int[] CleanupOrder = Array.Empty<int>();
+
+        /// <summary>收尾阶段的进度下标；-1 = 不在逐个结算（还没进收尾，或已经结算完）。</summary>
+        public int CleanupIndex = -1;
+
+        /// <summary>收尾阶段「没有可以触发的效果」被跳过的座位（供行动记录显示）。</summary>
+        public int[] CleanupSkippedSeats = Array.Empty<int>();
 
         /// <summary>向所有玩家公开展示过的牌（只追加）。</summary>
         public readonly List<PublicRevealSnapshot> PublicReveals = new();
@@ -197,6 +206,9 @@ namespace NomadCity.Core.Net
                 LastCityMoveRouteId = state.LastCityMoveRouteId,
                 ActiveSpecialActionPatternId = state.ActiveSpecialActionPatternId,
                 NextPendingActionId = state.NextPendingActionId,
+                CleanupOrder = state.CleanupOrder.ToArray(),
+                CleanupIndex = state.CleanupIndex,
+                CleanupSkippedSeats = state.CleanupSkippedSeats.ToArray(),
             };
 
             foreach (PlayerState player in state.Players) snapshot.Players.Add(PlayerSnapshot.Capture(player));
@@ -373,7 +385,11 @@ namespace NomadCity.Core.Net
                 LastCityMoveRouteId = LastCityMoveRouteId,
                 ActiveSpecialActionPatternId = ActiveSpecialActionPatternId,
                 NextPendingActionId = NextPendingActionId < 1 ? 1 : NextPendingActionId,
+                CleanupIndex = CleanupIndex,
             };
+
+            if (CleanupOrder != null) state.CleanupOrder.AddRange(CleanupOrder);
+            if (CleanupSkippedSeats != null) state.CleanupSkippedSeats.AddRange(CleanupSkippedSeats);
 
             foreach (PlayerSnapshot player in Players) state.Players.Add(player.Restore());
 

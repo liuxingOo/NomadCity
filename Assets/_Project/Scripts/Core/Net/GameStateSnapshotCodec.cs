@@ -38,6 +38,11 @@ namespace NomadCity.Core.Net
             writer.Int(snapshot.LastCityMoveRouteId);
             writer.Int(snapshot.ActiveSpecialActionPatternId);
 
+            // —— 收尾阶段的逐座位进度（§8.1） ——
+            writer.Int(snapshot.CleanupIndex);
+            writer.Ints(snapshot.CleanupOrder);
+            writer.Ints(snapshot.CleanupSkippedSeats);
+
             // —— 企业扩展 ——
             writer.Bool(snapshot.EnterpriseDraftDone);
             writer.Int(snapshot.EnterprisePendingAdvanceSeat);
@@ -225,6 +230,9 @@ namespace NomadCity.Core.Net
                 PendingStartMarkerSeat = reader.Int(),
                 LastCityMoveRouteId = reader.Int(),
                 ActiveSpecialActionPatternId = reader.Int(),
+                CleanupIndex = reader.Int(),
+                CleanupOrder = reader.Ints(),
+                CleanupSkippedSeats = reader.Ints(),
                 EnterpriseDraftDone = reader.Bool(),
                 EnterprisePendingAdvanceSeat = reader.Int(),
                 EnterprisePendingAdvanceExcludeBoard = reader.Int(),
